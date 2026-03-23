@@ -1,0 +1,23 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+.DS_Store
+data/
+buildServer.json
+
+# Tuist
+AgentApp/*.xcodeproj
+AgentApp/*.xcworkspace
+AgentApp/Derived/
+
+# Fastlane
+AgentApp/build/
+AgentApp/fastlane/.env
+AgentApp/fastlane/report.xml
+AgentApp/fastlane/README.md
+AgentApp/fastlane/test_output/
+
+# 內部文件
+docs/工作量評估-*.md

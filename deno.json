@@ -1,0 +1,14 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-env --allow-read --allow-write --allow-net --allow-ffi --watch src/server.ts",
+    "start": "deno run --allow-env --allow-read --allow-write --allow-net --allow-ffi src/server.ts",
+    "test-api": "deno run --allow-env --allow-read --allow-net src/scripts/test-api.ts"
+  },
+  "imports": {
+    "@hono/hono": "jsr:@hono/hono@^4",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225"
+  },
+  "compilerOptions": {
+    "strict": true
+  }
+}

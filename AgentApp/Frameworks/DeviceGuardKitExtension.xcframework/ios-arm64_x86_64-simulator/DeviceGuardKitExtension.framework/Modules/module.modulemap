@@ -1,0 +1,4 @@
+framework module DeviceGuardKitExtension {
+  header "DeviceGuardKitExtension-Swift.h"
+  requires objc
+}

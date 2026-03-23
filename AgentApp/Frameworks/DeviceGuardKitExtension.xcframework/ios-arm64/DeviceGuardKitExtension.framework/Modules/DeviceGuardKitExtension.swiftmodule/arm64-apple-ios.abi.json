@@ -1,0 +1,1790 @@
+{
+  "ABIRoot": {
+    "kind": "Root",
+    "name": "DeviceGuardKitExtension",
+    "printedName": "DeviceGuardKitExtension",
+    "children": [
+      {
+        "kind": "Import",
+        "name": "DeviceActivity",
+        "printedName": "DeviceActivity",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "DeviceGuardKit",
+        "printedName": "DeviceGuardKit",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "FamilyControls",
+        "printedName": "FamilyControls",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "Foundation",
+        "printedName": "Foundation",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "ManagedSettings",
+        "printedName": "ManagedSettings",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "Network",
+        "printedName": "Network",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "OSLog",
+        "printedName": "OSLog",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "UserNotifications",
+        "printedName": "UserNotifications",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "DGKExtensionConfig",
+        "printedName": "DGKExtensionConfig",
+        "children": [
+          {
+            "kind": "Var",
+            "name": "offlineProtectionTimeout",
+            "printedName": "offlineProtectionTimeout",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Double",
+                "printedName": "Swift.Double",
+                "usr": "s:Sd"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvp",
+            "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvp",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "HasStorage",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "hasStorage": true,
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Double",
+                    "printedName": "Swift.Double",
+                    "usr": "s:Sd"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvg",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvg",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "accessorKind": "get"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Set",
+                "printedName": "Set()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Double",
+                    "printedName": "Swift.Double",
+                    "usr": "s:Sd"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvs",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvs",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "accessorKind": "set"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Modify",
+                "printedName": "Modify()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvM",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeoutSdvM",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "accessorKind": "_modify"
+              }
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "enableOfflineProtection",
+            "printedName": "enableOfflineProtection",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Bool",
+                "printedName": "Swift.Bool",
+                "usr": "s:Sb"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvp",
+            "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvp",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "HasStorage",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "hasStorage": true,
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Bool",
+                    "printedName": "Swift.Bool",
+                    "usr": "s:Sb"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvg",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvg",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "accessorKind": "get"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Set",
+                "printedName": "Set()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Bool",
+                    "printedName": "Swift.Bool",
+                    "usr": "s:Sb"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvs",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvs",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "accessorKind": "set"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Modify",
+                "printedName": "Modify()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvM",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV23enableOfflineProtectionSbvM",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "accessorKind": "_modify"
+              }
+            ]
+          },
+          {
+            "kind": "Constructor",
+            "name": "init",
+            "printedName": "init(offlineProtectionTimeout:enableOfflineProtection:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "DGKExtensionConfig",
+                "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Double",
+                "printedName": "Swift.Double",
+                "hasDefaultArg": true,
+                "usr": "s:Sd"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Bool",
+                "printedName": "Swift.Bool",
+                "hasDefaultArg": true,
+                "usr": "s:Sb"
+              }
+            ],
+            "declKind": "Constructor",
+            "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeout013enableOfflineH0ACSd_Sbtcfc",
+            "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV24offlineProtectionTimeout013enableOfflineH0ACSd_Sbtcfc",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "AccessControl"
+            ],
+            "init_kind": "Designated"
+          },
+          {
+            "kind": "Var",
+            "name": "debug",
+            "printedName": "debug",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "DGKExtensionConfig",
+                "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV5debugACvpZ",
+            "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV5debugACvpZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKExtensionConfig",
+                    "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                    "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV5debugACvgZ",
+                "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV5debugACvgZ",
+                "moduleName": "DeviceGuardKitExtension",
+                "static": true,
+                "accessorKind": "get"
+              }
+            ]
+          }
+        ],
+        "declKind": "Struct",
+        "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV",
+        "mangledName": "$s23DeviceGuardKitExtension18DGKExtensionConfigV",
+        "moduleName": "DeviceGuardKitExtension",
+        "declAttributes": [
+          "AccessControl",
+          "RawDocComment"
+        ],
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Sendable",
+            "printedName": "Sendable",
+            "usr": "s:s8SendableP",
+            "mangledName": "$ss8SendableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "SendableMetatype",
+            "printedName": "SendableMetatype",
+            "usr": "s:s16SendableMetatypeP",
+            "mangledName": "$ss16SendableMetatypeP"
+          }
+        ]
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "DGKExtensionHandler",
+        "printedName": "DGKExtensionHandler",
+        "children": [
+          {
+            "kind": "Var",
+            "name": "shared",
+            "printedName": "shared",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "DGKExtensionHandler",
+                "printedName": "DeviceGuardKitExtension.DGKExtensionHandler",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC6sharedACvpZ",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC6sharedACvpZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "HasInitialValue",
+              "Final",
+              "HasStorage",
+              "AccessControl"
+            ],
+            "isLet": true,
+            "hasStorage": true,
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKExtensionHandler",
+                    "printedName": "DeviceGuardKitExtension.DGKExtensionHandler",
+                    "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC6sharedACvgZ",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC6sharedACvgZ",
+                "moduleName": "DeviceGuardKitExtension",
+                "static": true,
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "get"
+              }
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "appGroupIdentifier",
+            "printedName": "appGroupIdentifier",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvp",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvp",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "HasInitialValue",
+              "Final",
+              "HasStorage",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "hasStorage": true,
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "String",
+                    "printedName": "Swift.String",
+                    "usr": "s:SS"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvg",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvg",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "get"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Set",
+                "printedName": "Set()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "String",
+                    "printedName": "Swift.String",
+                    "usr": "s:SS"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvs",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvs",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "set"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Modify",
+                "printedName": "Modify()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvM",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC18appGroupIdentifierSSvM",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "_modify"
+              }
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "config",
+            "printedName": "config",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "DGKExtensionConfig",
+                "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvp",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvp",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "HasInitialValue",
+              "Final",
+              "HasStorage",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "hasStorage": true,
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKExtensionConfig",
+                    "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                    "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvg",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvg",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "get"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Set",
+                "printedName": "Set()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKExtensionConfig",
+                    "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                    "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvs",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvs",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "set"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Modify",
+                "printedName": "Modify()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvM",
+                "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC6configAA0E6ConfigVvM",
+                "moduleName": "DeviceGuardKitExtension",
+                "implicit": true,
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "_modify"
+              }
+            ]
+          },
+          {
+            "kind": "Function",
+            "name": "configure",
+            "printedName": "configure(appGroupIdentifier:config:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DGKExtensionConfig",
+                "printedName": "DeviceGuardKitExtension.DGKExtensionConfig",
+                "hasDefaultArg": true,
+                "usr": "s:23DeviceGuardKitExtension18DGKExtensionConfigV"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC9configure18appGroupIdentifier6configySS_AA0E6ConfigVtFZ",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC9configure18appGroupIdentifier6configySS_AA0E6ConfigVtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "Final",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "handleIntervalStart",
+            "printedName": "handleIntervalStart(activity:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DeviceActivityName",
+                "printedName": "DeviceActivity.DeviceActivityName",
+                "usr": "s:14DeviceActivity0aB4NameV"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC19handleIntervalStart8activityy0A8Activity0aK4NameV_tF",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC19handleIntervalStart8activityy0A8Activity0aK4NameV_tF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "Final",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "handleIntervalEnd",
+            "printedName": "handleIntervalEnd(activity:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DeviceActivityName",
+                "printedName": "DeviceActivity.DeviceActivityName",
+                "usr": "s:14DeviceActivity0aB4NameV"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC17handleIntervalEnd8activityy0A8Activity0aK4NameV_tF",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC17handleIntervalEnd8activityy0A8Activity0aK4NameV_tF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "Final",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "handleThresholdReached",
+            "printedName": "handleThresholdReached(event:activity:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Name",
+                "printedName": "DeviceActivity.DeviceActivityEvent.Name",
+                "usr": "s:14DeviceActivity0aB5EventV4NameV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DeviceActivityName",
+                "printedName": "DeviceActivity.DeviceActivityName",
+                "usr": "s:14DeviceActivity0aB4NameV"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC22handleThresholdReached5event8activityy0A8Activity0aL5EventV4NameV_AG0alN0VtF",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC22handleThresholdReached5event8activityy0A8Activity0aL5EventV4NameV_AG0alN0VtF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "Final",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "handleIntervalEndWarning",
+            "printedName": "handleIntervalEndWarning(activity:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DeviceActivityName",
+                "printedName": "DeviceActivity.DeviceActivityName",
+                "usr": "s:14DeviceActivity0aB4NameV"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC24handleIntervalEndWarning8activityy0A8Activity0aL4NameV_tF",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC24handleIntervalEndWarning8activityy0A8Activity0aL4NameV_tF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "Final",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "handleThresholdWarning",
+            "printedName": "handleThresholdWarning(event:activity:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Name",
+                "printedName": "DeviceActivity.DeviceActivityEvent.Name",
+                "usr": "s:14DeviceActivity0aB5EventV4NameV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DeviceActivityName",
+                "printedName": "DeviceActivity.DeviceActivityName",
+                "usr": "s:14DeviceActivity0aB4NameV"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC22handleThresholdWarning5event8activityy0A8Activity0aL5EventV4NameV_AG0alN0VtF",
+            "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC22handleThresholdWarning5event8activityy0A8Activity0aL5EventV4NameV_AG0alN0VtF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "Final",
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          }
+        ],
+        "declKind": "Class",
+        "usr": "s:23DeviceGuardKitExtension19DGKExtensionHandlerC",
+        "mangledName": "$s23DeviceGuardKitExtension19DGKExtensionHandlerC",
+        "moduleName": "DeviceGuardKitExtension",
+        "declAttributes": [
+          "Final",
+          "AccessControl",
+          "RawDocComment"
+        ],
+        "hasMissingDesignatedInitializers": true,
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Sendable",
+            "printedName": "Sendable",
+            "usr": "s:s8SendableP",
+            "mangledName": "$ss8SendableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "SendableMetatype",
+            "printedName": "SendableMetatype",
+            "usr": "s:s16SendableMetatypeP",
+            "mangledName": "$ss16SendableMetatypeP"
+          }
+        ]
+      },
+      {
+        "kind": "Import",
+        "name": "DeviceGuardKit",
+        "printedName": "DeviceGuardKit",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "Foundation",
+        "printedName": "Foundation",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "ManagedSettings",
+        "printedName": "ManagedSettings",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "ManagedSettingsUI",
+        "printedName": "ManagedSettingsUI",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "Import",
+        "name": "UIKit",
+        "printedName": "UIKit",
+        "declKind": "Import",
+        "moduleName": "DeviceGuardKitExtension"
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "DGKShieldScenario",
+        "printedName": "DGKShieldScenario",
+        "children": [
+          {
+            "kind": "Var",
+            "name": "appTerminated",
+            "printedName": "appTerminated",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKShieldScenario",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                    "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO13appTerminatedyA2CmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO13appTerminatedyA2CmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "connectionLost",
+            "printedName": "connectionLost",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKShieldScenario",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                    "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO14connectionLostyA2CmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO14connectionLostyA2CmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "blacklisted",
+            "printedName": "blacklisted",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> (Swift.String?) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeFunc",
+                    "name": "Function",
+                    "printedName": "(Swift.String?) -> DeviceGuardKitExtension.DGKShieldScenario",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      },
+                      {
+                        "kind": "TypeNominal",
+                        "name": "Tuple",
+                        "printedName": "(appName: Swift.String?)",
+                        "children": [
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Optional",
+                            "printedName": "Swift.String?",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "String",
+                                "printedName": "Swift.String",
+                                "usr": "s:SS"
+                              }
+                            ],
+                            "usr": "s:Sq"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO11blacklistedyACSSSg_tcACmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO11blacklistedyACSSSg_tcACmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "appGroupLimitReached",
+            "printedName": "appGroupLimitReached",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> (Swift.String, Swift.Int) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeFunc",
+                    "name": "Function",
+                    "printedName": "(Swift.String, Swift.Int) -> DeviceGuardKitExtension.DGKShieldScenario",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      },
+                      {
+                        "kind": "TypeNominal",
+                        "name": "Tuple",
+                        "printedName": "(groupName: Swift.String, limitMinutes: Swift.Int)",
+                        "children": [
+                          {
+                            "kind": "TypeNominal",
+                            "name": "String",
+                            "printedName": "Swift.String",
+                            "usr": "s:SS"
+                          },
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Int",
+                            "printedName": "Swift.Int",
+                            "usr": "s:Si"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO20appGroupLimitReachedyACSS_SitcACmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO20appGroupLimitReachedyACSS_SitcACmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "scheduleBlocked",
+            "printedName": "scheduleBlocked",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> (Swift.String?) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeFunc",
+                    "name": "Function",
+                    "printedName": "(Swift.String?) -> DeviceGuardKitExtension.DGKShieldScenario",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      },
+                      {
+                        "kind": "TypeNominal",
+                        "name": "Tuple",
+                        "printedName": "(timeSpans: Swift.String?)",
+                        "children": [
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Optional",
+                            "printedName": "Swift.String?",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "String",
+                                "printedName": "Swift.String",
+                                "usr": "s:SS"
+                              }
+                            ],
+                            "usr": "s:Sq"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO15scheduleBlockedyACSSSg_tcACmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO15scheduleBlockedyACSSSg_tcACmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "dailyLimitReached",
+            "printedName": "dailyLimitReached",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKShieldScenario",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                    "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO17dailyLimitReachedyA2CmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO17dailyLimitReachedyA2CmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          },
+          {
+            "kind": "Var",
+            "name": "defaultGuarding",
+            "printedName": "defaultGuarding",
+            "children": [
+              {
+                "kind": "TypeFunc",
+                "name": "Function",
+                "printedName": "(DeviceGuardKitExtension.DGKShieldScenario.Type) -> DeviceGuardKitExtension.DGKShieldScenario",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "DGKShieldScenario",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                    "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Metatype",
+                    "printedName": "DeviceGuardKitExtension.DGKShieldScenario.Type",
+                    "children": [
+                      {
+                        "kind": "TypeNominal",
+                        "name": "DGKShieldScenario",
+                        "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "declKind": "EnumElement",
+            "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO15defaultGuardingyA2CmF",
+            "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO15defaultGuardingyA2CmF",
+            "moduleName": "DeviceGuardKitExtension",
+            "declAttributes": [
+              "RawDocComment"
+            ]
+          }
+        ],
+        "declKind": "Enum",
+        "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO",
+        "mangledName": "$s23DeviceGuardKitExtension17DGKShieldScenarioO",
+        "moduleName": "DeviceGuardKitExtension",
+        "declAttributes": [
+          "AccessControl",
+          "RawDocComment"
+        ],
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          }
+        ]
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "DGKShieldConfigurationBuilder",
+        "printedName": "DGKShieldConfigurationBuilder",
+        "children": [
+          {
+            "kind": "Function",
+            "name": "buildSmart",
+            "printedName": "buildSmart(for:appName:primaryColor:logoImage:sharedDefaults:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "ShieldConfiguration",
+                "printedName": "ManagedSettingsUI.ShieldConfiguration",
+                "usr": "s:17ManagedSettingsUI19ShieldConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Application",
+                "printedName": "ManagedSettings.Application",
+                "usr": "s:15ManagedSettings11ApplicationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "UIColor",
+                "printedName": "UIKit.UIColor",
+                "usr": "c:objc(cs)UIColor"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "UIKit.UIImage?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UIImage",
+                    "printedName": "UIKit.UIImage",
+                    "usr": "c:objc(cs)UIImage"
+                  }
+                ],
+                "usr": "s:Sq"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "Foundation.UserDefaults?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UserDefaults",
+                    "printedName": "Foundation.UserDefaults",
+                    "usr": "c:objc(cs)NSUserDefaults"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV10buildSmart3for7appName12primaryColor9logoImage14sharedDefaults17ManagedSettingsUI06ShieldF0V0sT011ApplicationV_SSSo7UIColorCSo7UIImageCSgSo06NSUserR0CSgtFZ",
+            "mangledName": "$s23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV10buildSmart3for7appName12primaryColor9logoImage14sharedDefaults17ManagedSettingsUI06ShieldF0V0sT011ApplicationV_SSSo7UIColorCSo7UIImageCSgSo06NSUserR0CSgtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "buildDefault",
+            "printedName": "buildDefault(appName:primaryColor:logoImage:sharedDefaults:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "ShieldConfiguration",
+                "printedName": "ManagedSettingsUI.ShieldConfiguration",
+                "usr": "s:17ManagedSettingsUI19ShieldConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "UIColor",
+                "printedName": "UIKit.UIColor",
+                "usr": "c:objc(cs)UIColor"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "UIKit.UIImage?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UIImage",
+                    "printedName": "UIKit.UIImage",
+                    "usr": "c:objc(cs)UIImage"
+                  }
+                ],
+                "usr": "s:Sq"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "Foundation.UserDefaults?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UserDefaults",
+                    "printedName": "Foundation.UserDefaults",
+                    "usr": "c:objc(cs)NSUserDefaults"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV12buildDefault7appName12primaryColor9logoImage14sharedDefaults17ManagedSettingsUI06ShieldF0VSS_So7UIColorCSo7UIImageCSgSo06NSUserQ0CSgtFZ",
+            "mangledName": "$s23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV12buildDefault7appName12primaryColor9logoImage14sharedDefaults17ManagedSettingsUI06ShieldF0VSS_So7UIColorCSo7UIImageCSgSo06NSUserQ0CSgtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "build",
+            "printedName": "build(scenario:appName:primaryColor:logoImage:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "ShieldConfiguration",
+                "printedName": "ManagedSettingsUI.ShieldConfiguration",
+                "usr": "s:17ManagedSettingsUI19ShieldConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "DGKShieldScenario",
+                "printedName": "DeviceGuardKitExtension.DGKShieldScenario",
+                "usr": "s:23DeviceGuardKitExtension17DGKShieldScenarioO"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "UIColor",
+                "printedName": "UIKit.UIColor",
+                "usr": "c:objc(cs)UIColor"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "UIKit.UIImage?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UIImage",
+                    "printedName": "UIKit.UIImage",
+                    "usr": "c:objc(cs)UIImage"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV5build8scenario7appName12primaryColor9logoImage17ManagedSettingsUI06ShieldF0VAA0E8ScenarioO_SSSo7UIColorCSo7UIImageCSgtFZ",
+            "mangledName": "$s23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV5build8scenario7appName12primaryColor9logoImage17ManagedSettingsUI06ShieldF0VAA0E8ScenarioO_SSSo7UIColorCSo7UIImageCSgtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "build",
+            "printedName": "build(for:appName:primaryColor:logoImage:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "ShieldConfiguration",
+                "printedName": "ManagedSettingsUI.ShieldConfiguration",
+                "usr": "s:17ManagedSettingsUI19ShieldConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Application",
+                "printedName": "ManagedSettings.Application",
+                "usr": "s:15ManagedSettings11ApplicationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "UIColor",
+                "printedName": "UIKit.UIColor",
+                "usr": "c:objc(cs)UIColor"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "UIKit.UIImage?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UIImage",
+                    "printedName": "UIKit.UIImage",
+                    "usr": "c:objc(cs)UIImage"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV5build3for7appName12primaryColor9logoImage17ManagedSettingsUI06ShieldF0V0pQ011ApplicationV_SSSo7UIColorCSo7UIImageCSgtFZ",
+            "mangledName": "$s23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV5build3for7appName12primaryColor9logoImage17ManagedSettingsUI06ShieldF0V0pQ011ApplicationV_SSSo7UIColorCSo7UIImageCSgtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "buildDefault",
+            "printedName": "buildDefault(appName:primaryColor:logoImage:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "ShieldConfiguration",
+                "printedName": "ManagedSettingsUI.ShieldConfiguration",
+                "usr": "s:17ManagedSettingsUI19ShieldConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "UIColor",
+                "printedName": "UIKit.UIColor",
+                "usr": "c:objc(cs)UIColor"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "UIKit.UIImage?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "UIImage",
+                    "printedName": "UIKit.UIImage",
+                    "usr": "c:objc(cs)UIImage"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV12buildDefault7appName12primaryColor9logoImage17ManagedSettingsUI06ShieldF0VSS_So7UIColorCSo7UIImageCSgtFZ",
+            "mangledName": "$s23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV12buildDefault7appName12primaryColor9logoImage17ManagedSettingsUI06ShieldF0VSS_So7UIColorCSo7UIImageCSgtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "funcSelfKind": "NonMutating"
+          }
+        ],
+        "declKind": "Struct",
+        "usr": "s:23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV",
+        "mangledName": "$s23DeviceGuardKitExtension29DGKShieldConfigurationBuilderV",
+        "moduleName": "DeviceGuardKitExtension",
+        "declAttributes": [
+          "AccessControl",
+          "RawDocComment"
+        ],
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          }
+        ]
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "ShieldConfiguration",
+        "printedName": "ShieldConfiguration",
+        "children": [
+          {
+            "kind": "Function",
+            "name": "simple",
+            "printedName": "simple(title:subtitle:primaryColor:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "ShieldConfiguration",
+                "printedName": "ManagedSettingsUI.ShieldConfiguration",
+                "usr": "s:17ManagedSettingsUI19ShieldConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "String",
+                "printedName": "Swift.String",
+                "usr": "s:SS"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "UIColor",
+                "printedName": "UIKit.UIColor",
+                "usr": "c:objc(cs)UIColor"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:17ManagedSettingsUI19ShieldConfigurationV23DeviceGuardKitExtensionE6simple5title8subtitle12primaryColorACSS_SSSo7UIColorCtFZ",
+            "mangledName": "$s17ManagedSettingsUI19ShieldConfigurationV23DeviceGuardKitExtensionE6simple5title8subtitle12primaryColorACSS_SSSo7UIColorCtFZ",
+            "moduleName": "DeviceGuardKitExtension",
+            "static": true,
+            "declAttributes": [
+              "AccessControl",
+              "RawDocComment"
+            ],
+            "isFromExtension": true,
+            "funcSelfKind": "NonMutating"
+          }
+        ],
+        "declKind": "Struct",
+        "usr": "s:17ManagedSettingsUI19ShieldConfigurationV",
+        "mangledName": "$s17ManagedSettingsUI19ShieldConfigurationV",
+        "moduleName": "ManagedSettingsUI",
+        "intro_iOS": "15.0",
+        "declAttributes": [
+          "Available",
+          "Available",
+          "Available",
+          "Available",
+          "Available"
+        ],
+        "isExternal": true,
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          }
+        ]
+      }
+    ],
+    "json_format_version": 8
+  },
+  "ConstValues": [
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "IntegerLiteral",
+      "offset": 470,
+      "length": 1,
+      "value": "3"
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "IntegerLiteral",
+      "offset": 474,
+      "length": 2,
+      "value": "60"
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "IntegerLiteral",
+      "offset": 479,
+      "length": 2,
+      "value": "60"
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "BooleanLiteral",
+      "offset": 519,
+      "length": 4,
+      "value": "true"
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1050,
+      "length": 20,
+      "value": "\"com.deviceguardkit\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1082,
+      "length": 11,
+      "value": "\"Extension\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1193,
+      "length": 2,
+      "value": "\"\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1550,
+      "length": 24,
+      "value": "\"dgk_pendingUsageEvents\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1614,
+      "length": 25,
+      "value": "\"dgk_reachTodayThreshold\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1675,
+      "length": 31,
+      "value": "\"dgk_blockedAppGroupActivities\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1741,
+      "length": 26,
+      "value": "\"dgk_globalScheduleEnable\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1809,
+      "length": 23,
+      "value": "\"LastSettingUpdateTime\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 1875,
+      "length": 24,
+      "value": "\"ChildAppLostConnection\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "BooleanLiteral",
+      "offset": 10470,
+      "length": 5,
+      "value": "false"
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "StringLiteral",
+      "offset": 10554,
+      "length": 35,
+      "value": "\"com.deviceguardkit.networkmonitor\""
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "IntegerLiteral",
+      "offset": 10668,
+      "length": 1,
+      "value": "0"
+    },
+    {
+      "filePath": "\/Users\/hj\/Innovative\/DeviceGuardKit\/Sources\/DeviceGuardKitExtension\/DGKExtensionHandler.swift",
+      "kind": "IntegerLiteral",
+      "offset": 10894,
+      "length": 1,
+      "value": "1"
+    }
+  ]
+}
