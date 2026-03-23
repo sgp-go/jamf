@@ -1,0 +1,90 @@
+default_platform(:ios)
+
+platform :ios do
+
+  # ── 證書管理 ──
+
+  desc "同步 Development 證書和 Provisioning Profiles"
+  lane :match_dev do
+    match(type: "development", readonly: true)
+  end
+
+  desc "同步 Ad Hoc 證書和 Provisioning Profiles"
+  lane :match_adhoc do
+    match(type: "adhoc", readonly: true)
+  end
+
+  desc "同步 App Store 證書和 Provisioning Profiles"
+  lane :match_appstore do
+    match(type: "appstore", readonly: true)
+  end
+
+  desc "首次初始化：生成並上傳所有證書（僅需執行一次）"
+  lane :match_init do
+    match(type: "development", readonly: false)
+    match(type: "adhoc", readonly: false)
+  end
+
+  # ── 構建 ──
+
+  desc "使用 Tuist 生成 Xcode 專案"
+  lane :generate do
+    sh("cd .. && tuist generate")
+  end
+
+  desc "構建 Development 版本"
+  lane :build_dev do
+    match(type: "development", readonly: true)
+
+    build_app(
+      workspace: "AgentApp.xcworkspace",
+      scheme: "AgentApp",
+      configuration: "Debug",
+      export_method: "development",
+      output_directory: "./build",
+      output_name: "AgentApp-dev.ipa"
+    )
+  end
+
+  desc "構建 Ad Hoc 版本（用於 Jamf 分發）"
+  lane :build do
+    match(type: "adhoc", readonly: true)
+
+    build_app(
+      workspace: "AgentApp.xcworkspace",
+      scheme: "AgentApp",
+      configuration: "Release",
+      export_method: "ad-hoc",
+      output_directory: "./build",
+      output_name: "AgentApp.ipa"
+    )
+  end
+
+  # ── 分發 ──
+
+  desc "構建並導出 IPA，準備上傳到 Jamf Pro"
+  lane :distribute do
+    build
+    UI.success("IPA 已導出到 ./build/AgentApp.ipa")
+    UI.message("請手動上傳到 Jamf Pro > Mobile Device Apps")
+  end
+
+  desc "上傳到 TestFlight"
+  lane :beta do
+    match(type: "appstore", readonly: true)
+
+    build_app(
+      workspace: "AgentApp.xcworkspace",
+      scheme: "AgentApp",
+      configuration: "Release",
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "AgentApp-appstore.ipa"
+    )
+
+    upload_to_testflight(
+      skip_waiting_for_build_processing: true
+    )
+  end
+
+end

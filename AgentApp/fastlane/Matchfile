@@ -1,0 +1,10 @@
+git_url(ENV["MATCH_GIT_URL"] || "https://github.com/your-org/provision_files")
+git_branch("aspira")
+
+storage_mode("git")
+
+type("development") # 預設類型，Fastfile 中可覆蓋
+
+app_identifier([ENV["APP_IDENTIFIER"] || "com.example.your.app", ENV["EXTENSION_IDENTIFIER"] || "com.example.your.app.devicemonitor"])
+username(ENV["FASTLANE_USER"] || "your-apple-id@example.com")
+team_id(ENV["TEAM_ID"] || "your-team-id")
