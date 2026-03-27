@@ -19,5 +19,7 @@ AgentApp/fastlane/report.xml
 AgentApp/fastlane/README.md
 AgentApp/fastlane/test_output/
 
+/tmp/**
+/certs/**
 # 內部文件
-docs/工作量評估-*.md
+docs/工作量評估*.md
