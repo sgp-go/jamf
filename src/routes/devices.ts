@@ -103,12 +103,12 @@ devices.post("/:id/command", async (c) => {
   const detail = await svc.getMobileDevice(id);
 
   const validCommands = [
-    "DeviceLock",
-    "EraseDevice",
-    "ClearPasscode",
-    "UpdateInventory",
-    "RestartDevice",
-    "ShutDownDevice",
+    "DEVICE_LOCK",
+    "ERASE_DEVICE",
+    "CLEAR_PASSCODE",
+    "DEVICE_INFORMATION",
+    "RESTART_DEVICE",
+    "SHUT_DOWN_DEVICE",
   ];
 
   if (!validCommands.includes(body.command)) {

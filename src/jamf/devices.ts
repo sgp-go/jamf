@@ -45,21 +45,20 @@ export class DeviceService {
     managementId: string,
     command: CommandPayload
   ): Promise<unknown> {
-    return this.client.post("/api/preview/mdm/commands", {
-      clientData: command.clientData ?? [],
+    return this.client.post("/api/v2/mdm/commands", {
+      clientData: [{ managementId }],
       commandData: { commandType: command.commandType },
-      deviceIds: [managementId],
     });
   }
 
   /** 更新庫存資訊 */
   updateInventory(managementId: string): Promise<unknown> {
-    return this.sendCommand(managementId, { commandType: "UpdateInventory" });
+    return this.sendCommand(managementId, { commandType: "DEVICE_INFORMATION" });
   }
 
   /** 鎖定裝置 */
   lockDevice(managementId: string): Promise<unknown> {
-    return this.sendCommand(managementId, { commandType: "DeviceLock" });
+    return this.sendCommand(managementId, { commandType: "DEVICE_LOCK" });
   }
 }
 
