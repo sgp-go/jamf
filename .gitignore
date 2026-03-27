@@ -5,7 +5,9 @@ __pycache__/
 *.pyc
 .DS_Store
 data/
+certs/
 buildServer.json
+/tmp/**
 
 # Tuist
 AgentApp/*.xcodeproj
@@ -20,4 +22,4 @@ AgentApp/fastlane/README.md
 AgentApp/fastlane/test_output/
 
 # 內部文件
-docs/工作量評估-*.md
+docs/工作量評估*.md
