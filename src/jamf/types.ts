@@ -117,18 +117,17 @@ export interface DeviceGroup {
   smart: boolean;
 }
 
-// 裝置命令
+// 裝置命令（v2 API 使用 UPPER_SNAKE_CASE）
 export type DeviceCommand =
-  | "DeviceLock"
-  | "EraseDevice"
-  | "ClearPasscode"
-  | "UpdateInventory"
-  | "RestartDevice"
-  | "ShutDownDevice";
+  | "DEVICE_LOCK"
+  | "ERASE_DEVICE"
+  | "CLEAR_PASSCODE"
+  | "DEVICE_INFORMATION"
+  | "RESTART_DEVICE"
+  | "SHUT_DOWN_DEVICE";
 
 export interface CommandPayload {
   commandType: DeviceCommand;
-  clientData?: Record<string, unknown>[];
 }
 
 // Jamf Pro 版本

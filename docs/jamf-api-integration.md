@@ -258,7 +258,7 @@ CREATE TABLE device_usage_stats (
 |------|------|------|
 | `/api/devices` | GET | 獲取 Jamf 管理的裝置列表 |
 | `/api/devices/:id` | GET | 獲取裝置詳情（合併 Jamf + Agent 資料） |
-| `/api/devices/:id/command` | POST | 傳送管理命令（DeviceLock、EraseDevice 等） |
+| `/api/devices/:id/command` | POST | 傳送管理命令（DEVICE_LOCK、ERASE_DEVICE 等，v2 UPPER_SNAKE_CASE 格式） |
 
 ## 注意事項
 
