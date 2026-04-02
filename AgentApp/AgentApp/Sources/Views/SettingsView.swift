@@ -8,6 +8,10 @@ struct SettingsView: View {
     @State private var deviceId: String = ""
     @State private var serialNumber: String = ""
 
+    private var hasManagedConfig: Bool {
+        UserDefaults.standard.dictionary(forKey: "com.apple.configuration.managed") != nil
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -33,6 +37,17 @@ struct SettingsView: View {
                         manager.stopPeriodicReporting()
                     }
                     .foregroundStyle(.red)
+                }
+
+                if hasManagedConfig {
+                    Section("MDM 託管組態") {
+                        LabeledContent("狀態", value: "已套用")
+                        if let config = UserDefaults.standard.dictionary(forKey: "com.apple.configuration.managed") {
+                            ForEach(config.keys.sorted(), id: \.self) { key in
+                                LabeledContent(key, value: "\(config[key] ?? "")")
+                            }
+                        }
+                    }
                 }
 
                 Section("Info") {
