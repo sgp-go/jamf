@@ -813,6 +813,63 @@ CREATE TABLE device_usage_stats (
 | `/api/devices` | GET | 獲取 Jamf 管理的裝置列表 |
 | `/api/devices/:id` | GET | 獲取裝置詳情（合併 Jamf + Agent 資料） |
 | `/api/devices/:id/command` | POST | 傳送管理命令（DEVICE_LOCK、ERASE_DEVICE 等，v2 UPPER_SNAKE_CASE 格式） |
+| `/api/devices/:id/app-lock` | POST | 啟用單 App 模式（將裝置加入 App Lock Profile scope） |
+| `/api/devices/:id/app-lock` | DELETE | 停用單 App 模式（將裝置從 App Lock Profile scope 移除） |
+
+## 單 App 模式（App Lock）配置
+
+### 前提條件
+
+- 裝置必須是 **Supervised** 模式
+- 目標 App 已安裝到裝置上
+
+### 配置步驟
+
+**步驟 1：在 Jamf Pro UI 建立 Configuration Profile**
+
+> ⚠️ `com.apple.app.lock` payload 無法透過 API 建立，只能透過 Jamf Pro Web UI。
+
+1. 登入 Jamf Pro → **Devices → Configuration Profiles → + New**
+2. **General** 設定：
+   - Name: 自定義名稱（如 `SPA`）
+   - Level: `Device Level`
+   - Distribution Method: `Install Automatically`
+   - Security: `Never`（防止 Profile 被手動移除）
+3. 左側選擇 **Single App Mode (App Lock)**
+4. App Bundle ID 填入目標 App 的 Bundle ID（如 `com.aspira.agent.app`）
+5. **Scope 保持為空**（不指向任何裝置或群組）
+6. 點選 **Save**
+7. 記下 Profile 的 ID，填入 `.env` 的 `JAMF_APP_LOCK_PROFILE_ID`
+
+**步驟 2：透過 API 開關單 App 模式**
+
+啟用（將裝置加入 Profile scope）：
+
+```bash
+curl -X POST http://localhost:3000/api/devices/1/app-lock
+# 返回: {"ok": true, "action": "enabled"}
+```
+
+停用（將裝置從 Profile scope 移除）：
+
+```bash
+curl -X DELETE http://localhost:3000/api/devices/1/app-lock
+# 返回: {"ok": true, "action": "disabled"}
+```
+
+### 底層原理
+
+API 透過 Classic API 修改 Configuration Profile 的 scope 來實現開關：
+
+```
+啟用: PUT /JSSResource/mobiledeviceconfigurationprofiles/id/{profileId}
+      → scope 加入裝置 → Jamf 自動推送 App Lock Profile → 裝置進入單 App 模式
+
+停用: PUT /JSSResource/mobiledeviceconfigurationprofiles/id/{profileId}
+      → scope 清空 → Jamf 自動移除 App Lock Profile → 裝置恢復正常
+
+每次操作後自動發送 Blank Push 加速裝置簽入。
+```
 
 ## 注意事項
 
