@@ -119,6 +119,45 @@ export class JamfClient {
   delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: "DELETE" });
   }
+
+  /** Classic API XML PUT 請求（用於 Configuration Profile scope 等操作） */
+  async putXml(path: string, xmlBody: string): Promise<string> {
+    const token = await this.getToken();
+    const url = `${this.baseUrl}${path}`;
+    const resp = await fetch(url, {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "text/xml; charset=utf-8",
+        Accept: "application/xml",
+      },
+      body: xmlBody,
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      throw new JamfRequestError(resp.status, url, text);
+    }
+    return text;
+  }
+
+  /** Classic API XML POST 請求 */
+  async postXml(path: string, xmlBody?: string): Promise<string> {
+    const token = await this.getToken();
+    const url = `${this.baseUrl}${path}`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/xml",
+      },
+      body: xmlBody,
+    });
+    const text = await resp.text();
+    if (!resp.ok) {
+      throw new JamfRequestError(resp.status, url, text);
+    }
+    return text;
+  }
 }
 
 /** Jamf API 請求錯誤 */

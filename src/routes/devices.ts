@@ -125,4 +125,20 @@ devices.post("/:id/command", async (c) => {
   return c.json({ ok: true, command: body.command, result });
 });
 
+/** POST /api/devices/:id/app-lock - 啟用單 App 模式 */
+devices.post("/:id/app-lock", async (c) => {
+  const id = c.req.param("id");
+  const svc = getService();
+  await svc.enableAppLock(id);
+  return c.json({ ok: true, action: "enabled" });
+});
+
+/** DELETE /api/devices/:id/app-lock - 停用單 App 模式 */
+devices.delete("/:id/app-lock", async (c) => {
+  const id = c.req.param("id");
+  const svc = getService();
+  await svc.disableAppLock(id);
+  return c.json({ ok: true, action: "disabled" });
+});
+
 export default devices;
