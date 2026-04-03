@@ -837,9 +837,26 @@ CREATE TABLE device_usage_stats (
    - Security: `Never`（防止 Profile 被手動移除）
 3. 左側選擇 **Single App Mode (App Lock)**
 4. App Bundle ID 填入目標 App 的 Bundle ID（如 `com.aspira.agent.app`）
-5. **Scope 保持為空**（不指向任何裝置或群組）
+5. **Scope 指向步驟 2 建立的 Static Group**（不直接指向裝置）
 6. 點選 **Save**
-7. 記下 Profile 的 ID，填入 `.env` 的 `JAMF_APP_LOCK_PROFILE_ID`
+
+**步驟 2：建立 Static Group**
+
+透過 API 或 UI 建立一個 Static Mobile Device Group，作為 App Lock 的開關：
+
+```bash
+curl -X POST "${JAMF_BASE_URL}/JSSResource/mobiledevicegroups/id/0" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  -H "Content-Type: text/xml; charset=utf-8" \
+  -H "Accept: application/xml" \
+  -d '<mobile_device_group>
+  <name>App Lock Devices</name>
+  <is_smart>false</is_smart>
+</mobile_device_group>'
+```
+
+記下群組 ID，填入 `.env` 的 `JAMF_APP_LOCK_GROUP_ID`。
+然後將步驟 1 的 Profile scope 綁定到此群組。
 
 **步驟 2：透過 API 開關單 App 模式**
 
@@ -859,14 +876,16 @@ curl -X DELETE http://localhost:3000/api/devices/1/app-lock
 
 ### 底層原理
 
-API 透過 Classic API 修改 Configuration Profile 的 scope 來實現開關：
+API 透過 Classic API 操作 Static Group 成員來實現開關（增量操作，不影響其他裝置）：
 
 ```
-啟用: PUT /JSSResource/mobiledeviceconfigurationprofiles/id/{profileId}
-      → scope 加入裝置 → Jamf 自動推送 App Lock Profile → 裝置進入單 App 模式
+啟用: PUT /JSSResource/mobiledevicegroups/id/{groupId}
+      → mobile_device_additions 加入裝置
+      → Jamf 自動推送 App Lock Profile → 裝置進入單 App 模式
 
-停用: PUT /JSSResource/mobiledeviceconfigurationprofiles/id/{profileId}
-      → scope 清空 → Jamf 自動移除 App Lock Profile → 裝置恢復正常
+停用: PUT /JSSResource/mobiledevicegroups/id/{groupId}
+      → mobile_device_deletions 移除裝置
+      → Jamf 自動移除 App Lock Profile → 裝置恢復正常
 
 每次操作後自動發送 Blank Push 加速裝置簽入。
 ```
