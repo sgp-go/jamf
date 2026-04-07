@@ -124,10 +124,15 @@ export type DeviceCommand =
   | "CLEAR_PASSCODE"
   | "DEVICE_INFORMATION"
   | "RESTART_DEVICE"
-  | "SHUT_DOWN_DEVICE";
+  | "SHUT_DOWN_DEVICE"
+  | "ENABLE_LOST_MODE"
+  | "DISABLE_LOST_MODE";
 
 export interface CommandPayload {
   commandType: DeviceCommand;
+  lostModeMessage?: string;
+  lostModePhone?: string;
+  lostModeFootnote?: string;
 }
 
 // Jamf Pro 版本
