@@ -53,7 +53,9 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 |------|------|------|
 | `/api/devices` | GET | 取得 Jamf 管理的裝置列表 |
 | `/api/devices/:id` | GET | 取得裝置詳情（Jamf + Agent 資料） |
-| `/api/devices/:id/command` | POST | 傳送管理命令 |
+| `/api/devices/:id/command` | POST | 傳送管理命令（含 Lost Mode） |
+| `/api/devices/:id/app-lock` | POST | 啟用單 App 模式 |
+| `/api/devices/:id/app-lock` | DELETE | 停用單 App 模式 |
 | `/api/agent/report` | POST | Agent App 上報裝置狀態 |
 | `/api/agent/reports/:deviceId` | GET | 查詢裝置上報歷史 |
 | `/api/agent/latest/:deviceId` | GET | 取得裝置最新上報 |
