@@ -25,12 +25,13 @@ final class StatusManager: ObservableObject {
         }
     }
 
-    /// 立即傳送一次回報
+    /// 立即傳送一次回報（裝置狀態 + 使用時長）
     func sendReport() async {
         isReporting = true
         lastError = nil
         do {
             try await reporter.sendReport()
+            try await UsageService.shared.uploadUsageStats()
             lastReportTime = Date()
             reportCount += 1
         } catch {

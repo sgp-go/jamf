@@ -5,21 +5,26 @@ import UIKit
 final class ReportService {
     static let shared = ReportService()
 
-    /// 管理平臺 API 地址（可透過 MDM Config Profile 配置）
+    /// 從 Jamf Managed App Configuration 讀取值，取不到再 fallback 到手動設定
+    private func managedValue(forKey key: String) -> String? {
+        UserDefaults.standard.dictionary(forKey: "com.apple.configuration.managed")?[key] as? String
+    }
+
+    /// 管理平臺 API 地址（優先從 Managed App Configuration 讀取）
     var serverURL: String {
-        get { UserDefaults.standard.string(forKey: "serverURL") ?? "http://localhost:3000" }
+        get { managedValue(forKey: "serverURL") ?? UserDefaults.standard.string(forKey: "serverURL") ?? "http://localhost:3000" }
         set { UserDefaults.standard.set(newValue, forKey: "serverURL") }
     }
 
-    /// 裝置 ID（Jamf 分配，可透過 MDM Config Profile 配置）
+    /// 裝置 ID（優先從 Managed App Configuration 讀取）
     var deviceId: String {
-        get { UserDefaults.standard.string(forKey: "deviceId") ?? UIDevice.current.identifierForVendor?.uuidString ?? "unknown" }
+        get { managedValue(forKey: "deviceId") ?? UserDefaults.standard.string(forKey: "deviceId") ?? UIDevice.current.identifierForVendor?.uuidString ?? "unknown" }
         set { UserDefaults.standard.set(newValue, forKey: "deviceId") }
     }
 
-    /// 序列號（實際需從裝置獲取，此處使用 placeholder）
+    /// 序列號（優先從 Managed App Configuration 讀取）
     var serialNumber: String {
-        get { UserDefaults.standard.string(forKey: "serialNumber") ?? "unknown" }
+        get { managedValue(forKey: "serialNumber") ?? UserDefaults.standard.string(forKey: "serialNumber") ?? "unknown" }
         set { UserDefaults.standard.set(newValue, forKey: "serialNumber") }
     }
 

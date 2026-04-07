@@ -48,6 +48,14 @@ app.notFound((c) => c.json({ error: "Not Found" }, 404));
 // 錯誤處理
 app.onError((err, c) => {
   console.error("Server error:", err);
+  // 如果是 Jamf API 錯誤，回傳上游的完整錯誤資訊
+  if (err.name === "JamfRequestError") {
+    const jamfErr = err as import("./jamf/client.ts").JamfRequestError;
+    return c.json(
+      { error: err.message, upstream: jamfErr.body },
+      jamfErr.status as 400
+    );
+  }
   return c.json({ error: err.message }, 500);
 });
 
