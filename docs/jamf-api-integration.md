@@ -812,9 +812,41 @@ CREATE TABLE device_usage_stats (
 |------|------|------|
 | `/api/devices` | GET | 獲取 Jamf 管理的裝置列表 |
 | `/api/devices/:id` | GET | 獲取裝置詳情（合併 Jamf + Agent 資料） |
-| `/api/devices/:id/command` | POST | 傳送管理命令（DEVICE_LOCK、ERASE_DEVICE 等，v2 UPPER_SNAKE_CASE 格式） |
+| `/api/devices/:id/command` | POST | 傳送管理命令（支援的命令見下方列表） |
 | `/api/devices/:id/app-lock` | POST | 啟用單 App 模式（將裝置加入 App Lock Profile scope） |
 | `/api/devices/:id/app-lock` | DELETE | 停用單 App 模式（將裝置從 App Lock Profile scope 移除） |
+
+**支援的管理命令（POST /api/devices/:id/command）：**
+
+| 命令 | 說明 | 額外參數 |
+|------|------|----------|
+| `DEVICE_LOCK` | 鎖定裝置螢幕 | - |
+| `ERASE_DEVICE` | 清除裝置所有內容 | - |
+| `CLEAR_PASSCODE` | 清除密碼（需 Supervised） | - |
+| `DEVICE_INFORMATION` | 更新裝置庫存資訊 | - |
+| `RESTART_DEVICE` | 重新啟動裝置 | - |
+| `SHUT_DOWN_DEVICE` | 關機 | - |
+| `ENABLE_LOST_MODE` | 啟用遺失模式 | `lostModeMessage`、`lostModePhone`、`lostModeFootnote`（均為可選） |
+| `DISABLE_LOST_MODE` | 停用遺失模式 | - |
+
+**遺失模式範例：**
+
+```bash
+# 啟用遺失模式
+curl -X POST http://localhost:3000/api/devices/1/command \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "ENABLE_LOST_MODE",
+    "lostModeMessage": "此裝置已被管理員鎖定",
+    "lostModePhone": "010-12345678",
+    "lostModeFootnote": "請聯繫管理員解鎖"
+  }'
+
+# 停用遺失模式
+curl -X POST http://localhost:3000/api/devices/1/command \
+  -H "Content-Type: application/json" \
+  -d '{"command": "DISABLE_LOST_MODE"}'
+```
 
 ## 單 App 模式（App Lock）配置
 
