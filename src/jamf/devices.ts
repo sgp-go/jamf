@@ -40,14 +40,14 @@ export class DeviceService {
     );
   }
 
-  /** 向裝置傳送管理命令 */
+  /** 向裝置傳送管理命令（支援帶額外參數的命令，如 ENABLE_LOST_MODE） */
   async sendCommand(
     managementId: string,
     command: CommandPayload
   ): Promise<unknown> {
     return this.client.post("/api/v2/mdm/commands", {
       clientData: [{ managementId }],
-      commandData: { commandType: command.commandType },
+      commandData: command,
     });
   }
 
@@ -59,6 +59,24 @@ export class DeviceService {
   /** 鎖定裝置 */
   lockDevice(managementId: string): Promise<unknown> {
     return this.sendCommand(managementId, { commandType: "DEVICE_LOCK" });
+  }
+
+  /** 啟用遺失模式 */
+  enableLostMode(
+    managementId: string,
+    opts?: { message?: string; phone?: string; footnote?: string }
+  ): Promise<unknown> {
+    return this.sendCommand(managementId, {
+      commandType: "ENABLE_LOST_MODE",
+      lostModeMessage: opts?.message ?? "",
+      lostModePhone: opts?.phone ?? "",
+      lostModeFootnote: opts?.footnote ?? "",
+    });
+  }
+
+  /** 停用遺失模式 */
+  disableLostMode(managementId: string): Promise<unknown> {
+    return this.sendCommand(managementId, { commandType: "DISABLE_LOST_MODE" });
   }
 
   /**

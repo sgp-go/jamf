@@ -96,7 +96,12 @@ devices.get("/:id", async (c) => {
 /** POST /api/devices/:id/command - 傳送管理命令 */
 devices.post("/:id/command", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{ command: string }>();
+  const body = await c.req.json<{
+    command: string;
+    lostModeMessage?: string;
+    lostModePhone?: string;
+    lostModeFootnote?: string;
+  }>();
 
   const svc = getService();
   // 先取得裝置的 managementId
@@ -109,6 +114,8 @@ devices.post("/:id/command", async (c) => {
     "DEVICE_INFORMATION",
     "RESTART_DEVICE",
     "SHUT_DOWN_DEVICE",
+    "ENABLE_LOST_MODE",
+    "DISABLE_LOST_MODE",
   ];
 
   if (!validCommands.includes(body.command)) {
@@ -118,9 +125,14 @@ devices.post("/:id/command", async (c) => {
     );
   }
 
-  const result = await svc.sendCommand(detail.managementId, {
+  const payload: import("../jamf/types.ts").CommandPayload = {
     commandType: body.command as import("../jamf/types.ts").DeviceCommand,
-  });
+  };
+  if (body.lostModeMessage) payload.lostModeMessage = body.lostModeMessage;
+  if (body.lostModePhone) payload.lostModePhone = body.lostModePhone;
+  if (body.lostModeFootnote) payload.lostModeFootnote = body.lostModeFootnote;
+
+  const result = await svc.sendCommand(detail.managementId, payload);
 
   return c.json({ ok: true, command: body.command, result });
 });
