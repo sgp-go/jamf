@@ -87,6 +87,11 @@ function initSchema() {
       enrollment_status TEXT NOT NULL DEFAULT 'pending',
       enrollment_type TEXT DEFAULT 'dep',
       device_info TEXT,
+      lost_mode_enabled INTEGER NOT NULL DEFAULT 0,
+      lost_mode_message TEXT,
+      lost_mode_phone TEXT,
+      lost_mode_footnote TEXT,
+      lost_mode_enabled_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
@@ -166,6 +171,22 @@ function initSchema() {
       completed_at TEXT
     );
   `);
+
+  // ---- Migration: 舊表補 lost mode 欄位（SQLite 沒有 ADD COLUMN IF NOT EXISTS） ----
+  const lostModeAlters = [
+    "ALTER TABLE mdm_devices ADD COLUMN lost_mode_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE mdm_devices ADD COLUMN lost_mode_message TEXT",
+    "ALTER TABLE mdm_devices ADD COLUMN lost_mode_phone TEXT",
+    "ALTER TABLE mdm_devices ADD COLUMN lost_mode_footnote TEXT",
+    "ALTER TABLE mdm_devices ADD COLUMN lost_mode_enabled_at TEXT",
+  ];
+  for (const sql of lostModeAlters) {
+    try {
+      db.exec(sql);
+    } catch {
+      // 欄位已存在
+    }
+  }
 }
 
 // Agent 回報的狀態資料
@@ -373,6 +394,11 @@ export function upsertMdmDevice(
     enrollmentStatus: string;
     enrollmentType: string;
     deviceInfo: string;
+    lostModeEnabled: boolean;
+    lostModeMessage: string | null;
+    lostModePhone: string | null;
+    lostModeFootnote: string | null;
+    lostModeEnabledAt: string | null;
   }>
 ): void {
   const db = getDb();
@@ -426,6 +452,26 @@ export function upsertMdmDevice(
     if (fields.deviceInfo !== undefined) {
       sets.push("device_info = ?");
       params.push(fields.deviceInfo);
+    }
+    if (fields.lostModeEnabled !== undefined) {
+      sets.push("lost_mode_enabled = ?");
+      params.push(fields.lostModeEnabled ? "1" : "0");
+    }
+    if (fields.lostModeMessage !== undefined) {
+      sets.push("lost_mode_message = ?");
+      params.push(fields.lostModeMessage);
+    }
+    if (fields.lostModePhone !== undefined) {
+      sets.push("lost_mode_phone = ?");
+      params.push(fields.lostModePhone);
+    }
+    if (fields.lostModeFootnote !== undefined) {
+      sets.push("lost_mode_footnote = ?");
+      params.push(fields.lostModeFootnote);
+    }
+    if (fields.lostModeEnabledAt !== undefined) {
+      sets.push("lost_mode_enabled_at = ?");
+      params.push(fields.lostModeEnabledAt);
     }
 
     sets.push("last_seen_at = ?");
@@ -492,6 +538,38 @@ export function queueMdmCommand(
   return db.lastInsertRowId;
 }
 
+/** 批次排入 MDM 命令（在單一 transaction 內完成） */
+export function queueMdmCommandsBatch(
+  rows: Array<{
+    commandUuid: string;
+    deviceUdid: string;
+    commandType: string;
+    requestPayload: string;
+  }>
+): void {
+  if (rows.length === 0) return;
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT INTO mdm_commands (command_uuid, device_udid, command_type, request_payload)
+     VALUES (?, ?, ?, ?)`
+  );
+  db.exec("BEGIN");
+  try {
+    for (const row of rows) {
+      stmt.run(
+        row.commandUuid,
+        row.deviceUdid,
+        row.commandType,
+        row.requestPayload
+      );
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
 /** 取得裝置下一筆待執行命令 */
 export function getNextQueuedCommand(
   deviceUdid: string
@@ -503,6 +581,13 @@ export function getNextQueuedCommand(
        ORDER BY queued_at ASC LIMIT 1`
     )
     .get(deviceUdid) as MdmCommandRow | undefined;
+}
+
+/** 以 UUID 取得單筆命令 */
+export function getMdmCommand(commandUuid: string): MdmCommandRow | undefined {
+  return getDb()
+    .prepare("SELECT * FROM mdm_commands WHERE command_uuid = ?")
+    .get(commandUuid) as MdmCommandRow | undefined;
 }
 
 /** 更新命令狀態 */
