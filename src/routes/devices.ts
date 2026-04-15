@@ -40,7 +40,14 @@ devices.get("/:id", async (c) => {
   const id = c.req.param("id");
   const svc = getService();
 
-  const detail = await svc.getMobileDevice(id);
+  // v2 detail + Classic API lost mode 並行查
+  const [detail, lostMode] = await Promise.all([
+    svc.getMobileDevice(id),
+    svc.getLostModeStatus(id).catch((e) => {
+      console.warn(`[Jamf] getLostModeStatus(${id}) 失敗:`, e);
+      return null;
+    }),
+  ]);
   const agentReport = getLatestReport(id);
 
   const ios = detail.ios;
@@ -72,6 +79,8 @@ devices.get("/:id", async (c) => {
       : null,
     // iOS 安全資訊
     security: ios?.security ?? null,
+    // Lost Mode 狀態（Jamf 只在 Classic API /JSSResource/mobiledevices 才回傳，需額外 request）
+    lostMode,
     // 已安裝 App
     applications: ios?.applications ?? [],
     // 設定描述檔

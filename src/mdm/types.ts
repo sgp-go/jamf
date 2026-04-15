@@ -88,7 +88,11 @@ export type MdmCommandType =
   | "InstallProfile"
   | "RemoveProfile"
   | "ProfileList"
-  | "CertificateList";
+  | "CertificateList"
+  | "EnableLostMode"
+  | "DisableLostMode"
+  | "InstallApplication"
+  | "RemoveApplication";
 
 /** 命令佇列資料庫記錄 */
 export interface MdmCommandRow {
@@ -142,6 +146,11 @@ export interface MdmDeviceRow {
   enrollment_status: string;
   enrollment_type: string;
   device_info: string | null;
+  lost_mode_enabled: number;
+  lost_mode_message: string | null;
+  lost_mode_phone: string | null;
+  lost_mode_footnote: string | null;
+  lost_mode_enabled_at: string | null;
   created_at: string;
   updated_at: string;
 }

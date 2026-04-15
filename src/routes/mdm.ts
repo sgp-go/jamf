@@ -2,8 +2,13 @@
 
 import { Hono } from "@hono/hono";
 import { handleCheckin } from "../mdm/checkin.ts";
-import { handleCommandRequest, enqueueCommand } from "../mdm/command.ts";
+import {
+  handleCommandRequest,
+  enqueueCommand,
+  enqueueCommandBatch,
+} from "../mdm/command.ts";
 import { pushToDevice } from "../mdm/apns.ts";
+import { apnsClient } from "../mdm/apns-client.ts";
 import {
   getApnsCertInfo,
   getApnsTopic,
@@ -16,6 +21,11 @@ import {
   saveVendorCert,
 } from "../mdm/crypto.ts";
 import { generateEnrollmentProfile } from "../mdm/enrollment.ts";
+import {
+  generateAppLockProfile,
+  APP_LOCK_PROFILE_IDENTIFIER,
+  type AppLockOptions,
+} from "../mdm/profiles.ts";
 import {
   getDepAccount,
   syncDevicesToDb,
@@ -33,7 +43,11 @@ import {
   updateDepTokenInfo,
   updateDepDeviceProfile,
 } from "../db/sqlite.ts";
-import type { MdmCommandType, DepProfile } from "../mdm/types.ts";
+import type {
+  MdmCommandType,
+  DepProfile,
+  MdmDeviceRow,
+} from "../mdm/types.ts";
 
 const mdm = new Hono();
 
@@ -66,9 +80,23 @@ mdm.put("/command", async (c) => {
 // 管理 API 端點（前端/管理者呼叫，JSON）
 // ============================================================
 
+/** 裝置 row 加上 lostMode 物件（保留原 snake_case 欄位以相容舊前端） */
+function shapeMdmDevice(row: MdmDeviceRow) {
+  return {
+    ...row,
+    lostMode: {
+      enabled: row.lost_mode_enabled === 1,
+      message: row.lost_mode_message,
+      phone: row.lost_mode_phone,
+      footnote: row.lost_mode_footnote,
+      enabledAt: row.lost_mode_enabled_at,
+    },
+  };
+}
+
 /** GET /devices - 列出所有 MDM 註冊裝置 */
 mdm.get("/devices", (c) => {
-  const devices = listMdmDevices();
+  const devices = listMdmDevices().map(shapeMdmDevice);
   return c.json({ totalCount: devices.length, devices });
 });
 
@@ -79,7 +107,7 @@ mdm.get("/devices/:udid", (c) => {
   if (!device) {
     return c.json({ error: "裝置不存在" }, 404);
   }
-  return c.json(device);
+  return c.json(shapeMdmDevice(device));
 });
 
 /** POST /devices/:udid/command - 排入 MDM 命令 */
@@ -115,6 +143,10 @@ mdm.post("/devices/:udid/command", async (c) => {
     "RemoveProfile",
     "ProfileList",
     "CertificateList",
+    "EnableLostMode",
+    "DisableLostMode",
+    "InstallApplication",
+    "RemoveApplication",
   ];
 
   if (!validCommands.includes(body.commandType)) {
@@ -124,8 +156,77 @@ mdm.post("/devices/:udid/command", async (c) => {
     );
   }
 
-  const commandUuid = enqueueCommand(udid, body.commandType, body.params);
-  return c.json({ commandUuid, commandType: body.commandType }, 201);
+  try {
+    const commandUuid = enqueueCommand(udid, body.commandType, body.params);
+    return c.json({ commandUuid, commandType: body.commandType }, 201);
+  } catch (e) {
+    return c.json(
+      { error: e instanceof Error ? e.message : "命令建構失敗" },
+      400
+    );
+  }
+});
+
+/**
+ * POST /devices/:udid/app-lock - 啟用單 App 模式
+ * 動態生成 com.apple.app.lock 描述檔並透過 InstallProfile 下發
+ * body: { bundleId: string, options?: AppLockOptions }
+ */
+mdm.post("/devices/:udid/app-lock", async (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device) {
+    return c.json({ error: "裝置不存在" }, 404);
+  }
+  if (device.enrollment_status !== "enrolled") {
+    return c.json({ error: "裝置未註冊或已移除" }, 400);
+  }
+
+  const body = await c.req.json<{
+    bundleId: string;
+    options?: AppLockOptions;
+  }>();
+
+  if (!body.bundleId) {
+    return c.json({ error: "需要 bundleId（要鎖定的 App Bundle ID）" }, 400);
+  }
+
+  const profileBuffer = generateAppLockProfile(body.bundleId, body.options);
+  const commandUuid = enqueueCommand(udid, "InstallProfile", {
+    Payload: profileBuffer,
+  });
+
+  return c.json(
+    {
+      message: "App Lock 描述檔已排入下發",
+      commandUuid,
+      bundleId: body.bundleId,
+      profileIdentifier: APP_LOCK_PROFILE_IDENTIFIER,
+    },
+    201
+  );
+});
+
+/** DELETE /devices/:udid/app-lock - 停用單 App 模式（移除描述檔） */
+mdm.delete("/devices/:udid/app-lock", (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device) {
+    return c.json({ error: "裝置不存在" }, 404);
+  }
+  if (device.enrollment_status !== "enrolled") {
+    return c.json({ error: "裝置未註冊或已移除" }, 400);
+  }
+
+  const commandUuid = enqueueCommand(udid, "RemoveProfile", {
+    Identifier: APP_LOCK_PROFILE_IDENTIFIER,
+  });
+
+  return c.json({
+    message: "App Lock 移除命令已排入",
+    commandUuid,
+    profileIdentifier: APP_LOCK_PROFILE_IDENTIFIER,
+  });
 });
 
 /** GET /devices/:udid/commands - 查詢裝置命令歷史 */
@@ -159,6 +260,140 @@ mdm.post("/devices/:udid/push", async (c) => {
     return c.json({ message: "推播已發送", result });
   }
   return c.json({ error: "推播失敗", result }, 502);
+});
+
+/**
+ * POST /commands/bulk - 批次對多台裝置下發同一命令
+ * body: { udids: string[], commandType: MdmCommandType, params?: Record<string, unknown> }
+ *
+ * 流程：驗證 → 事務批次入隊 → 併發 APNS push（長連線 multiplexing）
+ */
+mdm.post("/commands/bulk", async (c) => {
+  const body = await c.req.json<{
+    udids: string[];
+    commandType: MdmCommandType;
+    params?: Record<string, unknown>;
+  }>();
+
+  if (!Array.isArray(body.udids) || body.udids.length === 0) {
+    return c.json({ error: "需要非空的 udids 陣列" }, 400);
+  }
+  if (!body.commandType) {
+    return c.json({ error: "缺少 commandType" }, 400);
+  }
+
+  const validCommands: MdmCommandType[] = [
+    "DeviceInformation",
+    "SecurityInfo",
+    "InstalledApplicationList",
+    "DeviceLock",
+    "ClearPasscode",
+    "EraseDevice",
+    "RestartDevice",
+    "ShutDownDevice",
+    "InstallProfile",
+    "RemoveProfile",
+    "ProfileList",
+    "CertificateList",
+    "EnableLostMode",
+    "DisableLostMode",
+    "InstallApplication",
+    "RemoveApplication",
+  ];
+  if (!validCommands.includes(body.commandType)) {
+    return c.json({ error: `無效的命令類型: ${body.commandType}` }, 400);
+  }
+
+  // 驗證每台裝置狀態，篩出可下發的
+  const failed: Array<{ udid: string; reason: string }> = [];
+  const validDevices: Array<{
+    udid: string;
+    pushToken: string;
+    pushMagic: string;
+    topic: string;
+  }> = [];
+
+  for (const udid of body.udids) {
+    const device = getMdmDevice(udid);
+    if (!device) {
+      failed.push({ udid, reason: "裝置不存在" });
+      continue;
+    }
+    if (device.enrollment_status !== "enrolled") {
+      failed.push({ udid, reason: "裝置未註冊或已移除" });
+      continue;
+    }
+    if (!device.push_token || !device.push_magic || !device.topic) {
+      failed.push({ udid, reason: "裝置缺少推播 token/magic/topic" });
+      continue;
+    }
+    validDevices.push({
+      udid,
+      pushToken: device.push_token,
+      pushMagic: device.push_magic,
+      topic: device.topic,
+    });
+  }
+
+  if (validDevices.length === 0) {
+    return c.json({ enqueued: 0, pushed: 0, failed, commandUuids: {} }, 200);
+  }
+
+  // 批次入隊
+  let commandUuids: Record<string, string>;
+  try {
+    commandUuids = enqueueCommandBatch(
+      validDevices.map((d) => d.udid),
+      body.commandType,
+      body.params
+    );
+  } catch (e) {
+    return c.json(
+      { error: e instanceof Error ? e.message : "命令建構失敗" },
+      400
+    );
+  }
+
+  // 併發 APNS push（semaphore 限流在 apnsClient 內部）
+  const pushStart = performance.now();
+  const pushResults = await Promise.allSettled(
+    validDevices.map((d) =>
+      pushToDevice(d.pushToken, d.pushMagic, d.topic).then((r) => ({
+        udid: d.udid,
+        result: r,
+      }))
+    )
+  );
+  const pushMs = (performance.now() - pushStart).toFixed(1);
+
+  let pushed = 0;
+  for (const r of pushResults) {
+    if (r.status === "fulfilled" && r.value.result.success) {
+      pushed++;
+    } else if (r.status === "fulfilled") {
+      failed.push({
+        udid: r.value.udid,
+        reason: r.value.result.reason ?? `HTTP ${r.value.result.statusCode}`,
+      });
+    } else {
+      failed.push({
+        udid: "unknown",
+        reason: r.reason instanceof Error ? r.reason.message : String(r.reason),
+      });
+    }
+  }
+
+  console.log(
+    `[MDM] Bulk 完成: type=${body.commandType}, enqueued=${validDevices.length}, pushed=${pushed}, failed=${failed.length}, pushMs=${pushMs}`
+  );
+
+  return c.json({
+    enqueued: validDevices.length,
+    pushed,
+    failed,
+    commandUuids,
+    pushElapsedMs: Number(pushMs),
+  }, 200);
 });
 
 // ============================================================
@@ -301,16 +536,48 @@ mdm.post("/dep/profile", async (c) => {
       support_phone_number: body.support_phone_number,
       support_email_address: body.support_email_address,
       org_magic: body.org_magic ?? "Self-Hosted MDM",
+      // Setup Assistant 跳過清單：Apple 官方 SkipKeys 的近乎完整子集
+      // 故意保留不跳：WiFi（需連網完成 MDM check-in）、Passcode（仍要求設裝置密碼）
       skip_setup_items: body.skip_setup_items ?? [
-        "Location",
-        "Restore",
+        // 帳號 / 服務
         "AppleID",
         "Terms",
         "Siri",
-        "Diagnostics",
-        "Biometric",
         "Payment",
         "ScreenTime",
+        "iCloudStorage",
+        "iCloudDiagnostics",
+        "Privacy",
+        "Intelligence",
+        // 個人化 / 外觀
+        "Welcome",
+        "TapToSetup",
+        "Appearance",
+        "DisplayTone",
+        "TrueTone",
+        "Keyboard",
+        "SpokenLanguage",
+        "OnBoarding",
+        "Zoom",
+        "Safety",
+        // 遷移 / 還原
+        "Restore",
+        "RestoreCompleted",
+        "UpdateCompleted",
+        "Android",
+        "DeviceToDeviceMigration",
+        "WatchMigration",
+        // 硬體按鈕 / 無障礙
+        "HomeButtonSensitivity",
+        "Accessibility",
+        "ActionButton",
+        "CameraButton",
+        // 生物辨識 / 訊息 / 系統服務
+        "Biometric",
+        "MessagingActivationUsingPhoneNumber",
+        "SIMSetup",
+        "Location",
+        "Diagnostics",
         "SoftwareUpdate",
       ],
     };
@@ -706,6 +973,8 @@ mdm.post("/certs/apns", async (c) => {
     }
 
     const result = saveApnsCert(certPem, keyPem);
+    // 憑證已更新，關閉舊 APNS 長連線，下次推播自動用新憑證重建
+    apnsClient.reset();
     return c.json({
       message: "APNS 憑證上傳成功",
       topic: result.topic,
