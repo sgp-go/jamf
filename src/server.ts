@@ -6,6 +6,7 @@ import { cors } from "@hono/hono/cors";
 import { logger } from "@hono/hono/logger";
 import devices from "./routes/devices.ts";
 import agent from "./routes/agent.ts";
+import mdm from "./routes/mdm.ts";
 
 const app = new Hono();
 
@@ -27,6 +28,11 @@ app.get("/", (c) =>
       agentLatest: "/api/agent/latest/:deviceId",
       agentUsage: "/api/agent/usage",
       agentUsageQuery: "/api/agent/usage/:deviceId",
+      mdmCheckin: "/api/mdm/checkin",
+      mdmCommand: "/api/mdm/command",
+      mdmDevices: "/api/mdm/devices",
+      mdmDepDevices: "/api/mdm/dep/devices",
+      mdmMigration: "/api/mdm/migration/status",
     },
   })
 );
@@ -34,6 +40,7 @@ app.get("/", (c) =>
 // 路由掛載
 app.route("/api/devices", devices);
 app.route("/api/agent", agent);
+app.route("/api/mdm", mdm);
 
 // 404
 app.notFound((c) => c.json({ error: "Not Found" }, 404));

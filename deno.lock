@@ -12,7 +12,9 @@
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/path@0.217": "0.217.0",
     "jsr:@std/path@1": "1.1.4",
-    "jsr:@std/path@^1.1.4": "1.1.4"
+    "jsr:@std/path@^1.1.4": "1.1.4",
+    "npm:node-forge@1": "1.4.0",
+    "npm:plist@3": "3.1.0"
   },
   "jsr": {
     "@db/sqlite@0.12.0": {
@@ -69,10 +71,34 @@
       ]
     }
   },
+  "npm": {
+    "@xmldom/xmldom@0.8.11": {
+      "integrity": "sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw=="
+    },
+    "base64-js@1.5.1": {
+      "integrity": "sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA=="
+    },
+    "node-forge@1.4.0": {
+      "integrity": "sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ=="
+    },
+    "plist@3.1.0": {
+      "integrity": "sha512-uysumyrvkUX0rX/dEVqt8gC3sTBzd4zoWfLeS29nb53imdaXVvLINYXTI2GNqzaMuvacNx4uJQ8+b3zXR0pkgQ==",
+      "dependencies": [
+        "@xmldom/xmldom",
+        "base64-js",
+        "xmlbuilder"
+      ]
+    },
+    "xmlbuilder@15.1.1": {
+      "integrity": "sha512-yMqGBqtXyeN1e3TGYvgNgDVZ3j84W4cwkOXQswghol6APgZWaff9lnbvN7MHYJOiXsvGPXtjTYJEiC9J2wv9Eg=="
+    }
+  },
   "workspace": {
     "dependencies": [
       "jsr:@hono/hono@4",
-      "jsr:@std/dotenv@0.225"
+      "jsr:@std/dotenv@0.225",
+      "npm:node-forge@1",
+      "npm:plist@3"
     ]
   }
 }
