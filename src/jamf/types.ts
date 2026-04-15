@@ -69,6 +69,50 @@ export interface IosDetail {
   certificates: DeviceCertificate[];
 }
 
+/**
+ * Classic API /JSSResource/mobiledevices/id/:id 的 security 區塊
+ * 注意：v2 detail endpoint 不回傳 lost mode 欄位，必須走 Classic API
+ */
+export interface ClassicMobileDeviceSecurity {
+  // 注意：lost_mode_enabled 是字串 "true"/"false"，lost_mode_enforced 才是 boolean
+  lost_mode_enabled: string | boolean;
+  lost_mode_enforced: boolean;
+  lost_mode_enable_issued_epoch: number;
+  lost_mode_enable_issued_utc: string;
+  lost_mode_message: string;
+  lost_mode_phone: string;
+  lost_mode_footnote: string;
+  lost_location_epoch: number;
+  lost_location_utc: string;
+  lost_location_latitude: number;
+  lost_location_longitude: number;
+  lost_location_altitude: number;
+  lost_location_speed: number;
+  lost_location_course: number;
+  lost_location_horizontal_accuracy: number;
+  lost_location_vertical_accuracy: number;
+}
+
+/** 整理後的 Lost Mode 狀態（路由層對外格式） */
+export interface JamfLostModeStatus {
+  enabled: boolean;
+  enforced: boolean;
+  message: string | null;
+  phone: string | null;
+  footnote: string | null;
+  enabledAt: string | null;
+  location: {
+    latitude: number;
+    longitude: number;
+    altitude: number | null;
+    speed: number | null;
+    course: number | null;
+    horizontalAccuracy: number | null;
+    verticalAccuracy: number | null;
+    timestamp: string | null;
+  } | null;
+}
+
 export interface DeviceSecurity {
   dataProtected: boolean;
   blockLevelEncryptionCapable: boolean;

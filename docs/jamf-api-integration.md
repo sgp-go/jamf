@@ -848,6 +848,35 @@ curl -X POST http://localhost:3000/api/devices/1/command \
   -d '{"command": "DISABLE_LOST_MODE"}'
 ```
 
+### 查詢遺失模式狀態
+
+`GET /api/devices/:id` 回應中包含 `lostMode` 物件：
+
+```bash
+curl -s http://localhost:3000/api/devices/1 | jq .lostMode
+```
+
+回應：
+
+```json
+{
+  "enabled": true,
+  "enforced": false,
+  "message": "此裝置已被管理員鎖定",
+  "phone": "010-12345678",
+  "footnote": "請聯繫管理員解鎖",
+  "enabledAt": null,
+  "location": null
+}
+```
+
+**實作重點**：
+
+- Jamf v2 detail endpoint（`/api/v2/mobile-devices/:id/detail`）**不回傳 lost mode 欄位**。此狀態必須走 Classic API `/JSSResource/mobiledevices/id/:id` 的 `mobile_device.security` 區塊取得。我方 route 會**並行**打這兩個 endpoint。
+- 發送 `ENABLE_LOST_MODE` 後約 **10 秒內** Classic API 的 `lost_mode_enabled` 會從 `"false"` 變 `"true"`，訊息、電話、備註與下發時一致。
+- **`enabledAt` 目前常為 null**：Jamf Pro 11.25 實測即使 `enabled=true`，`lost_mode_enable_issued_epoch` 與 `lost_mode_enable_issued_utc` 都不被填入。程式碼保留解析邏輯以便未來 Jamf 版本補齊後自動啟用。
+- `location` 在裝置未實際遺失、座標為 (0, 0) 或 `accuracy = -1` 等哨兵值時統一回傳 null。
+
 ## 單 App 模式（App Lock）配置
 
 ### 前提條件

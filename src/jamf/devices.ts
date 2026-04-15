@@ -6,6 +6,8 @@ import type {
   MobileDeviceDetail,
   MobileDeviceSummary,
   CommandPayload,
+  ClassicMobileDeviceSecurity,
+  JamfLostModeStatus,
 } from "./types.ts";
 
 export class DeviceService {
@@ -28,6 +30,17 @@ export class DeviceService {
     return this.client.get<MobileDeviceDetail>(
       `/api/v2/mobile-devices/${id}/detail`
     );
+  }
+
+  /**
+   * 取得 Lost Mode 狀態（Classic API）
+   * Jamf v2 detail endpoint 不回傳 lost mode 欄位，必須走 Classic
+   */
+  async getLostModeStatus(id: string): Promise<JamfLostModeStatus> {
+    const resp = await this.client.get<{
+      mobile_device: { security: ClassicMobileDeviceSecurity };
+    }>(`/JSSResource/mobiledevices/id/${id}`);
+    return normalizeLostMode(resp.mobile_device.security);
   }
 
   /** 透過序列號查詢裝置 */
@@ -126,3 +139,51 @@ export class DeviceService {
 }
 
 export type { MobileDeviceListResponse, MobileDeviceDetail, MobileDeviceSummary };
+
+/** Classic API 的 security 區塊映射成對外格式 */
+function normalizeLostMode(
+  sec: ClassicMobileDeviceSecurity
+): JamfLostModeStatus {
+  // lost_mode_enabled 在 Classic API 是字串 "true" / "false"
+  const enabled =
+    typeof sec.lost_mode_enabled === "boolean"
+      ? sec.lost_mode_enabled
+      : sec.lost_mode_enabled === "true";
+
+  // 座標 (0,0) 或 timestamp=0 視為未回報位置
+  const hasLocation =
+    sec.lost_location_epoch > 0 &&
+    !(sec.lost_location_latitude === 0 && sec.lost_location_longitude === 0);
+
+  const nullIfNegative = (n: number): number | null => (n < 0 ? null : n);
+
+  return {
+    enabled,
+    enforced: Boolean(sec.lost_mode_enforced),
+    message: sec.lost_mode_message || null,
+    phone: sec.lost_mode_phone || null,
+    footnote: sec.lost_mode_footnote || null,
+    // 實測 Jamf Pro 11.25 即使 enabled=true 也不填 issued_epoch/issued_utc，多為 null
+    // 仍保留邏輯：若未來版本開始回填就能自動用上
+    enabledAt:
+      sec.lost_mode_enable_issued_epoch > 0
+        ? new Date(sec.lost_mode_enable_issued_epoch).toISOString()
+        : sec.lost_mode_enable_issued_utc || null,
+    location: hasLocation
+      ? {
+          latitude: sec.lost_location_latitude,
+          longitude: sec.lost_location_longitude,
+          altitude: nullIfNegative(sec.lost_location_altitude),
+          speed: nullIfNegative(sec.lost_location_speed),
+          course: nullIfNegative(sec.lost_location_course),
+          horizontalAccuracy: nullIfNegative(
+            sec.lost_location_horizontal_accuracy
+          ),
+          verticalAccuracy: nullIfNegative(
+            sec.lost_location_vertical_accuracy
+          ),
+          timestamp: sec.lost_location_utc || null,
+        }
+      : null,
+  };
+}
