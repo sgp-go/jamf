@@ -200,20 +200,24 @@ curl -X POST https://<your-ngrok-url>/api/mdm/dep/token \
 
 ADE 描述檔定義了裝置在 Setup Assistant 中的行為（跳過哪些步驟、是否 supervised 等）。
 
+若不帶 `skip_setup_items`，伺服器會套用內建的完整預設清單（Apple 官方 SkipKeys 近乎完整子集，共 35 項，**保留** `WiFi` 與 `Passcode`）。實機驗證結果（iPad 9th Gen）：裝置僅會看到 **語言 → 地區 → Wi-Fi → 「遠端管理」→ 設密碼 → 桌面**，不再出現 Welcome、TapToSetup、Appearance、TrueTone、Keyboard、Accessibility、Privacy、Apple ID、Siri、Touch ID、Terms 等約 25 頁。
+
 ```bash
+# 採用內建預設（最精簡 Setup Assistant 體驗）
 curl -X POST https://<your-ngrok-url>/api/mdm/dep/profile \
   -H "Content-Type: application/json" \
   -d '{
-    "profile_name": "Self-Hosted MDM Auto Enrollment",
     "is_supervised": true,
     "is_mdm_removable": false,
     "support_phone_number": "your-phone",
-    "support_email_address": "admin@example.com",
-    "skip_setup_items": [
-      "Location", "Restore", "AppleID", "Terms",
-      "Siri", "Diagnostics", "Biometric", "Payment",
-      "ScreenTime", "SoftwareUpdate"
-    ]
+    "support_email_address": "admin@example.com"
+  }'
+
+# 或自訂 skip 清單（覆蓋預設）
+curl -X POST https://<your-ngrok-url>/api/mdm/dep/profile \
+  -H "Content-Type: application/json" \
+  -d '{
+    "skip_setup_items": ["Location", "Restore", "AppleID"]
   }'
 ```
 
@@ -228,6 +232,27 @@ curl -X POST https://<your-ngrok-url>/api/mdm/dep/profile \
 ```
 
 **記下 `profile_uuid`**，後續分配裝置時需要。
+
+> **升級既有 profile 的方法**：Apple DEP 後台已上傳的 profile 不會隨代碼預設值自動更新。若要套用新 skip 清單，重新呼叫 `POST /api/mdm/dep/profile` 建立新版本（取得新 `profile_uuid`），再呼叫 `POST /api/mdm/dep/assign` 重新分配給裝置。已完成 Setup Assistant 的裝置需抹掉重進才會生效。
+>
+> 實測流程範例（已驗證通過）：
+>
+> ```bash
+> # 1. 重建 profile（body 傳空物件以採用內建預設）
+> curl -X POST $BASE/dep/profile -H 'Content-Type: application/json' -d '{}'
+> # → { "profile_uuid": "21ED45...4154" }
+>
+> # 2. 查 DEP 裝置序號
+> curl -s $BASE/dep/devices
+>
+> # 3. 將新 profile 分配給目標裝置
+> curl -X POST $BASE/dep/assign -H 'Content-Type: application/json' \
+>   -d '{"profileUuid":"21ED45...4154","serialNumbers":["JHNWY39N9M"]}'
+> # → { "devices": { "JHNWY39N9M": "SUCCESS" } }
+>
+> # 4. 在 iPad 上抹掉（設定 → 一般 → 傳送或重置 iPad → 清除所有內容和設定）
+> # 5. 重進 Setup Assistant 後 skip 清單自動套用
+> ```
 
 ### 步驟 5：驗證前置作業完成
 
@@ -321,15 +346,18 @@ curl -X POST https://<your-ngrok-url>/api/devices/<jamf-device-id>/command \
 
 ### A-6. 裝置自動註冊
 
-裝置抹掉重啟後進入 Setup Assistant：
+裝置抹掉重啟後進入 Setup Assistant。採用內建預設 skip 清單時的完整路徑（iPad 9th Gen 實測）：
 
-1. 選擇語言和地區
-2. 連線 Wi-Fi
-3. 裝置自動從 Apple 取得 ADE 描述檔
-4. 出現 **「遠端管理」** 提示，顯示由你的組織管理
-5. 按提示繼續完成設定
+1. 選擇語言
+2. 選擇地區
+3. 連線 Wi-Fi
+4. 裝置自動從 Apple 取得 ADE 描述檔
+5. 出現 **「遠端管理」** 提示，顯示由你的組織管理 → 點繼續
 6. 裝置自動向自建 MDM 發送 Authenticate → TokenUpdate
-7. 註冊完成
+7. 設定裝置密碼（Passcode 頁面，按預設保留）
+8. 進入桌面，註冊完成
+
+其餘 ~25 頁（Welcome、TapToSetup、Appearance、TrueTone、Keyboard、Accessibility、Privacy、Apple ID、Siri、Touch ID、Terms 等）由 skip_setup_items 自動略過。
 
 ### A-7. 驗證註冊成功
 
@@ -426,14 +454,13 @@ curl -X POST https://<your-ngrok-url>/api/mdm/dep/assign \
 
 ### B-4. 在裝置上完成 Setup Assistant
 
-1. 確保 iPad 處於 **Setup Assistant**（Hello 介面）
-   - 如果已經設定過，需要先抹掉
-2. 選擇語言和地區
-3. **連線 Wi-Fi**
-4. iPad 自動從 ABM 取得 MDM 設定
-5. 出現 **「遠端管理」** 提示
-6. 按提示完成設定
-7. 裝置自動向自建 MDM 註冊
+採用內建預設 skip 清單時的完整路徑（參考 A-6）：
+
+1. 確保 iPad 處於 **Setup Assistant**（Hello 介面）—— 已設定過需先抹掉
+2. 選擇語言 → 選擇地區 → 連線 Wi-Fi
+3. 出現 **「遠端管理」** → 點繼續
+4. 設定裝置密碼
+5. 進入桌面，註冊完成
 
 ### B-5. 驗證
 
@@ -483,9 +510,68 @@ curl -X POST $BASE/devices/<udid>/command \
   -H "Content-Type: application/json" \
   -d '{ "commandType": "RestartDevice" }'
 
+# 啟用 Lost Mode（Message / PhoneNumber / Footnote 至少給一項）
+curl -X POST $BASE/devices/<udid>/command \
+  -H "Content-Type: application/json" \
+  -d '{ "commandType": "EnableLostMode",
+        "params": { "Message": "請聯繫失主", "PhoneNumber": "0912345678" } }'
+
+# 停用 Lost Mode
+curl -X POST $BASE/devices/<udid>/command \
+  -H "Content-Type: application/json" \
+  -d '{ "commandType": "DisableLostMode" }'
+
+# 查詢 Lost Mode 狀態（list 與 detail 都會附 lostMode 物件）
+curl -s $BASE/devices/<udid> | jq .lostMode
+# → { "enabled": true, "message": "...", "phone": "...", "footnote": "...", "enabledAt": "2026-..." }
+#
+# 實作說明：
+# - 狀態由伺服器在裝置 ack EnableLostMode / DisableLostMode 命令時自動簿記
+#   （對應 src/mdm/command.ts 的 applyLostModeBookkeeping）
+# - enabledAt 是本地伺服器記錄的時間，不是裝置回報的時間
+# - 與 Jamf 路徑不同：Jamf 需額外呼叫 Classic API 才能拿到狀態，
+#   自建 MDM 直接從 mdm_devices 表的 lost_mode_* 欄位讀取
+
+# 啟用單 App 模式（App Lock）
+curl -X POST $BASE/devices/<udid>/app-lock \
+  -H "Content-Type: application/json" \
+  -d '{ "bundleId": "com.apple.mobilesafari",
+        "options": { "disableAutoLock": true } }'
+
+# 停用單 App 模式
+curl -X DELETE $BASE/devices/<udid>/app-lock
+
+# 派送 App（iTunesStoreID / ManifestURL / Identifier 擇一）
+curl -X POST $BASE/devices/<udid>/command \
+  -H "Content-Type: application/json" \
+  -d '{ "commandType": "InstallApplication",
+        "params": { "iTunesStoreID": 1234567890, "ManagementFlags": 4 } }'
+
+# 移除派送的 App
+curl -X POST $BASE/devices/<udid>/command \
+  -H "Content-Type: application/json" \
+  -d '{ "commandType": "RemoveApplication",
+        "params": { "Identifier": "com.example.app" } }'
+
 # 排入命令後，推播喚醒裝置執行
 curl -X POST $BASE/devices/<udid>/push
 ```
+
+### 批次下發同一命令到多台裝置
+
+透過長連線 HTTP/2 multiplexing 併發推播，N 台裝置 ~ 秒級完成：
+
+```bash
+curl -X POST $BASE/commands/bulk \
+  -H "Content-Type: application/json" \
+  -d '{
+    "udids": ["UDID-1", "UDID-2", "UDID-3"],
+    "commandType": "DeviceLock",
+    "params": { "Message": "統一鎖定" }
+  }'
+```
+
+回應會回報 `enqueued`、`pushed`、`failed` 與每台 `commandUuid`；部分失敗（未註冊、缺 push token）會列入 `failed` 但不 rollback 已入隊的命令。
 
 ---
 
@@ -549,9 +635,12 @@ curl -X POST $BASE/devices/<udid>/push
 |------|------|------|
 | `/api/mdm/devices` | GET | 列出所有 MDM 註冊裝置 |
 | `/api/mdm/devices/:udid` | GET | 取得裝置詳情 |
-| `/api/mdm/devices/:udid/command` | POST | 排入 MDM 命令 |
+| `/api/mdm/devices/:udid/command` | POST | 排入 MDM 命令（含 Lost Mode / App 派送） |
 | `/api/mdm/devices/:udid/commands` | GET | 查詢命令歷史 |
 | `/api/mdm/devices/:udid/push` | POST | APNS 推播喚醒裝置 |
+| `/api/mdm/devices/:udid/app-lock` | POST | 啟用單 App 模式（動態 profile + InstallProfile） |
+| `/api/mdm/devices/:udid/app-lock` | DELETE | 停用單 App 模式 |
+| `/api/mdm/commands/bulk` | POST | 批次下發同一命令到多台裝置（併發 APNS 推播） |
 
 ### 遷移
 
