@@ -7,6 +7,7 @@ import { logger } from "@hono/hono/logger";
 import devices from "./routes/devices.ts";
 import agent from "./routes/agent.ts";
 import mdm from "./routes/mdm.ts";
+import windowsMdm from "./routes/windows-mdm.ts";
 
 const app = new Hono();
 
@@ -33,6 +34,16 @@ app.get("/", (c) =>
       mdmDevices: "/api/mdm/devices",
       mdmDepDevices: "/api/mdm/dep/devices",
       mdmMigration: "/api/mdm/migration/status",
+      // Windows MDM
+      winDiscovery: "/EnrollmentServer/Discovery.svc",
+      winPolicy: "/EnrollmentServer/Policy.svc",
+      winEnrollment: "/EnrollmentServer/Enrollment.svc",
+      winManage: "/api/mdm/win/manage/:deviceId",
+      winDevices: "/api/mdm/win/devices",
+      winWipe: "/api/mdm/win/devices/:udid/wipe",
+      winApps: "/api/mdm/win/devices/:udid/apps",
+      winAppInstall: "/api/mdm/win/devices/:udid/apps/install",
+      winAppRefresh: "/api/mdm/win/devices/:udid/apps/refresh",
     },
   })
 );
@@ -41,6 +52,8 @@ app.get("/", (c) =>
 app.route("/api/devices", devices);
 app.route("/api/agent", agent);
 app.route("/api/mdm", mdm);
+// Windows MDM 內含跨前綴端點（/EnrollmentServer/* 與 /api/mdm/win/*），掛在 root
+app.route("/", windowsMdm);
 
 // 404
 app.notFound((c) => c.json({ error: "Not Found" }, 404));

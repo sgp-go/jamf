@@ -94,6 +94,9 @@ export type MdmCommandType =
   | "InstallApplication"
   | "RemoveApplication";
 
+/** SyncML 動詞（Windows MDM 命令類別） */
+export type SyncMLVerb = "Add" | "Replace" | "Exec" | "Get" | "Delete";
+
 /** 命令佇列資料庫記錄 */
 export interface MdmCommandRow {
   id: number;
@@ -107,6 +110,23 @@ export interface MdmCommandRow {
   queued_at: string;
   sent_at: string | null;
   responded_at: string | null;
+  // 平台分流；Apple 沿用 request_payload (plist)，Windows 用 csp_path/syncml_*
+  platform: MdmPlatform;
+  csp_path: string | null;
+  syncml_verb: SyncMLVerb | null;
+  syncml_data: string | null;
+  session_msg_id: string | null;
+}
+
+/** Windows MDM 應用清單記錄 */
+export interface MdmWindowsAppRow {
+  id: number;
+  device_udid: string;
+  package_family_name: string;
+  display_name: string | null;
+  version: string | null;
+  install_state: string | null;
+  last_synced_at: string;
 }
 
 /** 伺服器回傳給裝置的命令結構 */
@@ -128,6 +148,9 @@ export type EnrollmentStatus =
   | "authenticated"
   | "enrolled"
   | "unenrolled";
+
+/** 平台類別 */
+export type MdmPlatform = "apple" | "windows";
 
 /** MDM 裝置資料庫記錄 */
 export interface MdmDeviceRow {
@@ -151,6 +174,13 @@ export interface MdmDeviceRow {
   lost_mode_phone: string | null;
   lost_mode_footnote: string | null;
   lost_mode_enabled_at: string | null;
+  // 平台與 Windows 專屬欄位（Apple 裝置 platform='apple'，其餘欄位為 NULL）
+  platform: MdmPlatform;
+  windows_device_id: string | null;
+  windows_hardware_id: string | null;
+  wns_channel_uri: string | null;
+  wns_channel_expiry: number | null;
+  management_session_state: string | null;
   created_at: string;
   updated_at: string;
 }

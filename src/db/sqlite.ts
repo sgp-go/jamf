@@ -172,21 +172,57 @@ function initSchema() {
     );
   `);
 
-  // ---- Migration: 舊表補 lost mode 欄位（SQLite 沒有 ADD COLUMN IF NOT EXISTS） ----
-  const lostModeAlters = [
+  // ---- Migration: 舊表補欄位（SQLite 沒有 ADD COLUMN IF NOT EXISTS） ----
+  const alters = [
+    // Lost Mode（先前已加）
     "ALTER TABLE mdm_devices ADD COLUMN lost_mode_enabled INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE mdm_devices ADD COLUMN lost_mode_message TEXT",
     "ALTER TABLE mdm_devices ADD COLUMN lost_mode_phone TEXT",
     "ALTER TABLE mdm_devices ADD COLUMN lost_mode_footnote TEXT",
     "ALTER TABLE mdm_devices ADD COLUMN lost_mode_enabled_at TEXT",
+    // 平台抽象（Apple / Windows）
+    "ALTER TABLE mdm_devices ADD COLUMN platform TEXT NOT NULL DEFAULT 'apple'",
+    "ALTER TABLE mdm_devices ADD COLUMN windows_device_id TEXT",
+    "ALTER TABLE mdm_devices ADD COLUMN windows_hardware_id TEXT",
+    "ALTER TABLE mdm_devices ADD COLUMN wns_channel_uri TEXT",
+    "ALTER TABLE mdm_devices ADD COLUMN wns_channel_expiry INTEGER",
+    "ALTER TABLE mdm_devices ADD COLUMN management_session_state TEXT",
+    "ALTER TABLE mdm_commands ADD COLUMN platform TEXT NOT NULL DEFAULT 'apple'",
+    "ALTER TABLE mdm_commands ADD COLUMN csp_path TEXT",
+    "ALTER TABLE mdm_commands ADD COLUMN syncml_verb TEXT",
+    "ALTER TABLE mdm_commands ADD COLUMN syncml_data TEXT",
+    "ALTER TABLE mdm_commands ADD COLUMN session_msg_id TEXT",
   ];
-  for (const sql of lostModeAlters) {
+  for (const sql of alters) {
     try {
       db.exec(sql);
     } catch {
       // 欄位已存在
     }
   }
+
+  // 平台索引：方便 listMdmDevicesByPlatform / Windows DeviceID lookup
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_mdm_devices_platform ON mdm_devices(platform);
+    CREATE INDEX IF NOT EXISTS idx_mdm_commands_platform ON mdm_commands(platform);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_mdm_devices_win_device_id
+      ON mdm_devices(windows_device_id)
+      WHERE windows_device_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS mdm_windows_apps (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      device_udid TEXT NOT NULL,
+      package_family_name TEXT NOT NULL,
+      display_name TEXT,
+      version TEXT,
+      install_state TEXT,
+      last_synced_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(device_udid, package_family_name),
+      FOREIGN KEY (device_udid) REFERENCES mdm_devices(udid)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mdm_windows_apps_device
+      ON mdm_windows_apps(device_udid);
+  `);
 }
 
 // Agent 回報的狀態資料
@@ -399,6 +435,13 @@ export function upsertMdmDevice(
     lostModePhone: string | null;
     lostModeFootnote: string | null;
     lostModeEnabledAt: string | null;
+    // 平台與 Windows 專屬欄位
+    platform: "apple" | "windows";
+    windowsDeviceId: string | null;
+    windowsHardwareId: string | null;
+    wnsChannelUri: string | null;
+    wnsChannelExpiry: number | null;
+    managementSessionState: string | null;
   }>
 ): void {
   const db = getDb();
@@ -473,6 +516,32 @@ export function upsertMdmDevice(
       sets.push("lost_mode_enabled_at = ?");
       params.push(fields.lostModeEnabledAt);
     }
+    if (fields.platform !== undefined) {
+      sets.push("platform = ?");
+      params.push(fields.platform);
+    }
+    if (fields.windowsDeviceId !== undefined) {
+      sets.push("windows_device_id = ?");
+      params.push(fields.windowsDeviceId);
+    }
+    if (fields.windowsHardwareId !== undefined) {
+      sets.push("windows_hardware_id = ?");
+      params.push(fields.windowsHardwareId);
+    }
+    if (fields.wnsChannelUri !== undefined) {
+      sets.push("wns_channel_uri = ?");
+      params.push(fields.wnsChannelUri);
+    }
+    if (fields.wnsChannelExpiry !== undefined) {
+      sets.push("wns_channel_expiry = ?");
+      params.push(
+        fields.wnsChannelExpiry === null ? null : String(fields.wnsChannelExpiry)
+      );
+    }
+    if (fields.managementSessionState !== undefined) {
+      sets.push("management_session_state = ?");
+      params.push(fields.managementSessionState);
+    }
 
     sets.push("last_seen_at = ?");
     params.push(now);
@@ -487,8 +556,10 @@ export function upsertMdmDevice(
         udid, serial_number, device_name, model, os_version,
         push_token, push_magic, unlock_token, topic,
         enrollment_status, enrollment_type, last_seen_at,
+        platform, windows_device_id, windows_hardware_id,
+        wns_channel_uri, wns_channel_expiry, management_session_state,
         enrolled_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       udid,
       fields.serialNumber ?? null,
@@ -502,6 +573,14 @@ export function upsertMdmDevice(
       fields.enrollmentStatus ?? "pending",
       fields.enrollmentType ?? "dep",
       now,
+      fields.platform ?? "apple",
+      fields.windowsDeviceId ?? null,
+      fields.windowsHardwareId ?? null,
+      fields.wnsChannelUri ?? null,
+      fields.wnsChannelExpiry === null || fields.wnsChannelExpiry === undefined
+        ? null
+        : String(fields.wnsChannelExpiry),
+      fields.managementSessionState ?? null,
       now,
       now,
       now
@@ -523,7 +602,27 @@ export function listMdmDevices(): MdmDeviceRow[] {
     .all() as MdmDeviceRow[];
 }
 
-/** 排入 MDM 命令 */
+/** 依平台列出 MDM 裝置 */
+export function listMdmDevicesByPlatform(
+  platform: "apple" | "windows"
+): MdmDeviceRow[] {
+  return getDb()
+    .prepare(
+      "SELECT * FROM mdm_devices WHERE platform = ? ORDER BY updated_at DESC"
+    )
+    .all(platform) as MdmDeviceRow[];
+}
+
+/** 以 Windows DeviceID 取得裝置 */
+export function getMdmDeviceByWindowsId(
+  windowsDeviceId: string
+): MdmDeviceRow | undefined {
+  return getDb()
+    .prepare("SELECT * FROM mdm_devices WHERE windows_device_id = ?")
+    .get(windowsDeviceId) as MdmDeviceRow | undefined;
+}
+
+/** 排入 MDM 命令（Apple plist 路徑） */
 export function queueMdmCommand(
   commandUuid: string,
   deviceUdid: string,
@@ -532,9 +631,35 @@ export function queueMdmCommand(
 ): number {
   const db = getDb();
   db.prepare(
-    `INSERT INTO mdm_commands (command_uuid, device_udid, command_type, request_payload)
-     VALUES (?, ?, ?, ?)`
+    `INSERT INTO mdm_commands (command_uuid, device_udid, command_type, request_payload, platform)
+     VALUES (?, ?, ?, ?, 'apple')`
   ).run(commandUuid, deviceUdid, commandType, requestPayload);
+  return db.lastInsertRowId;
+}
+
+/** 排入 Windows MDM 命令（CSP / SyncML 路徑） */
+export function queueWindowsCommand(
+  commandUuid: string,
+  deviceUdid: string,
+  commandType: string,
+  cspPath: string,
+  syncmlVerb: "Add" | "Replace" | "Exec" | "Get" | "Delete",
+  syncmlData?: string | null
+): number {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO mdm_commands (
+      command_uuid, device_udid, command_type, request_payload,
+      platform, csp_path, syncml_verb, syncml_data
+    ) VALUES (?, ?, ?, '', 'windows', ?, ?, ?)`
+  ).run(
+    commandUuid,
+    deviceUdid,
+    commandType,
+    cspPath,
+    syncmlVerb,
+    syncmlData ?? null
+  );
   return db.lastInsertRowId;
 }
 
@@ -570,14 +695,27 @@ export function queueMdmCommandsBatch(
   }
 }
 
-/** 取得裝置下一筆待執行命令 */
+/** 取得裝置下一筆待執行命令（Apple 路徑） */
 export function getNextQueuedCommand(
   deviceUdid: string
 ): MdmCommandRow | undefined {
   return getDb()
     .prepare(
       `SELECT * FROM mdm_commands
-       WHERE device_udid = ? AND status = 'queued'
+       WHERE device_udid = ? AND status = 'queued' AND platform = 'apple'
+       ORDER BY queued_at ASC LIMIT 1`
+    )
+    .get(deviceUdid) as MdmCommandRow | undefined;
+}
+
+/** 取得 Windows 裝置下一筆待執行命令 */
+export function getNextQueuedWindowsCommand(
+  deviceUdid: string
+): MdmCommandRow | undefined {
+  return getDb()
+    .prepare(
+      `SELECT * FROM mdm_commands
+       WHERE device_udid = ? AND status = 'queued' AND platform = 'windows'
        ORDER BY queued_at ASC LIMIT 1`
     )
     .get(deviceUdid) as MdmCommandRow | undefined;

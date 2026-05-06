@@ -137,6 +137,70 @@ export function getCACertDerBase64(): string {
   return forge.util.encode64(derBytes);
 }
 
+/** 取得 CA 憑證的 DER bytes（給 .ppkg 嵌入用） */
+export function getCaRootDer(): Uint8Array {
+  const ca = getOrCreateCA();
+  const derBytes = forge.asn1.toDer(forge.pki.certificateToAsn1(ca.cert)).getBytes();
+  return Uint8Array.from(derBytes, (c: string) => c.charCodeAt(0));
+}
+
+/**
+ * 簽發 Windows 裝置憑證（MS-MDE2 Enrollment.svc 流程）
+ *
+ * 設備在 OOBE 中送來 PKCS#10 CSR PEM，後端用 CA 簽發回傳憑證 PEM。
+ * 設備之後用此憑證做 mTLS 認證連管理通道，CN 為 Windows DeviceID。
+ *
+ * @param csrPem - 設備發來的 CSR PEM
+ * @param deviceId - Windows DeviceID（GUID 格式），用作 CN
+ * @returns 簽好的憑證 PEM
+ */
+export function signWindowsDeviceCsr(csrPem: string, deviceId: string): string {
+  const csr = forge.pki.certificationRequestFromPem(csrPem);
+
+  // 驗證 CSR self-signature（確保設備擁有對應的私鑰）
+  if (!csr.verify()) {
+    throw new Error("CSR self-signature 驗證失敗");
+  }
+  if (!csr.publicKey) {
+    throw new Error("CSR 未含 public key");
+  }
+
+  const ca = getOrCreateCA();
+  const cert = forge.pki.createCertificate();
+
+  cert.publicKey = csr.publicKey;
+  cert.serialNumber = generateSerialNumber();
+  cert.validity.notBefore = new Date();
+  cert.validity.notAfter = new Date();
+  // Windows MDM 設備憑證一年期自動續訂
+  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
+
+  cert.setSubject([
+    { name: "commonName", value: deviceId },
+    { name: "organizationName", value: "Aspira" },
+  ]);
+  cert.setIssuer(ca.cert.subject.attributes);
+
+  cert.setExtensions([
+    {
+      name: "keyUsage",
+      digitalSignature: true,
+      keyEncipherment: true,
+      critical: true,
+    },
+    {
+      name: "extKeyUsage",
+      clientAuth: true,
+    },
+    {
+      name: "subjectKeyIdentifier",
+    },
+  ]);
+
+  cert.sign(ca.key, forge.md.sha256.create());
+  return forge.pki.certificateToPem(cert);
+}
+
 // ============================================================
 // DEP Server Token 解密
 // ============================================================
