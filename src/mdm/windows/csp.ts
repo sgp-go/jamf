@@ -83,16 +83,71 @@ export function buildMsixInstall(params: MsixInstallParams): SyncMLCommand {
 }
 
 /**
- * 建立應用清單查詢命令（取所有已安裝包的 InstallState）
+ * AppInventoryQuery 條件參數（按 EnterpriseModernAppManagement CSP spec）
  *
- * 設備回應為 SyncML <Results>，每個 PFN 一筆 Item。
+ * 預設值對齊「應用列表＋詳細資料」最常見場景：取所有 Source、含詳細欄位、
+ * 排除 Framework / Resource 包。
  */
-export function buildAppInventoryQuery(): SyncMLCommand {
+export interface AppInventoryFilter {
+  /** Output 旗標（可組合，用 `|` 分隔），預設 PackageDetails */
+  output?: string;
+  /** Source（單選；省略=全部）：AppStore / nonStore / System */
+  source?: "AppStore" | "nonStore" | "System";
+  /** PackageTypeFilter（可組合 `|`），預設 Main|Bundle */
+  packageTypeFilter?: string;
+  /** 限定 PFN（精確匹配子串） */
+  packageFamilyName?: string;
+  /** 限定 Publisher */
+  publisher?: string;
+}
+
+/**
+ * 設定 AppInventoryQuery 條件（步驟 1/2）
+ *
+ * 必須在 Get AppInventoryResults 前以 Replace 寫入 `<Inventory ... />` XML。
+ * 路徑必須含中間段 `AppManagement`（舊版本實作漏寫導致 device 回 400）。
+ */
+export function buildAppInventoryConfig(
+  filter: AppInventoryFilter = {}
+): SyncMLCommand {
+  const {
+    output = "PackageDetails",
+    source,
+    packageTypeFilter = "Main|Bundle",
+    packageFamilyName,
+    publisher,
+  } = filter;
+  const attrs: string[] = [`Output="${escapeAttr(output)}"`];
+  if (source) attrs.push(`Source="${escapeAttr(source)}"`);
+  if (packageTypeFilter) {
+    attrs.push(`PackageTypeFilter="${escapeAttr(packageTypeFilter)}"`);
+  }
+  if (packageFamilyName) {
+    attrs.push(`PackageFamilyName="${escapeAttr(packageFamilyName)}"`);
+  }
+  if (publisher) attrs.push(`Publisher="${escapeAttr(publisher)}"`);
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target:
+      "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/AppInventoryQuery",
+    format: "xml",
+    data: `<Inventory ${attrs.join(" ")} />`,
+  };
+}
+
+/**
+ * 拉取 AppInventoryResults（步驟 2/2）
+ *
+ * 設備回應為 SyncML <Results>，根據 Replace 設定的條件返回應用清單。
+ * 必須在 buildAppInventoryConfig 之後執行。
+ */
+export function buildAppInventoryFetch(): SyncMLCommand {
   return {
     cmdId: "0",
     verb: "Get",
     target:
-      "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInventoryResults?Filter=Output=Inventory",
+      "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/AppInventoryResults",
   };
 }
 

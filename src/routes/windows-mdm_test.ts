@@ -483,7 +483,10 @@ Deno.test("Inventory refresh API + 設備回 Results：寫入 mdm_windows_apps",
     })
   );
   const respXml = await r1.text();
+  // 兩段式：同一輪 SyncML 同時下發 Replace AppInventoryQuery + Get AppInventoryResults
+  assert(respXml.includes("<Replace>"));
   assert(respXml.includes("<Get>"));
+  assert(respXml.includes("AppInventoryQuery"));
   assert(respXml.includes("AppInventoryResults"));
 
   // 模擬設備回 Results（escape 後的 inner XML）
@@ -497,6 +500,8 @@ Deno.test("Inventory refresh API + 設備回 Results：寫入 mdm_windows_apps",
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+  // server response cmdId 分配：1=SyncHdr Status, 2=Replace, 3=Get
+  // 設備需對 cmdRef=2 (Replace) 和 cmdRef=3 (Get) 各回一條 Status，並把 Results 對齊 cmdRef=3
   const sync2 = `<SyncML xmlns="SYNCML:SYNCML1.2">
   <SyncHdr>
     <SessionID>1</SessionID><MsgID>2</MsgID>
@@ -505,13 +510,14 @@ Deno.test("Inventory refresh API + 設備回 Results：寫入 mdm_windows_apps",
   </SyncHdr>
   <SyncBody>
     <Status><CmdID>1</CmdID><MsgRef>1</MsgRef><CmdRef>0</CmdRef><Cmd>SyncHdr</Cmd><Data>200</Data></Status>
-    <Status><CmdID>2</CmdID><MsgRef>1</MsgRef><CmdRef>2</CmdRef><Cmd>Get</Cmd><Data>200</Data></Status>
+    <Status><CmdID>2</CmdID><MsgRef>1</MsgRef><CmdRef>2</CmdRef><Cmd>Replace</Cmd><Data>200</Data></Status>
+    <Status><CmdID>3</CmdID><MsgRef>1</MsgRef><CmdRef>3</CmdRef><Cmd>Get</Cmd><Data>200</Data></Status>
     <Results>
-      <CmdID>3</CmdID>
+      <CmdID>4</CmdID>
       <MsgRef>1</MsgRef>
-      <CmdRef>2</CmdRef>
+      <CmdRef>3</CmdRef>
       <Item>
-        <Source><LocURI>./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInventoryResults?Filter=Output=Inventory</LocURI></Source>
+        <Source><LocURI>./User/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/AppInventoryResults</LocURI></Source>
         <Meta><Format xmlns="syncml:metinf">chr</Format></Meta>
         <Data>${escaped}</Data>
       </Item>

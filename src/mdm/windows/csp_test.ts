@@ -2,7 +2,8 @@ import { assertEquals } from "jsr:@std/assert@^1";
 import {
   buildRemoteWipe,
   buildMsixInstall,
-  buildAppInventoryQuery,
+  buildAppInventoryConfig,
+  buildAppInventoryFetch,
   buildMsixUninstall,
 } from "./csp.ts";
 
@@ -75,12 +76,43 @@ Deno.test("buildMsixInstall: ContentURL 中 & 字元被 escape", () => {
   assertEquals(data.includes("&b=2"), false);
 });
 
-Deno.test("buildAppInventoryQuery: Get 路徑", () => {
-  const cmd = buildAppInventoryQuery();
+Deno.test("buildAppInventoryConfig: 預設 Output=PackageDetails、PackageTypeFilter=Main|Bundle", () => {
+  const cmd = buildAppInventoryConfig();
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/AppInventoryQuery"
+  );
+  assertEquals(cmd.format, "xml");
+  // Inventory XML 屬性檢查
+  const data = cmd.data ?? "";
+  assertEquals(data.includes('Output="PackageDetails"'), true);
+  assertEquals(data.includes('PackageTypeFilter="Main|Bundle"'), true);
+  // 未指定 Source / Publisher 時不應出現
+  assertEquals(data.includes("Source="), false);
+  assertEquals(data.includes("Publisher="), false);
+});
+
+Deno.test("buildAppInventoryConfig: Source / Publisher / 自訂 Output", () => {
+  const cmd = buildAppInventoryConfig({
+    output: "PackageNames|RequiresReinstall",
+    source: "nonStore",
+    packageTypeFilter: "Main",
+    publisher: "CN=Aspira",
+  });
+  const data = cmd.data ?? "";
+  assertEquals(data.includes('Output="PackageNames|RequiresReinstall"'), true);
+  assertEquals(data.includes('Source="nonStore"'), true);
+  assertEquals(data.includes('PackageTypeFilter="Main"'), true);
+  assertEquals(data.includes('Publisher="CN=Aspira"'), true);
+});
+
+Deno.test("buildAppInventoryFetch: Get AppManagement/AppInventoryResults", () => {
+  const cmd = buildAppInventoryFetch();
   assertEquals(cmd.verb, "Get");
   assertEquals(
     cmd.target,
-    "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInventoryResults?Filter=Output=Inventory"
+    "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/AppInventoryResults"
   );
 });
 

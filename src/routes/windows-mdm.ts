@@ -23,7 +23,8 @@ import {
   buildRemoteWipe,
   buildMsixInstall,
   buildMsixUninstall,
-  buildAppInventoryQuery,
+  buildAppInventoryConfig,
+  buildAppInventoryFetch,
   type WipeAction,
 } from "../mdm/windows/csp.ts";
 import {
@@ -243,23 +244,30 @@ w.get("/api/mdm/win/devices/:udid/apps", (c) => {
   return c.json({ apps });
 });
 
-/** POST /api/mdm/win/devices/:udid/apps/refresh — 排入 inventory 查詢 */
+/** POST /api/mdm/win/devices/:udid/apps/refresh — 排入 inventory 查詢（兩段式） */
 w.post("/api/mdm/win/devices/:udid/apps/refresh", (c) => {
   const udid = c.req.param("udid");
   const device = getMdmDevice(udid);
   if (!device || device.platform !== "windows") {
     return c.json({ error: "device not found" }, 404);
   }
-  const cmd = buildAppInventoryQuery();
-  const commandUuid = enqueueWindowsCommand({
+  // EnterpriseModernAppManagement CSP spec：必須先 Replace AppInventoryQuery 設條件
+  // 再 Get AppInventoryResults。MAX_COMMANDS_PER_RESPONSE>=2 保證同一輪 SyncML 同時下發。
+  const configUuid = enqueueWindowsCommand({
     deviceUdid: udid,
-    commandType: "AppInventoryQuery",
-    command: cmd,
+    commandType: "AppInventoryConfig",
+    command: buildAppInventoryConfig(),
+  });
+  const fetchUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "AppInventoryFetch",
+    command: buildAppInventoryFetch(),
   });
   return c.json({
-    commandUuid,
+    configUuid,
+    fetchUuid,
     note:
-      "Inventory query queued. Device will report apps on next poll (1-60 min).",
+      "Inventory query queued (Replace+Get). Device will report apps on next poll (1-60 min).",
   });
 });
 
