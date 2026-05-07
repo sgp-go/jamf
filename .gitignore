@@ -5,7 +5,15 @@ env.*
 __pycache__/
 *.pyc
 .DS_Store
-data/
+data/*
+# 例外：data/test/ 的 demo MSIX 產物 + cert 公鑰允許 commit（接手即用，詳見 data/test/README.md）
+!data/test/
+data/test/*.db
+data/test/*.pfx
+data/test/.tmp/
+data/test/tmp-*
+data/test/*.log
+
 certs/
 buildServer.json
 /tmp/**

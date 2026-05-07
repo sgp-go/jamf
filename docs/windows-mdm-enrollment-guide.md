@@ -82,8 +82,15 @@ curl -s https://<your-host>/EnrollmentServer/Discovery.svc
    https://<your-host>/EnrollmentServer/Discovery.svc
    ```
 
-9. 點**下一步** → 後端三步協商
-10. 成功後返回「存取公司或學校資源」頁，看到一個**已連接的 MDM 條目**，名稱形如 `Aspira-<deviceId-prefix> MDM`
+9. 點**下一步** → Discovery 完成後彈出 **WS-Trust 認證對話框**「設定公司或學校帳戶」，要求填：
+   - **網域\使用者名稱**（可省略，或隨便填如 `jay`）
+   - **密碼**（隨便填如 `1234`）
+
+   ⚠️ 後端**不驗證** username/password（OnPremise AuthPolicy 開發環境），任意值都能通過。生產環境若改用 Federated 或 Certificate auth，這一步會走 IdP 真實校驗。
+
+10. 點**下一步** → 後端 Policy + Enrollment 兩步協商完成
+11. 看到「正在設定您的裝置」進度頁，等幾秒後出現「您已完成」 → 點「了解」
+12. 返回「存取公司或學校資源」頁，看到一個**已連接的 MDM 條目**，名稱形如 `Aspira-<deviceId-prefix> MDM`
 
 ### 後端日誌應該看到
 
