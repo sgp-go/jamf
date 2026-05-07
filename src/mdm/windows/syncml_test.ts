@@ -121,7 +121,7 @@ Deno.test("parseSyncML: XML 特殊字元 unescape", () => {
 // ============================================================
 
 Deno.test("buildSyncML: 空回應只含 SyncHdr Status + Final", () => {
-  const xml = buildSyncML({
+  const result = buildSyncML({
     sessionId: "1",
     msgId: "1",
     deviceId: "WIN-DEV-001-GUID",
@@ -130,7 +130,7 @@ Deno.test("buildSyncML: 空回應只含 SyncHdr Status + Final", () => {
   });
 
   // 來回解析驗證結構
-  const parsed = parseSyncML(xml);
+  const parsed = parseSyncML(result.xml);
   assertEquals(parsed.header.sessionId, "1");
   assertEquals(parsed.header.msgId, "1");
   assertEquals(parsed.header.target, "WIN-DEV-001-GUID");
@@ -140,10 +140,15 @@ Deno.test("buildSyncML: 空回應只含 SyncHdr Status + Final", () => {
   assertEquals(parsed.statuses[0].data, "200");
   assertEquals(parsed.statuses[0].cmdId, "1");
   assertEquals(parsed.hasFinal, true);
+
+  // 元數據
+  assertEquals(result.hdrStatusCmdId, "1");
+  assertEquals(result.statusCmdIds, []);
+  assertEquals(result.commandCmdIds, []);
 });
 
 Deno.test("buildSyncML: 帶 Exec 命令", () => {
-  const xml = buildSyncML({
+  const result = buildSyncML({
     sessionId: "2",
     msgId: "1",
     deviceId: "DEV",
@@ -159,19 +164,23 @@ Deno.test("buildSyncML: 帶 Exec 命令", () => {
   });
 
   // 命令在 XML 中正確序列化
-  const hasExec = xml.includes("<Exec>");
-  const hasTarget = xml.includes("./Device/Vendor/MSFT/RemoteWipe/doWipe");
+  const hasExec = result.xml.includes("<Exec>");
+  const hasTarget = result.xml.includes(
+    "./Device/Vendor/MSFT/RemoteWipe/doWipe"
+  );
   assertEquals(hasExec, true);
   assertEquals(hasTarget, true);
 
   // CmdID 由 buildSyncML 自動分配（hdrStatus=1, exec=2）
-  const cmdIdMatch = xml.match(/<Exec>\s*<CmdID>(\d+)<\/CmdID>/);
+  const cmdIdMatch = result.xml.match(/<Exec>\s*<CmdID>(\d+)<\/CmdID>/);
   assertExists(cmdIdMatch);
   assertEquals(cmdIdMatch[1], "2");
+  // 元數據對齊 XML 中的真實值
+  assertEquals(result.commandCmdIds, ["2"]);
 });
 
 Deno.test("buildSyncML: 帶 Replace 命令含 Format/Data", () => {
-  const xml = buildSyncML({
+  const result = buildSyncML({
     sessionId: "3",
     msgId: "1",
     deviceId: "DEV",
@@ -188,17 +197,17 @@ Deno.test("buildSyncML: 帶 Replace 命令含 Format/Data", () => {
     ],
   });
 
-  assertEquals(xml.includes("<Replace>"), true);
-  assertEquals(xml.includes("<Data>1</Data>"), true);
+  assertEquals(result.xml.includes("<Replace>"), true);
+  assertEquals(result.xml.includes("<Data>1</Data>"), true);
   assertEquals(
-    xml.includes('<Format xmlns="syncml:metinf">int</Format>'),
+    result.xml.includes('<Format xmlns="syncml:metinf">int</Format>'),
     true
   );
 });
 
 Deno.test("buildSyncML: 特殊字元正確 escape（建好可被 parse 還原）", () => {
   const tricky = "https://x.com/path?a=1&b=2<test>";
-  const xml = buildSyncML({
+  const result = buildSyncML({
     sessionId: "1",
     msgId: "1",
     deviceId: "DEV",
@@ -206,15 +215,15 @@ Deno.test("buildSyncML: 特殊字元正確 escape（建好可被 parse 還原）
     hdrStatus: { msgRef: "1", data: "200" },
   });
   // XML 中應為 escape 後的字元
-  assertEquals(xml.includes("&amp;"), true);
-  assertEquals(xml.includes("&lt;test&gt;"), true);
+  assertEquals(result.xml.includes("&amp;"), true);
+  assertEquals(result.xml.includes("&lt;test&gt;"), true);
   // 解析後還原
-  const parsed = parseSyncML(xml);
+  const parsed = parseSyncML(result.xml);
   assertEquals(parsed.header.source, tricky);
 });
 
 Deno.test("buildSyncML: 多個 Status + 多個命令的 CmdID 連續分配", () => {
-  const xml = buildSyncML({
+  const result = buildSyncML({
     sessionId: "4",
     msgId: "2",
     deviceId: "DEV",
@@ -235,6 +244,44 @@ Deno.test("buildSyncML: 多個 Status + 多個命令的 CmdID 連續分配", () 
     ],
   });
   // CmdID 應為 1=SyncHdr Status, 2=Alert Status, 3=Get, 4=Exec
-  const ids = [...xml.matchAll(/<CmdID>(\d+)<\/CmdID>/g)].map((m) => m[1]);
+  const ids = [...result.xml.matchAll(/<CmdID>(\d+)<\/CmdID>/g)].map((m) => m[1]);
   assertEquals(ids, ["1", "2", "3", "4"]);
+  // 元數據與 XML 中順序對齊
+  assertEquals(result.hdrStatusCmdId, "1");
+  assertEquals(result.statusCmdIds, ["2"]);
+  assertEquals(result.commandCmdIds, ["3", "4"]);
+});
+
+Deno.test("buildSyncML: 元數據對齊 XML（多 status + 多 command 完整斷言）", () => {
+  // 模擬 command.ts 真實會用到的場景：給多條 inFlight 對映寫入元數據
+  const result = buildSyncML({
+    sessionId: "9",
+    msgId: "3",
+    deviceId: "DEV",
+    managementUrl: "https://mdm/m",
+    hdrStatus: { msgRef: "3", data: "200" },
+    statuses: [
+      { cmdId: "x", msgRef: "3", cmdRef: "5", cmd: "Alert", data: "200" },
+      { cmdId: "x", msgRef: "3", cmdRef: "7", cmd: "Replace", data: "200" },
+    ],
+    commands: [
+      { cmdId: "x", verb: "Get", target: "./A" },
+      { cmdId: "x", verb: "Exec", target: "./B" },
+      { cmdId: "x", verb: "Replace", target: "./C", data: "v" },
+    ],
+  });
+
+  // 從 XML 還原各 command 的真實 CmdID，驗證元數據準確
+  const parsed = parseSyncML(result.xml);
+  // hdrStatus 1 + 2 個業務 status = 3 條 status
+  assertEquals(parsed.statuses.length, 3);
+  assertEquals(parsed.statuses[1].cmdId, result.statusCmdIds[0]);
+  assertEquals(parsed.statuses[2].cmdId, result.statusCmdIds[1]);
+  // 從 XML 抓 Get/Exec/Replace 的 CmdID
+  const getId = result.xml.match(/<Get>\s*<CmdID>(\d+)<\/CmdID>/)?.[1];
+  const execId = result.xml.match(/<Exec>\s*<CmdID>(\d+)<\/CmdID>/)?.[1];
+  const replaceId = result.xml.match(/<Replace>\s*<CmdID>(\d+)<\/CmdID>/)?.[1];
+  assertEquals(getId, result.commandCmdIds[0]);
+  assertEquals(execId, result.commandCmdIds[1]);
+  assertEquals(replaceId, result.commandCmdIds[2]);
 });

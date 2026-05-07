@@ -123,43 +123,45 @@ export function handleSyncMLRequest(opts: {
     );
   }
 
-  // 4. 取下一筆待執行命令（最多一次發 1 筆，避免複雜化 inFlight）
-  const next = getNextQueuedWindowsCommand(device.udid);
-  const commands: SyncMLCommand[] = [];
-  if (next && next.csp_path && next.syncml_verb) {
-    commands.push({
-      cmdId: "0", // buildSyncML 會自動分配
-      verb: next.syncml_verb as SyncMLVerb,
-      target: next.csp_path,
-      data: next.syncml_data ?? undefined,
-      format: next.syncml_data ? "chr" : undefined,
+  // 4. 取待執行命令（一次最多發 MAX_COMMANDS_PER_RESPONSE 條）
+  const queuedCommands: { uuid: string; command: SyncMLCommand }[] = [];
+  for (let i = 0; i < MAX_COMMANDS_PER_RESPONSE; i++) {
+    const next = getNextQueuedWindowsCommand(device.udid);
+    if (!next || !next.csp_path || !next.syncml_verb) break;
+    queuedCommands.push({
+      uuid: next.command_uuid,
+      command: {
+        cmdId: "0", // buildSyncML 會分配真實值並透過回傳元數據告知
+        verb: next.syncml_verb as SyncMLVerb,
+        target: next.csp_path,
+        data: next.syncml_data ?? undefined,
+        format: next.syncml_data ? "chr" : undefined,
+      },
     });
+    // 立刻標 sent 並從 queue 移走（getNextQueuedWindowsCommand 只取 status='queued'）
+    updateMdmCommand(next.command_uuid, { status: "sent" });
   }
 
   // 5. 回應 SyncML
   const sessionId = parsed.header.sessionId || "1";
   const newServerMsgId = (state.lastServerMsgId ?? 0) + 1;
-  const responseXml = buildSyncML({
+  const built = buildSyncML({
     sessionId,
     msgId: String(newServerMsgId),
     deviceId,
     managementUrl,
     hdrStatus: { msgRef: parsed.header.msgId, data: "200" },
-    statuses: [], // 我們對 Alert/Status/Results 不單獨回 Status（mTLS 已認證，簡化）
-    commands,
+    statuses: [], // 對 Alert/Status/Results 不單獨回 Status（mTLS 已認證，簡化）
+    commands: queuedCommands.map((q) => q.command),
   });
 
-  // 命令 cmdId 在 buildSyncML 內按順序分配：
-  //   1 = SyncHdr Status
-  //   2..N = statuses 各條
-  //   後續為 commands
-  // 由於我們 statuses=[]，commands 第 i 筆 cmdId = 2 + i
-  if (next && commands.length > 0) {
-    const cmdIdOfNext = String(2);
-    state.inFlight[cmdIdOfNext] = next.command_uuid;
-    updateMdmCommand(next.command_uuid, { status: "sent" });
+  // 用 buildSyncML 回傳的真實 CmdID 寫入 inFlight，避免推算耦合
+  for (let i = 0; i < queuedCommands.length; i++) {
+    const realCmdId = built.commandCmdIds[i];
+    const q = queuedCommands[i];
+    state.inFlight[realCmdId] = q.uuid;
     console.log(
-      `[Win MDM] 發送命令: ${next.command_uuid} csp=${next.csp_path} verb=${next.syncml_verb}`
+      `[Win MDM] 發送命令: ${q.uuid} cmdId=${realCmdId} csp=${q.command.target} verb=${q.command.verb}`
     );
   }
 
@@ -172,10 +174,13 @@ export function handleSyncMLRequest(opts: {
 
   return {
     status: 200,
-    body: responseXml,
+    body: built.xml,
     contentType: "application/vnd.syncml.dm+xml; charset=utf-8",
   };
 }
+
+/** 單次 SyncML 回應最多攜帶的命令數（保守值；過多會撐爆 SyncML 訊息） */
+const MAX_COMMANDS_PER_RESPONSE = 5;
 
 /** 映射 SyncML 狀態碼到 mdm_commands.status */
 function mapStatusCode(code: string): string {

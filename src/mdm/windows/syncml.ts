@@ -185,8 +185,29 @@ export interface BuildSyncMLOptions {
   final?: boolean;
 }
 
-/** 生成 SyncML 回應 XML */
-export function buildSyncML(opts: BuildSyncMLOptions): string {
+/** buildSyncML 結果含 XML 與分配的 CmdID 元數據 */
+export interface BuildSyncMLResult {
+  xml: string;
+  /** SyncHdr Status 的 CmdID（固定為 "1"） */
+  hdrStatusCmdId: string;
+  /** opts.statuses 各條對應的 CmdID（順序對齊輸入） */
+  statusCmdIds: string[];
+  /** opts.commands 各條對應的 CmdID（順序對齊輸入；inFlight 用此值寫入） */
+  commandCmdIds: string[];
+}
+
+/**
+ * 生成 SyncML 回應，回傳 XML 與每條 status / command 實際分配到的 CmdID。
+ *
+ * CmdID 分配規則：
+ *   1                              → SyncHdr Status
+ *   2 .. 1 + statuses.length       → 各條 status
+ *   後續                            → 各條 command
+ *
+ * 呼叫方應使用 commandCmdIds[i] 寫入 inFlight，
+ * 不要再依賴外部推算（會在加 status 或多命令時錯位）。
+ */
+export function buildSyncML(opts: BuildSyncMLOptions): BuildSyncMLResult {
   const lines: string[] = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push(
@@ -208,9 +229,10 @@ export function buildSyncML(opts: BuildSyncMLOptions): string {
 
   // 對客戶端 SyncHdr 的 Status（CmdID 1, CmdRef=0, Cmd=SyncHdr）
   let cmdIdCounter = 1;
+  const hdrStatusCmdId = String(cmdIdCounter++);
   lines.push(
     statusXml({
-      cmdId: String(cmdIdCounter++),
+      cmdId: hdrStatusCmdId,
       msgRef: opts.hdrStatus.msgRef,
       cmdRef: "0",
       cmd: "SyncHdr",
@@ -219,13 +241,19 @@ export function buildSyncML(opts: BuildSyncMLOptions): string {
   );
 
   // 對客戶端各命令的 Status
+  const statusCmdIds: string[] = [];
   for (const s of opts.statuses ?? []) {
-    lines.push(statusXml({ ...s, cmdId: String(cmdIdCounter++) }));
+    const id = String(cmdIdCounter++);
+    statusCmdIds.push(id);
+    lines.push(statusXml({ ...s, cmdId: id }));
   }
 
   // 伺服器下發的命令
+  const commandCmdIds: string[] = [];
   for (const cmd of opts.commands ?? []) {
-    lines.push(commandXml({ ...cmd, cmdId: String(cmdIdCounter++) }));
+    const id = String(cmdIdCounter++);
+    commandCmdIds.push(id);
+    lines.push(commandXml({ ...cmd, cmdId: id }));
   }
 
   if (opts.final !== false) {
@@ -233,7 +261,13 @@ export function buildSyncML(opts: BuildSyncMLOptions): string {
   }
   lines.push("  </SyncBody>");
   lines.push("</SyncML>");
-  return lines.join("\n");
+
+  return {
+    xml: lines.join("\n"),
+    hdrStatusCmdId,
+    statusCmdIds,
+    commandCmdIds,
+  };
 }
 
 function statusXml(s: SyncMLStatus): string {
