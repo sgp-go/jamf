@@ -44,41 +44,104 @@ export interface MsixInstallParams {
   contentUri: string;
   /** SHA-256 雜湊（hex 字串），對應 contentUri 內容 */
   hashHex: string;
-  /** 是否信任設備上未由 Microsoft Store 派送的 LOB 應用（自家 MSIX 必須 true） */
+  /**
+   * isLOB=true 走 HostedInstall（從我們的 HTTPS 拉，自家簽署的 LOB 應用，預設）
+   * isLOB=false 走 StoreInstall（從 Microsoft Store 拉，需提供 PackageIdentityName/Publisher，本實作未支援）
+   */
   isLOB?: boolean;
+  /**
+   * 強制升級到任意版本（可降版）。升級場景請傳 true；首次安裝可省略
+   */
+  forceUpdateToAnyVersion?: boolean;
+  /** 強制關閉正在運行的應用以完成安裝/升級 */
+  forceApplicationShutdown?: boolean;
+  /** 延遲註冊（在應用關閉後才註冊新版本，平滑升級體驗） */
+  deferRegistration?: boolean;
 }
 
 /**
- * 建立 MSIX 安裝命令
+ * 建立 MSIX 安裝/升級命令（HostedInstall）
  *
- * 使用 ./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/<PFN>/StoreInstall。
- * Data 是 JSON-shaped 設定字串。
+ * EnterpriseModernAppManagement CSP HostedInstall 用於從 LOB HTTPS source 拉取
+ * 自簽 MSIX 套件。同 PFN 高版本的 install 即覆蓋升級；要強制升級到任意版本（含降版）
+ * 需傳 forceUpdateToAnyVersion=true。
+ *
+ * 路徑：./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/<PFN>/HostedInstall
+ * Format=xml；Data 是 <HostedInstallAction> XML（spec 文件 §HostedInstall）。
  */
 export function buildMsixInstall(params: MsixInstallParams): SyncMLCommand {
-  const { packageFamilyName, contentUri, hashHex, isLOB = true } = params;
-  // CSP 規範要求 PFN 在路徑中經 URI-encode（保留 _ 與字母數字，特殊字元編碼）
+  const {
+    packageFamilyName,
+    contentUri,
+    hashHex,
+    isLOB = true,
+    forceUpdateToAnyVersion,
+    forceApplicationShutdown,
+    deferRegistration,
+  } = params;
+  if (!isLOB) {
+    // StoreInstall 需 PackageIdentityName + Publisher 而非 ContentURL/Hash，本實作專做 LOB
+    throw new Error(
+      "buildMsixInstall: isLOB=false (StoreInstall) 未支援；本實作專做 LOB HostedInstall"
+    );
+  }
   const encodedPfn = encodeURIComponent(packageFamilyName);
   const cspPath =
-    `./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/${encodedPfn}/StoreInstall`;
+    `./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/${encodedPfn}/HostedInstall`;
 
-  // EnterpriseModernAppManagement StoreInstall 的 Data 是 XML 配置字串
-  const innerXml = [
-    "<Application",
-    ' Verb="install"',
-    isLOB ? ' LOB="true"' : "",
-    ` ContentURL="${escapeAttr(contentUri)}"`,
-    " />",
-    `<Hash>${escapeText(hashHex)}</Hash>`,
-  ]
-    .filter(Boolean)
-    .join("");
+  // HostedInstallAction XML：spec 要求 ContentURI 屬性 + Hash 子元素 + 各種 install option 子元素
+  const opts: string[] = [];
+  if (forceApplicationShutdown) {
+    opts.push("<ForceApplicationShutdown>true</ForceApplicationShutdown>");
+  }
+  if (forceUpdateToAnyVersion) {
+    opts.push("<ForceUpdateToAnyVersion>true</ForceUpdateToAnyVersion>");
+  }
+  if (deferRegistration) {
+    opts.push('<DeferRegistration>1</DeferRegistration>');
+  }
+  const innerXml =
+    "<HostedInstallAction>" +
+    `<Source ContentURI="${escapeAttr(contentUri)}" />` +
+    `<Hash>${escapeText(hashHex)}</Hash>` +
+    opts.join("") +
+    "</HostedInstallAction>";
 
   return {
     cmdId: "0",
     verb: "Exec",
     target: cspPath,
-    format: "chr",
+    format: "xml",
     data: innerXml,
+  };
+}
+
+/**
+ * 建立 MSIX 升級命令（薄封裝）
+ *
+ * 同 install 入參，自動帶 forceUpdateToAnyVersion=true 確保新版本能覆蓋舊版（甚至降版）。
+ * 默認不關閉運行中的應用（需要可傳 forceApplicationShutdown=true）。
+ */
+export function buildMsixUpdate(
+  params: Omit<MsixInstallParams, "forceUpdateToAnyVersion">
+): SyncMLCommand {
+  return buildMsixInstall({ ...params, forceUpdateToAnyVersion: true });
+}
+
+/**
+ * 建立 UpdateScan Exec 命令
+ *
+ * 觸發設備掃描所有可升級的 MSIX 應用（針對之前透過 HostedInstall 部署過的）。
+ * 設備按結果與後續策略自動拉取新版本，不需指定特定 PFN。
+ *
+ * 路徑：./Device/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/UpdateScan
+ */
+export function buildUpdateScan(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Exec",
+    target:
+      "./Device/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/UpdateScan",
   };
 }
 

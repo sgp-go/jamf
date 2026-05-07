@@ -43,7 +43,10 @@ app.get("/", (c) =>
       winWipe: "/api/mdm/win/devices/:udid/wipe",
       winApps: "/api/mdm/win/devices/:udid/apps",
       winAppInstall: "/api/mdm/win/devices/:udid/apps/install",
+      winAppUpdate: "/api/mdm/win/devices/:udid/apps/update",
+      winAppUpdateScan: "/api/mdm/win/devices/:udid/apps/update-scan",
       winAppRefresh: "/api/mdm/win/devices/:udid/apps/refresh",
+      winAppInstallBulk: "/api/mdm/win/devices/install/bulk",
     },
   })
 );

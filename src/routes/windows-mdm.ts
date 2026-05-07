@@ -22,10 +22,13 @@ import {
 import {
   buildRemoteWipe,
   buildMsixInstall,
+  buildMsixUpdate,
+  buildUpdateScan,
   buildMsixUninstall,
   buildAppInventoryConfig,
   buildAppInventoryFetch,
   type WipeAction,
+  type MsixInstallParams,
 } from "../mdm/windows/csp.ts";
 import {
   upsertMdmDevice,
@@ -271,56 +274,164 @@ w.post("/api/mdm/win/devices/:udid/apps/refresh", (c) => {
   });
 });
 
-/** POST /api/mdm/win/devices/:udid/apps/install — 派送 MSIX */
+/**
+ * 從 JSON body 解析 MSIX install/update 共用參數，做欄位驗證。
+ * 回傳 [params, errorResponse]，errorResponse 為 null 表通過。
+ */
+async function parseMsixParams(
+  c: { req: { json: () => Promise<unknown> } }
+): Promise<[MsixInstallParams | null, { json: object; status: 400 } | null]> {
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return [null, { json: { error: "invalid json body" }, status: 400 }];
+  }
+  const packageFamilyName = body.packageFamilyName as string | undefined;
+  const contentUri = body.contentUri as string | undefined;
+  const hashHex = body.hashHex as string | undefined;
+  if (!packageFamilyName || !contentUri || !hashHex) {
+    return [
+      null,
+      {
+        json: { error: "packageFamilyName, contentUri, hashHex required" },
+        status: 400,
+      },
+    ];
+  }
+  if (!/^https:\/\//i.test(contentUri)) {
+    return [
+      null,
+      { json: { error: "contentUri must be HTTPS" }, status: 400 },
+    ];
+  }
+  return [
+    {
+      packageFamilyName,
+      contentUri,
+      hashHex,
+      isLOB: body.isLOB as boolean | undefined,
+      forceApplicationShutdown: body.forceApplicationShutdown as
+        | boolean
+        | undefined,
+      forceUpdateToAnyVersion: body.forceUpdateToAnyVersion as
+        | boolean
+        | undefined,
+      deferRegistration: body.deferRegistration as boolean | undefined,
+    },
+    null,
+  ];
+}
+
+/** POST /api/mdm/win/devices/:udid/apps/install — 派送 MSIX (HostedInstall) */
 w.post("/api/mdm/win/devices/:udid/apps/install", async (c) => {
   const udid = c.req.param("udid");
   const device = getMdmDevice(udid);
   if (!device || device.platform !== "windows") {
     return c.json({ error: "device not found" }, 404);
   }
-
-  let body: {
-    packageFamilyName?: string;
-    contentUri?: string;
-    hashHex?: string;
-    isLOB?: boolean;
-  };
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "invalid json body" }, 400);
-  }
-
-  const { packageFamilyName, contentUri, hashHex, isLOB } = body;
-  if (!packageFamilyName || !contentUri || !hashHex) {
-    return c.json(
-      {
-        error:
-          "packageFamilyName, contentUri, hashHex required",
-      },
-      400
-    );
-  }
-  if (!/^https:\/\//i.test(contentUri)) {
-    return c.json({ error: "contentUri must be HTTPS" }, 400);
-  }
-
-  const cmd = buildMsixInstall({
-    packageFamilyName,
-    contentUri,
-    hashHex,
-    isLOB,
-  });
+  const [params, err] = await parseMsixParams(c);
+  if (err) return c.json(err.json, err.status);
   const commandUuid = enqueueWindowsCommand({
     deviceUdid: udid,
     commandType: "MsixInstall",
-    command: cmd,
+    command: buildMsixInstall(params!),
   });
   return c.json({
     commandUuid,
-    packageFamilyName,
+    packageFamilyName: params!.packageFamilyName,
     note:
       "Install queued. Device will pick up on next poll (1-60 min) or via WNS push.",
+  });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/apps/update — 升級 MSIX（覆蓋安裝 + ForceUpdateToAnyVersion）
+ * 入參同 install；自動帶 forceUpdateToAnyVersion=true。
+ */
+w.post("/api/mdm/win/devices/:udid/apps/update", async (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  const [params, err] = await parseMsixParams(c);
+  if (err) return c.json(err.json, err.status);
+  const commandUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "MsixUpdate",
+    command: buildMsixUpdate(params!),
+  });
+  return c.json({
+    commandUuid,
+    packageFamilyName: params!.packageFamilyName,
+    note: "Update queued (ForceUpdateToAnyVersion=true).",
+  });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/apps/update-scan — 觸發設備掃描所有可升級 MSIX
+ * 不需指定 PFN；設備按已部署的 LOB 應用清單自動拉新版本。
+ */
+w.post("/api/mdm/win/devices/:udid/apps/update-scan", (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  const commandUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "UpdateScan",
+    command: buildUpdateScan(),
+  });
+  return c.json({ commandUuid, note: "UpdateScan queued." });
+});
+
+/**
+ * POST /api/mdm/win/devices/install/bulk — 批量派送 MSIX 到多台設備
+ * Body: { deviceUdids: string[], packageFamilyName, contentUri, hashHex, isLOB?, ...installOptions }
+ * 對每台 enqueue 一條 MsixInstall，不存在的設備標 error 但不中斷整批。
+ */
+w.post("/api/mdm/win/devices/install/bulk", async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid json body" }, 400);
+  }
+  const udids = body.deviceUdids as string[] | undefined;
+  if (!Array.isArray(udids) || udids.length === 0) {
+    return c.json({ error: "deviceUdids (non-empty array) required" }, 400);
+  }
+  // 復用 parseMsixParams 對命令參數做相同驗證（透過構造一個 minimal req）
+  const fakeC = { req: { json: () => Promise.resolve(body) } };
+  const [params, err] = await parseMsixParams(fakeC);
+  if (err) return c.json(err.json, err.status);
+
+  const results: Array<{
+    udid: string;
+    commandUuid?: string;
+    error?: string;
+  }> = [];
+  for (const udid of udids) {
+    const device = getMdmDevice(udid);
+    if (!device || device.platform !== "windows") {
+      results.push({ udid, error: "device not found" });
+      continue;
+    }
+    const commandUuid = enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: "MsixInstall",
+      command: buildMsixInstall(params!),
+    });
+    results.push({ udid, commandUuid });
+  }
+  const ok = results.filter((r) => r.commandUuid).length;
+  return c.json({
+    total: udids.length,
+    queued: ok,
+    failed: udids.length - ok,
+    results,
   });
 });
 

@@ -1,7 +1,9 @@
-import { assertEquals } from "jsr:@std/assert@^1";
+import { assertEquals, assertThrows } from "jsr:@std/assert@^1";
 import {
   buildRemoteWipe,
   buildMsixInstall,
+  buildMsixUpdate,
+  buildUpdateScan,
   buildAppInventoryConfig,
   buildAppInventoryFetch,
   buildMsixUninstall,
@@ -25,47 +27,75 @@ Deno.test("buildRemoteWipe: 三種動作各對應獨立 CSP 路徑", () => {
   );
 });
 
-Deno.test("buildMsixInstall: PFN 在路徑中 URI-encoded", () => {
+Deno.test("buildMsixInstall: HostedInstall 路徑 + Format=xml", () => {
   const cmd = buildMsixInstall({
     packageFamilyName: "Microsoft.WindowsCalculator_8wekyb3d8bbwe",
     contentUri: "https://cdn.example.com/calc.msixbundle",
     hashHex: "abc123",
   });
-  // 點號保留，底線保留，但路徑被 encode
   assertEquals(
     cmd.target,
-    "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/Microsoft.WindowsCalculator_8wekyb3d8bbwe/StoreInstall"
+    "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/Microsoft.WindowsCalculator_8wekyb3d8bbwe/HostedInstall"
   );
   assertEquals(cmd.verb, "Exec");
+  assertEquals(cmd.format, "xml");
 });
 
-Deno.test("buildMsixInstall: Data 含 ContentURL 與 Hash", () => {
+Deno.test("buildMsixInstall: Data 是 <HostedInstallAction> XML 含 Source ContentURI + Hash", () => {
   const cmd = buildMsixInstall({
     packageFamilyName: "X.Y_z",
     contentUri: "https://cdn.example.com/x.msix",
     hashHex: "deadbeef",
   });
-  // Data 是 XML 配置字串
   const data = cmd.data ?? "";
-  assertEquals(data.includes('Verb="install"'), true);
-  assertEquals(data.includes('LOB="true"'), true);
-  assertEquals(data.includes('ContentURL="https://cdn.example.com/x.msix"'), true);
+  assertEquals(data.startsWith("<HostedInstallAction>"), true);
+  assertEquals(
+    data.includes('<Source ContentURI="https://cdn.example.com/x.msix" />'),
+    true
+  );
   assertEquals(data.includes("<Hash>deadbeef</Hash>"), true);
+  // 預設不帶 ForceUpdate / ForceShutdown / DeferRegistration
+  assertEquals(data.includes("ForceUpdateToAnyVersion"), false);
+  assertEquals(data.includes("ForceApplicationShutdown"), false);
+  assertEquals(data.includes("DeferRegistration"), false);
 });
 
-Deno.test("buildMsixInstall: Store app（非 LOB）省略 LOB attr", () => {
+Deno.test("buildMsixInstall: install option 開關正確生成", () => {
   const cmd = buildMsixInstall({
-    packageFamilyName: "Microsoft.WindowsCalculator_8wekyb3d8bbwe",
-    contentUri: "https://cdn/c.msix",
-    hashHex: "1",
-    isLOB: false,
+    packageFamilyName: "X.Y_z",
+    contentUri: "https://cdn/x.msix",
+    hashHex: "x",
+    forceUpdateToAnyVersion: true,
+    forceApplicationShutdown: true,
+    deferRegistration: true,
   });
   const data = cmd.data ?? "";
-  assertEquals(data.includes("LOB="), false);
-  assertEquals(data.includes('Verb="install"'), true);
+  assertEquals(
+    data.includes("<ForceUpdateToAnyVersion>true</ForceUpdateToAnyVersion>"),
+    true
+  );
+  assertEquals(
+    data.includes("<ForceApplicationShutdown>true</ForceApplicationShutdown>"),
+    true
+  );
+  assertEquals(data.includes("<DeferRegistration>1</DeferRegistration>"), true);
 });
 
-Deno.test("buildMsixInstall: ContentURL 中 & 字元被 escape", () => {
+Deno.test("buildMsixInstall: isLOB=false 拋錯（StoreInstall 未支援）", () => {
+  assertThrows(
+    () =>
+      buildMsixInstall({
+        packageFamilyName: "X.Y_z",
+        contentUri: "https://cdn/x.msix",
+        hashHex: "x",
+        isLOB: false,
+      }),
+    Error,
+    "StoreInstall"
+  );
+});
+
+Deno.test("buildMsixInstall: ContentURI 中 & 字元被 escape", () => {
   const cmd = buildMsixInstall({
     packageFamilyName: "X.Y_z",
     contentUri: "https://cdn/x.msix?a=1&b=2",
@@ -73,7 +103,32 @@ Deno.test("buildMsixInstall: ContentURL 中 & 字元被 escape", () => {
   });
   const data = cmd.data ?? "";
   assertEquals(data.includes("&amp;"), true);
-  assertEquals(data.includes("&b=2"), false);
+  // 確保未 escape 的 & 不出現在屬性內
+  assertEquals(/[&](?!amp;|lt;|gt;|quot;|apos;)/.test(data), false);
+});
+
+Deno.test("buildMsixUpdate: 自動帶 ForceUpdateToAnyVersion=true", () => {
+  const cmd = buildMsixUpdate({
+    packageFamilyName: "X.Y_z",
+    contentUri: "https://cdn/x.msix",
+    hashHex: "h",
+  });
+  const data = cmd.data ?? "";
+  assertEquals(
+    data.includes("<ForceUpdateToAnyVersion>true</ForceUpdateToAnyVersion>"),
+    true
+  );
+  assertEquals(cmd.format, "xml");
+});
+
+Deno.test("buildUpdateScan: Exec ./Device/.../UpdateScan", () => {
+  const cmd = buildUpdateScan();
+  assertEquals(cmd.verb, "Exec");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/UpdateScan"
+  );
+  assertEquals(cmd.data, undefined);
 });
 
 Deno.test("buildAppInventoryConfig: 預設 Output=PackageDetails、PackageTypeFilter=Main|Bundle", () => {

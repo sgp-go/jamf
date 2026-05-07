@@ -409,7 +409,6 @@ Deno.test("MSIX install API + SyncML 通道：排入命令 → 設備 poll 拉�
         contentUri:
           "https://cdn.example.com/calculator.msixbundle",
         hashHex: "abc123def456",
-        isLOB: false,
       }),
       headers: { "Content-Type": "application/json" },
     })
@@ -587,4 +586,144 @@ Deno.test("MSIX uninstall API: 排入 Delete 命令", async () => {
   assert(respXml.includes("AppManagement/AppStore/Microsoft.WindowsCalculator"));
 
   cleanup(deviceId);
+});
+
+Deno.test("MSIX update API: 命令含 ForceUpdateToAnyVersion + HostedInstall 路徑", async () => {
+  const deviceId = `WIN-UPD-${crypto.randomUUID()}`;
+  const udid = `windows-${deviceId}`;
+  cleanup(deviceId);
+  const app = makeTestApp();
+  await enrollDevice(app, deviceId, makeCsrBase64("x"));
+
+  const updRes = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/devices/${udid}/apps/update`, {
+      method: "POST",
+      body: JSON.stringify({
+        packageFamilyName: "Aspira.Agent_xyz",
+        contentUri: "https://cdn.example.com/agent-v2.msixbundle",
+        hashHex: "v2hash",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  assertEquals(updRes.status, 200);
+
+  // 設備 poll 看回應
+  const sync = `<SyncML xmlns="SYNCML:SYNCML1.2">
+  <SyncHdr>
+    <SessionID>1</SessionID><MsgID>1</MsgID>
+    <Target><LocURI>${BASE}/api/mdm/win/manage/${deviceId}</LocURI></Target>
+    <Source><LocURI>${deviceId}</LocURI></Source>
+  </SyncHdr>
+  <SyncBody><Alert><CmdID>2</CmdID><Data>1201</Data></Alert><Final/></SyncBody>
+</SyncML>`;
+  const syncRes = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/manage/${deviceId}`, {
+      method: "PUT",
+      body: sync,
+    })
+  );
+  const respXml = await syncRes.text();
+  assert(respXml.includes("AppInstallation/Aspira.Agent_xyz/HostedInstall"));
+  assert(respXml.includes("ForceUpdateToAnyVersion"));
+  assert(respXml.includes("agent-v2.msixbundle"));
+
+  cleanup(deviceId);
+});
+
+Deno.test("UpdateScan API: 排入 Exec ./Device/.../UpdateScan", async () => {
+  const deviceId = `WIN-SCAN-${crypto.randomUUID()}`;
+  const udid = `windows-${deviceId}`;
+  cleanup(deviceId);
+  const app = makeTestApp();
+  await enrollDevice(app, deviceId, makeCsrBase64("x"));
+
+  const res = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/devices/${udid}/apps/update-scan`, {
+      method: "POST",
+    })
+  );
+  assertEquals(res.status, 200);
+
+  const sync = `<SyncML xmlns="SYNCML:SYNCML1.2">
+  <SyncHdr>
+    <SessionID>1</SessionID><MsgID>1</MsgID>
+    <Target><LocURI>${BASE}/api/mdm/win/manage/${deviceId}</LocURI></Target>
+    <Source><LocURI>${deviceId}</LocURI></Source>
+  </SyncHdr>
+  <SyncBody><Alert><CmdID>2</CmdID><Data>1201</Data></Alert><Final/></SyncBody>
+</SyncML>`;
+  const syncRes = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/manage/${deviceId}`, {
+      method: "PUT",
+      body: sync,
+    })
+  );
+  const respXml = await syncRes.text();
+  assert(
+    respXml.includes(
+      "./Device/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/UpdateScan"
+    )
+  );
+
+  cleanup(deviceId);
+});
+
+Deno.test("Bulk install API: 多台 enqueue + 不存在的 udid 標 error 不中斷", async () => {
+  const dev1 = `WIN-BULK1-${crypto.randomUUID()}`;
+  const dev2 = `WIN-BULK2-${crypto.randomUUID()}`;
+  const udid1 = `windows-${dev1}`;
+  const udid2 = `windows-${dev2}`;
+  cleanup(dev1);
+  cleanup(dev2);
+  const app = makeTestApp();
+  await enrollDevice(app, dev1, makeCsrBase64("a"));
+  await enrollDevice(app, dev2, makeCsrBase64("b"));
+
+  const res = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/devices/install/bulk`, {
+      method: "POST",
+      body: JSON.stringify({
+        deviceUdids: [udid1, udid2, "windows-doesnt-exist"],
+        packageFamilyName: "Foo.Bar_xyz",
+        contentUri: "https://cdn/foo.msix",
+        hashHex: "h",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  assertEquals(res.status, 200);
+  const json = await res.json();
+  assertEquals(json.total, 3);
+  assertEquals(json.queued, 2);
+  assertEquals(json.failed, 1);
+  // 兩台正常設備有 commandUuid，第三台有 error
+  const r1 = json.results.find((r: { udid: string }) => r.udid === udid1);
+  const r2 = json.results.find((r: { udid: string }) => r.udid === udid2);
+  const r3 = json.results.find(
+    (r: { udid: string }) => r.udid === "windows-doesnt-exist"
+  );
+  assertExists(r1.commandUuid);
+  assertExists(r2.commandUuid);
+  assertEquals(r3.error, "device not found");
+
+  cleanup(dev1);
+  cleanup(dev2);
+});
+
+Deno.test("Bulk install API: 空 deviceUdids 回 400", async () => {
+  const app = makeTestApp();
+  const res = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/devices/install/bulk`, {
+      method: "POST",
+      body: JSON.stringify({
+        deviceUdids: [],
+        packageFamilyName: "X",
+        contentUri: "https://cdn/x.msix",
+        hashHex: "h",
+      }),
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  assertEquals(res.status, 400);
 });
