@@ -82,6 +82,17 @@ export function handleSyncMLRequest(opts: {
 
   const state = parseSessionState(device.management_session_state);
 
+  // 0. session 切換偵測：sessionId 跟上次不同 → 先前 inFlight 對映已過期，先清空
+  // （否則本輪 client status 可能誤命中舊 session 留下的 cmdId 對映）
+  const sessionId = parsed.header.sessionId || "1";
+  const isNewSession = sessionId !== state.lastSessionId;
+  if (isNewSession && Object.keys(state.inFlight).length > 0) {
+    console.log(
+      `[Win MDM] Session 切換 ${state.lastSessionId} → ${sessionId}，清空 ${Object.keys(state.inFlight).length} 個過期 inFlight`
+    );
+    state.inFlight = {};
+  }
+
   // 1. 處理 client status：根據 cmdRef 找到 inFlight 對應的 command_uuid
   for (const s of parsed.statuses) {
     if (s.cmd === "SyncHdr") continue; // 對 hdr 的 status 不入庫
@@ -143,8 +154,10 @@ export function handleSyncMLRequest(opts: {
   }
 
   // 5. 回應 SyncML
-  const sessionId = parsed.header.sessionId || "1";
-  const newServerMsgId = (state.lastServerMsgId ?? 0) + 1;
+  // OMA-DM 1.2.1 §6.3：server MsgID per-session 遞增。
+  // 當前架構是 1:1 request/response 配對，鏡像 device 的 MsgID 最穩健
+  //（之前實作跨 session 累加 → device 收到突兀大 MsgID 對 SyncHdr 回 500）。
+  const newServerMsgId = parseInt(parsed.header.msgId, 10) || 1;
   const built = buildSyncML({
     sessionId,
     msgId: String(newServerMsgId),
