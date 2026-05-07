@@ -30,6 +30,21 @@ Deno.test("parseInventoryData: 子標籤式（older Windows）", () => {
   assertEquals(entries[0].installState, "2");
 });
 
+Deno.test("parseInventoryData: PackageDetails 模式 <Package ...> 真機格式（PackageStatus → installState）", () => {
+  // 來源：Win10 22H2 真機抓包
+  const xml = `<Results>
+    <Package PackageFamilyName="Microsoft.Windows.Photos_8wekyb3d8bbwe" PackageFullName="Microsoft.Windows.Photos_2019.19071.12548.0_neutral_~_8wekyb3d8bbwe" Name="Microsoft.Windows.Photos" Version="2019.19071.12548.0" Publisher="CN=Microsoft Corporation" Architecture="Neutral" InstallLocation="C:\\Program Files\\WindowsApps\\foo" PackageStatus="0" IsBundle="1" IsFramework="0"/>
+    <Package PackageFamilyName="BadApp_xyz" Name="BadApp" Version="1.0" PackageStatus="65535" IsBundle="0" IsFramework="0"/>
+  </Results>`;
+  const entries = parseInventoryData(xml);
+  assertEquals(entries.length, 2);
+  assertEquals(entries[0].packageFamilyName, "Microsoft.Windows.Photos_8wekyb3d8bbwe");
+  assertEquals(entries[0].displayName, "Microsoft.Windows.Photos");
+  assertEquals(entries[0].version, "2019.19071.12548.0");
+  assertEquals(entries[0].installState, "0"); // 真機 PackageStatus=0 表 OK
+  assertEquals(entries[1].installState, "65535");
+});
+
 Deno.test("parseInventoryData: 缺 PackageFamilyName 的節點被跳過", () => {
   const xml = `<Results>
     <App Name="bogus" Version="1.0"/>

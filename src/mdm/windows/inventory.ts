@@ -19,7 +19,11 @@ export interface InventoryEntry {
   packageFamilyName: string;
   displayName?: string;
   version?: string;
-  /** 0=NotInstalled, 1=Installing, 2=Installed, 3=Failed（保留為字串以容納未知值） */
+  /**
+   * 安裝狀態（保留為字串以容納未知值），語義依 Output 模式而異：
+   *   - PackageNames|RequiresReinstall 模式：InstallState (0=NotInstalled/1=Installing/2=Installed/3=Failed)
+   *   - PackageDetails 模式：PackageStatus (0=OK，其他為各類錯誤碼)
+   */
   installState?: string;
 }
 
@@ -59,6 +63,9 @@ export function parseInventoryData(dataXml: string): InventoryEntry[] {
       installState:
         attrValue(attrs, "InstallState") ??
         innerTag(inner, "InstallState") ??
+        // PackageDetails 模式下真機回 PackageStatus（0=OK，其他為錯誤碼）
+        attrValue(attrs, "PackageStatus") ??
+        innerTag(inner, "PackageStatus") ??
         attrValue(attrs, "Status"),
     });
   }
