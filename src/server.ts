@@ -48,6 +48,8 @@ app.get("/", (c) =>
       winAppRefresh: "/api/mdm/win/devices/:udid/apps/refresh",
       winAppInstallBulk: "/api/mdm/win/devices/install/bulk",
       winPollConfig: "/api/mdm/win/devices/:udid/poll-config",
+      winPushConfig: "/api/mdm/win/devices/:udid/push-config",
+      winPush: "/api/mdm/win/devices/:udid/push",
     },
   })
 );

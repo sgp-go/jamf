@@ -116,22 +116,39 @@ export function handleSyncMLRequest(opts: {
     }
   }
 
-  // 3. Results：應用清單等查詢結果
+  // 3. Results：應用清單 / push channel URI 等查詢結果
   for (const r of parsed.results) {
-    if (!isInventoryResult(r.source)) continue;
-    const entries = parseInventoryData(r.data);
-    for (const e of entries) {
-      upsertWindowsApp({
-        deviceUdid: device.udid,
-        packageFamilyName: e.packageFamilyName,
-        displayName: e.displayName ?? null,
-        version: e.version ?? null,
-        installState: e.installState ?? null,
-      });
+    if (isInventoryResult(r.source)) {
+      const entries = parseInventoryData(r.data);
+      for (const e of entries) {
+        upsertWindowsApp({
+          deviceUdid: device.udid,
+          packageFamilyName: e.packageFamilyName,
+          displayName: e.displayName ?? null,
+          version: e.version ?? null,
+          installState: e.installState ?? null,
+        });
+      }
+      console.log(
+        `[Win MDM] Inventory: device=${deviceId} 收到 ${entries.length} 個應用`
+      );
+      continue;
     }
-    console.log(
-      `[Win MDM] Inventory: device=${deviceId} 收到 ${entries.length} 個應用`
-    );
+    // DMClient Push/ChannelURI Get 結果 → 入庫供 WNS push 使用
+    if (/\/Push\/ChannelURI(\?|$)/i.test(r.source)) {
+      const uri = r.data.trim();
+      if (uri && /^https:\/\/[^.]+\.notify\.windows\.com\//i.test(uri)) {
+        upsertMdmDevice(device.udid, { wnsChannelUri: uri });
+        console.log(
+          `[Win MDM] WNS ChannelURI 入庫: device=${deviceId} uri=${uri.slice(0, 60)}...`
+        );
+      } else {
+        console.warn(
+          `[Win MDM] WNS ChannelURI 格式異常 (device=${deviceId}): ${uri.slice(0, 100)}`
+        );
+      }
+      continue;
+    }
   }
 
   // 4. 取待執行命令（一次最多發 MAX_COMMANDS_PER_RESPONSE 條）

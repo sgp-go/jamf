@@ -29,10 +29,13 @@ import {
   buildAppInventoryConfig,
   buildAppInventoryFetch,
   buildSetPollInterval,
+  buildSetPushPfn,
+  buildGetPushChannelUri,
   type WipeAction,
   type MsixInstallParams,
   type PollConfig,
 } from "../mdm/windows/csp.ts";
+import { getWnsClient, WnsAuthError } from "../wns/client.ts";
 import {
   upsertMdmDevice,
   listMdmDevicesByPlatform,
@@ -523,6 +526,90 @@ w.post("/api/mdm/win/devices/:udid/poll-config", async (c) => {
     },
     note: "Poll config queued. Takes effect on next poll, then steady state.",
   });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/push-config — 設置 device 的 WNS push 接收 PFN
+ *
+ * 完整流程：
+ *   1. server 排 Replace ./Push/PFN = <PFN> + Get ./Push/ChannelURI
+ *   2. device poll 拉到後 DMClient 註冊 push channel 到 OS（前置：該 PFN 對應的
+ *      push-capable MSIX 已裝在 device 上）
+ *   3. device 在後續 SyncML Results 上報 ChannelURI，server 寫入 mdm_devices.wns_channel_uri
+ *   4. 之後 enqueue 命令時 server 可調 WNS API 立刻 push 觸發 device session
+ *
+ * Body: { pfn?: string }（省略則用 .env WNS_PFN）
+ */
+w.post("/api/mdm/win/devices/:udid/push-config", async (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as { pfn?: string };
+  const pfn = body.pfn ?? Deno.env.get("WNS_PFN");
+  if (!pfn) {
+    return c.json(
+      { error: "pfn required (or set WNS_PFN in .env)" },
+      400
+    );
+  }
+  const setPfnUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "PushSetPfn",
+    command: buildSetPushPfn(pfn),
+  });
+  const getUriUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "PushGetChannelUri",
+    command: buildGetPushChannelUri(),
+  });
+  return c.json({
+    setPfnUuid,
+    getUriUuid,
+    pfn,
+    note:
+      "Push config queued (Replace PFN + Get ChannelURI). Device must have push-capable MSIX with matching PFN installed.",
+  });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/push — 立即發 WNS raw push 給 device
+ *
+ * 前置：device 已透過 push-config 上報 ChannelURI；mdm_devices.wns_channel_uri 非空。
+ * 觸發後 device 應在數秒內發起 OMA-DM session 拉取排隊中的命令（A 路徑秒級響應）。
+ */
+w.post("/api/mdm/win/devices/:udid/push", async (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  if (!device.wns_channel_uri) {
+    return c.json(
+      {
+        error:
+          "device 尚未上報 ChannelURI；先 POST /push-config 並等 device poll 後才能 push",
+      },
+      409
+    );
+  }
+  try {
+    const wns = getWnsClient();
+    const result = await wns.sendRaw(device.wns_channel_uri);
+    return c.json({
+      ok: result.ok,
+      status: result.status,
+      wnsStatus: result.wnsStatus,
+      wnsError: result.wnsError,
+      channelExpired: result.channelExpired,
+    });
+  } catch (e) {
+    if (e instanceof WnsAuthError) {
+      return c.json({ error: "WNS auth: " + e.message }, 502);
+    }
+    throw e;
+  }
 });
 
 /** POST /api/mdm/win/devices/:udid/wipe — 排入 RemoteWipe */

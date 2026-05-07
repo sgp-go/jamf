@@ -273,6 +273,50 @@ export function buildMsixUninstall(packageFamilyName: string): SyncMLCommand {
 }
 
 // ============================================================
+// DMClient Push (WNS) 配置
+// ============================================================
+
+/**
+ * 設置 device 的 push 接收 PFN
+ *
+ * device 收到此 Replace 後 DMClient 服務會去 WNS 注册 push channel（通過 OS API），
+ * 注册成功後可從 ./Push/ChannelURI 節點 Get 拿到 URI。
+ *
+ * ⚠️ 前置：該 PFN 對應的 MSIX 必須已裝在 device 上且實作了 push notification background task，
+ * 否則 Replace 會失敗或 ChannelURI 拿不到值。
+ */
+export function buildSetPushPfn(
+  pfn: string,
+  providerId = "MS DM Server"
+): SyncMLCommand {
+  const provider = encodeURIComponent(providerId);
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: `./Vendor/MSFT/DMClient/Provider/${provider}/Push/PFN`,
+    format: "chr",
+    data: pfn,
+  };
+}
+
+/**
+ * 拉取 device 注冊到 WNS 的 push channel URI
+ *
+ * 路徑：./Vendor/MSFT/DMClient/Provider/<ProviderID>/Push/ChannelURI
+ * 結果為 https://*.notify.windows.com/... 字串，server 入庫後即可 send raw notification。
+ */
+export function buildGetPushChannelUri(
+  providerId = "MS DM Server"
+): SyncMLCommand {
+  const provider = encodeURIComponent(providerId);
+  return {
+    cmdId: "0",
+    verb: "Get",
+    target: `./Vendor/MSFT/DMClient/Provider/${provider}/Push/ChannelURI`,
+  };
+}
+
+// ============================================================
 // DMClient Polling 配置
 // ============================================================
 
