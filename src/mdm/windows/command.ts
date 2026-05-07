@@ -14,6 +14,7 @@
 
 import {
   upsertMdmDevice,
+  getMdmDevice,
   getMdmDeviceByWindowsId,
   updateMdmCommand,
   getNextQueuedWindowsCommand,
@@ -23,6 +24,7 @@ import type { MdmDeviceRow, SyncMLVerb } from "../types.ts";
 import { parseSyncML, buildSyncML, type SyncMLCommand } from "./syncml.ts";
 import { upsertWindowsApp } from "./db.ts";
 import { parseInventoryData, isInventoryResult } from "./inventory.ts";
+import { getWnsClient, WnsAuthError } from "../../wns/client.ts";
 
 /** Session 持久狀態（存於 mdm_devices.management_session_state JSON） */
 interface SessionState {
@@ -226,7 +228,9 @@ function mapStatusCode(code: string): string {
 /**
  * 排入 Windows 命令的高階封裝（接 csp.ts 產出的 SyncMLCommand）
  *
- * 回傳 command_uuid。
+ * 回傳 command_uuid。排隊成功後會 fire-and-forget 觸發 WNS push 通知 device 立刻
+ * 發起 OMA-DM session（A 路徑秒級響應）。push 失敗不影響 enqueue 結果，
+ * device 仍會按 polling 間隔（B 路徑兜底）拉到命令。
  */
 export function enqueueWindowsCommand(opts: {
   deviceUdid: string;
@@ -247,7 +251,55 @@ export function enqueueWindowsCommand(opts: {
   console.log(
     `[Win MDM] 命令已排入: ${commandUuid} type=${opts.commandType} udid=${opts.deviceUdid}`
   );
+  // Fire-and-forget WNS push（不 await，不 throw 影響 enqueue）
+  // 排除自身：push 工具命令本身不觸發（PushSetPfn / PushGetChannelUri / PollConfig）
+  if (
+    opts.commandType !== "PushSetPfn" &&
+    opts.commandType !== "PushGetChannelUri" &&
+    !opts.commandType.startsWith("PollConfig")
+  ) {
+    triggerWnsPush(opts.deviceUdid).catch((e) => {
+      console.warn(
+        `[Win MDM] WNS push 觸發失敗（不影響 enqueue）: ${e instanceof Error ? e.message : String(e)}`
+      );
+    });
+  }
   return commandUuid;
+}
+
+/**
+ * 異步嘗試 WNS push（fire-and-forget）
+ *
+ * 跳過條件：
+ *   - device 無 wns_channel_uri（未跑過 push-config）
+ *   - WNS 凭据未配（環境變數缺失）
+ *
+ * 副作用：
+ *   - 410 channel expired → 清空 device.wns_channel_uri，提醒 caller 重跑 push-config
+ */
+async function triggerWnsPush(deviceUdid: string): Promise<void> {
+  const device = getMdmDevice(deviceUdid);
+  if (!device || !device.wns_channel_uri) return; // 沒 channel 就不發
+  let client;
+  try {
+    client = getWnsClient();
+  } catch (e) {
+    if (e instanceof WnsAuthError) return; // 凭据未配，靜默跳過（B polling 兜底）
+    throw e;
+  }
+  const result = await client.sendRaw(device.wns_channel_uri);
+  if (result.channelExpired) {
+    console.warn(
+      `[Win MDM] WNS channel expired (410)，清空 device ${deviceUdid} 的 channel uri`
+    );
+    upsertMdmDevice(deviceUdid, { wnsChannelUri: null });
+  } else if (!result.ok) {
+    console.warn(
+      `[Win MDM] WNS push 非 200: status=${result.status} wnsStatus=${result.wnsStatus ?? "?"}`
+    );
+  } else {
+    console.log(`[Win MDM] WNS push 已發 (${result.wnsStatus ?? "received"})`);
+  }
 }
 
 /** 將 MdmDeviceRow 投影為前端友好的格式（PR5/6 會用） */
