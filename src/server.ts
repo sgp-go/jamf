@@ -58,6 +58,47 @@ app.route("/api/mdm", mdm);
 // Windows MDM 內含跨前綴端點（/EnrollmentServer/* 與 /api/mdm/win/*），掛在 root
 app.route("/", windowsMdm);
 
+/**
+ * GET /test/:filename — 靜態 host data/test/ 下的測試文件（給 MDM HostedInstall 用）
+ * 嚴格只允許 basename，防 path traversal；只接受白名單副檔名
+ */
+const TEST_HOST_DIR = "data/test";
+const TEST_ALLOWED_EXT = [".msix", ".msixbundle", ".appx", ".appxbundle", ".cer"];
+app.get("/test/:filename", async (c) => {
+  const raw = c.req.param("filename");
+  // 嚴格 basename：禁 / \ .. 及隱藏文件
+  if (
+    !raw ||
+    raw.includes("/") ||
+    raw.includes("\\") ||
+    raw.includes("..") ||
+    raw.startsWith(".")
+  ) {
+    return c.text("invalid filename", 400);
+  }
+  const ext = raw.slice(raw.lastIndexOf(".")).toLowerCase();
+  if (!TEST_ALLOWED_EXT.includes(ext)) {
+    return c.text("ext not allowed", 400);
+  }
+  try {
+    const path = `${TEST_HOST_DIR}/${raw}`;
+    const data = await Deno.readFile(path);
+    return new Response(data, {
+      status: 200,
+      headers: {
+        "content-type":
+          ext === ".cer"
+            ? "application/x-x509-ca-cert"
+            : "application/vnd.ms-appx",
+        "content-length": String(data.byteLength),
+      },
+    });
+  } catch (e) {
+    if (e instanceof Deno.errors.NotFound) return c.text("not found", 404);
+    throw e;
+  }
+});
+
 // 404
 app.notFound((c) => c.json({ error: "Not Found" }, 404));
 
