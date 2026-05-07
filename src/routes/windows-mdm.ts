@@ -28,8 +28,10 @@ import {
   buildMsixUninstall,
   buildAppInventoryConfig,
   buildAppInventoryFetch,
+  buildSetPollInterval,
   type WipeAction,
   type MsixInstallParams,
+  type PollConfig,
 } from "../mdm/windows/csp.ts";
 import {
   upsertMdmDevice,
@@ -479,6 +481,48 @@ w.delete("/api/mdm/win/devices/:udid/apps/:pfn", (c) => {
     command: cmd,
   });
   return c.json({ commandUuid, packageFamilyName: pfn });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/poll-config — 設置 device 的 OMA-DM polling 間隔
+ *
+ * 默認 Win10 polling 間隔很長（前 8 次每 15 分鐘，之後每 8 小時），
+ * 命令排隊後動輒等幾小時。發此 API 後 device 會在下次 poll 套用新間隔，
+ * 之後所有命令在新間隔內到達。生產推薦 5/15 分鐘組合。
+ *
+ * Body: PollConfig（全為 optional，省略走推薦預設）
+ */
+w.post("/api/mdm/win/devices/:udid/poll-config", async (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  let config: PollConfig = {};
+  try {
+    config = (await c.req.json().catch(() => ({}))) as PollConfig;
+  } catch {
+    // 無 body 時用預設
+  }
+  const cmds = buildSetPollInterval(config);
+  const uuids = cmds.map((cmd, i) =>
+    enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: `PollConfig-${i}`,
+      command: cmd,
+    })
+  );
+  return c.json({
+    commandUuids: uuids,
+    config: {
+      intervalFirst: config.intervalFirst ?? 5,
+      countFirst: config.countFirst ?? 8,
+      intervalRest: config.intervalRest ?? 15,
+      countRest: config.countRest ?? 0,
+      pollOnLogin: config.pollOnLogin ?? true,
+    },
+    note: "Poll config queued. Takes effect on next poll, then steady state.",
+  });
 });
 
 /** POST /api/mdm/win/devices/:udid/wipe — 排入 RemoteWipe */

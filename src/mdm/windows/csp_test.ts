@@ -8,6 +8,7 @@ import {
   buildAppInventoryConfig,
   buildAppInventoryFetch,
   buildMsixUninstall,
+  buildSetPollInterval,
 } from "./csp.ts";
 
 Deno.test("buildRemoteWipe: 預設 doWipe", () => {
@@ -193,5 +194,44 @@ Deno.test("buildMsixUninstall: Delete + AppStore 路徑", () => {
   assertEquals(
     cmd.target,
     "./User/Vendor/MSFT/EnterpriseModernAppManagement/AppManagement/AppStore/Foo.Bar_xyz"
+  );
+});
+
+Deno.test("buildSetPollInterval: 默認 5 條 Replace 路徑 + ProviderID URL encode", () => {
+  const cmds = buildSetPollInterval();
+  assertEquals(cmds.length, 5);
+  // 每條都是 Replace
+  for (const c of cmds) {
+    assertEquals(c.verb, "Replace");
+    assertEquals(c.target.startsWith(
+      "./Vendor/MSFT/DMClient/Provider/MS%20DM%20Server/Poll/"
+    ), true);
+  }
+  // 默認值
+  assertEquals(cmds[0].target.endsWith("/IntervalForFirstSetOfRetries"), true);
+  assertEquals(cmds[0].format, "int");
+  assertEquals(cmds[0].data, "5");
+  assertEquals(cmds[1].data, "8"); // NumberOfFirstRetries
+  assertEquals(cmds[2].data, "15"); // IntervalForRemainingScheduledRetries
+  assertEquals(cmds[3].data, "0"); // NumberOfRemainingScheduledRetries=0=infinite
+  assertEquals(cmds[4].format, "bool");
+  assertEquals(cmds[4].data, "true"); // PollOnLogin
+});
+
+Deno.test("buildSetPollInterval: 自訂 ProviderID + 配置", () => {
+  const cmds = buildSetPollInterval({
+    intervalFirst: 1,
+    countFirst: 3,
+    intervalRest: 30,
+    pollOnLogin: false,
+    providerId: "Custom Provider",
+  });
+  assertEquals(cmds[0].data, "1");
+  assertEquals(cmds[1].data, "3");
+  assertEquals(cmds[2].data, "30");
+  assertEquals(cmds[4].data, "false");
+  assertEquals(
+    cmds[0].target.includes("/Provider/Custom%20Provider/Poll/"),
+    true
   );
 });

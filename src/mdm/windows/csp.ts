@@ -273,6 +273,87 @@ export function buildMsixUninstall(packageFamilyName: string): SyncMLCommand {
 }
 
 // ============================================================
+// DMClient Polling 配置
+// ============================================================
+
+/**
+ * Polling 配置參數
+ *
+ * Win10 默認 polling 間隔很長（IntervalForFirstSetOfRetries 預設 15 分鐘僅前 8 次，
+ * 之後切到 IntervalForRemainingScheduledRetries 預設 480 分鐘=8 小時）。
+ * 為讓命令能在 1-5 分鐘內到達 device，需顯式 Replace 這些節點。
+ *
+ * 推薦生產配置：
+ *   - intervalFirst=5（前 8 次，密集 retry 5 分鐘一次）
+ *   - countFirst=8
+ *   - intervalRest=15（之後 15 分鐘一次，平衡及時性 vs 耗電）
+ *   - countRest=0（0=無限）
+ */
+export interface PollConfig {
+  /** 前 N 次 retry 的間隔（分鐘）。預設 5。 */
+  intervalFirst?: number;
+  /** 前段 retry 次數。預設 8。 */
+  countFirst?: number;
+  /** 後續 retry 的間隔（分鐘）。預設 15。 */
+  intervalRest?: number;
+  /** 後段 retry 次數（0=無限）。預設 0。 */
+  countRest?: number;
+  /** 用戶登入時是否觸發 poll。預設 true。 */
+  pollOnLogin?: boolean;
+  /** ProviderID。MS-MDE2 自建 enrollment 用 magic name "MS DM Server"。 */
+  providerId?: string;
+}
+
+/**
+ * 建立 DMClient polling 配置命令序列（多條 Replace）
+ *
+ * 路徑：./Vendor/MSFT/DMClient/Provider/<ProviderID>/Poll/{IntervalForFirstSetOfRetries|...}
+ * Format=int / bool。
+ *
+ * 注意：ProviderID 在 URI 中需 URL encode（含空格的 "MS DM Server" → "MS%20DM%20Server"）。
+ */
+export function buildSetPollInterval(opts: PollConfig = {}): SyncMLCommand[] {
+  const {
+    intervalFirst = 5,
+    countFirst = 8,
+    intervalRest = 15,
+    countRest = 0,
+    pollOnLogin = true,
+    providerId = "MS DM Server",
+  } = opts;
+  const provider = encodeURIComponent(providerId);
+  const base =
+    `./Vendor/MSFT/DMClient/Provider/${provider}/Poll`;
+  return [
+    intReplace(`${base}/IntervalForFirstSetOfRetries`, intervalFirst),
+    intReplace(`${base}/NumberOfFirstRetries`, countFirst),
+    intReplace(`${base}/IntervalForRemainingScheduledRetries`, intervalRest),
+    intReplace(`${base}/NumberOfRemainingScheduledRetries`, countRest),
+    boolReplace(`${base}/PollOnLogin`, pollOnLogin),
+  ];
+}
+
+function intReplace(target: string, value: number): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target,
+    format: "int",
+    data: String(value),
+  };
+}
+
+function boolReplace(target: string, value: boolean): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target,
+    format: "bool",
+    data: value ? "true" : "false",
+  };
+}
+
+// ============================================================
 // 內部工具
 // ============================================================
 

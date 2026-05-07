@@ -738,3 +738,48 @@ Deno.test("Bulk install API: 空 deviceUdids 回 400", async () => {
   );
   assertEquals(res.status, 400);
 });
+
+Deno.test("Poll Config API: 排入 5 條 Replace 命令，設備 poll 拉到", async () => {
+  const deviceId = `WIN-POLL-${crypto.randomUUID()}`;
+  const udid = `windows-${deviceId}`;
+  cleanup(deviceId);
+  const app = makeTestApp();
+  await enrollDevice(app, deviceId, makeCsrBase64("x"));
+
+  const res = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/devices/${udid}/poll-config`, {
+      method: "POST",
+      body: JSON.stringify({ intervalFirst: 3, intervalRest: 10 }),
+      headers: { "Content-Type": "application/json" },
+    })
+  );
+  assertEquals(res.status, 200);
+  const json = await res.json();
+  assertEquals(json.commandUuids.length, 5);
+  assertEquals(json.config.intervalFirst, 3);
+  assertEquals(json.config.intervalRest, 10);
+
+  // 設備 poll 收到 5 條 Replace（MAX_COMMANDS_PER_RESPONSE=5 剛好同輪下發完）
+  const sync = `<SyncML xmlns="SYNCML:SYNCML1.2">
+  <SyncHdr>
+    <SessionID>1</SessionID><MsgID>1</MsgID>
+    <Target><LocURI>${BASE}/api/mdm/win/manage/${deviceId}</LocURI></Target>
+    <Source><LocURI>${deviceId}</LocURI></Source>
+  </SyncHdr>
+  <SyncBody><Alert><CmdID>2</CmdID><Data>1201</Data></Alert><Final/></SyncBody>
+</SyncML>`;
+  const syncRes = await app.fetch(
+    new Request(`${BASE}/api/mdm/win/manage/${deviceId}`, {
+      method: "PUT",
+      body: sync,
+    })
+  );
+  const respXml = await syncRes.text();
+  assert(respXml.includes("/IntervalForFirstSetOfRetries</LocURI>"));
+  assert(respXml.includes("/IntervalForRemainingScheduledRetries</LocURI>"));
+  assert(respXml.includes("/PollOnLogin</LocURI>"));
+  assert(respXml.includes(">3</Data>")); // intervalFirst=3
+  assert(respXml.includes(">10</Data>")); // intervalRest=10
+
+  cleanup(deviceId);
+});
