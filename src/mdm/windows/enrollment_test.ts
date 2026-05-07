@@ -66,10 +66,14 @@ Deno.test("Discovery: 解析請求並回傳含 Policy / Enrollment URL", () => {
     baseUrl: "https://mdm.example.com",
   });
 
-  // 必含的關鍵欄位（EnrollmentVersion 等須在 PKI namespace 下，Win10 ENROLLClient 嚴格要求）
-  assert(/<EnrollmentVersion xmlns="[^"]*pki\/2009[^"]*">4\.0<\/EnrollmentVersion>/.test(resp));
-  assert(/<EnrollmentPolicyServiceUrl xmlns="[^"]*pki\/2009[^"]*">[^<]*Policy\.svc/.test(resp));
-  assert(/<EnrollmentServiceUrl xmlns="[^"]*pki\/2009[^"]*">[^<]*Enrollment\.svc/.test(resp));
+  // DiscoverResult 子元素繼承父 enrollment namespace（按 Intune 真機抓包）
+  // — 不應在子元素上重新宣告 PKI namespace；舊版測試誤期待 PKI ns 已修正
+  assert(/<EnrollmentVersion>4\.0<\/EnrollmentVersion>/.test(resp));
+  assert(/<EnrollmentPolicyServiceUrl>[^<]*Policy\.svc<\/EnrollmentPolicyServiceUrl>/.test(resp));
+  assert(/<EnrollmentServiceUrl>[^<]*Enrollment\.svc<\/EnrollmentServiceUrl>/.test(resp));
+  // negative：DiscoverResult 子元素不該帶 xmlns="...pki..."
+  assert(!/<EnrollmentVersion\s+xmlns="[^"]*pki/.test(resp));
+  assert(!/<EnrollmentPolicyServiceUrl\s+xmlns="[^"]*pki/.test(resp));
   assert(resp.includes("<AuthPolicy>OnPremise</AuthPolicy>"));
   assert(resp.includes("<a:RelatesTo>urn:uuid:abc-123</a:RelatesTo>"));
 });
