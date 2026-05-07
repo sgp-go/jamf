@@ -2,6 +2,20 @@
 
 > 自建 Windows MDM 完整文檔索引。建議按角色閱讀順序。
 
+## ⚠️ 已驗證 vs 未驗證範圍
+
+| 項目 | 真機驗證狀態 |
+|---|---|
+| Win10 22H2 Pro/Enterprise/Education | ✅ 真機（Surface Go 3）端到端驗證 |
+| 4 大功能：部署 / 派送（批量）/ 更新 | ✅ 真機驗證（含 inventory 反查） |
+| 4 大功能：清除個資（RemoteWipe） | ⏳ 協議層 OK，**未真機驗證**（需要可被 wipe 的虛擬機） |
+| polling 自動觸發（5/15 min 雙段）| ✅ 真機驗證 |
+| WNS push 秒級觸發 | ✅ 真機驗證（6-9s 延遲） |
+| Win11 Pro/Enterprise/Education | ⏳ 協議層完全同源預期可用，**建議首批接入時單獨跑一台 Win11 真機/VM 確認** |
+| Win10/11 Home | ❌ 不支援（MDM client 限制） |
+
+> RemoteWipe 與 Win11 的協議邏輯與已驗證部分同源，預期可用。建議台灣團隊首批接入時跑一台 VM 各驗證一次。
+
 ## 角色 A：剛接手的工程師
 
 按順序讀：
