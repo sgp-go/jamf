@@ -360,8 +360,11 @@ w.post("/api/mdm/win/devices/:udid/apps/install", async (c) => {
 });
 
 /**
- * POST /api/mdm/win/devices/:udid/apps/update — 升級 MSIX（覆蓋安裝 + ForceUpdateToAnyVersion）
- * 入參同 install；自動帶 forceUpdateToAnyVersion=true。
+ * POST /api/mdm/win/devices/:udid/apps/update — 升級 MSIX
+ *
+ * 真機驗證：install 完成後 HostedInstall sub-node 會被 device 清掉，
+ * update 直接 Exec 會 404。必須重新 Add PFN 節點 → 再 Exec HostedInstall（含 ForceUpdate）。
+ * 與 install 流程一致，差別只在 Exec 攜帶 ForceUpdateToAnyVersion 位。
  */
 w.post("/api/mdm/win/devices/:udid/apps/update", async (c) => {
   const udid = c.req.param("udid");
@@ -371,15 +374,21 @@ w.post("/api/mdm/win/devices/:udid/apps/update", async (c) => {
   }
   const [params, err] = await parseMsixParams(c);
   if (err) return c.json(err.json, err.status);
-  const commandUuid = enqueueWindowsCommand({
+  const addUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "MsixUpdateAdd",
+    command: buildMsixInstallAddNode(params!.packageFamilyName),
+  });
+  const execUuid = enqueueWindowsCommand({
     deviceUdid: udid,
     commandType: "MsixUpdate",
     command: buildMsixUpdate(params!),
   });
   return c.json({
-    commandUuid,
+    addUuid,
+    execUuid,
     packageFamilyName: params!.packageFamilyName,
-    note: "Update queued (ForceUpdateToAnyVersion=true).",
+    note: "Update queued (Add+Exec ForceUpdateToAnyVersion).",
   });
 });
 

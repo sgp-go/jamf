@@ -610,8 +610,11 @@ Deno.test("MSIX update API: 命令含 ForceUpdateToAnyVersion + HostedInstall �
     })
   );
   assertEquals(updRes.status, 200);
+  const updJson = await updRes.json();
+  assertExists(updJson.addUuid);
+  assertExists(updJson.execUuid);
 
-  // 設備 poll 看回應
+  // 設備 poll 看回應：應同時含 Add + Exec（與 install 同樣兩段式）
   const sync = `<SyncML xmlns="SYNCML:SYNCML1.2">
   <SyncHdr>
     <SessionID>1</SessionID><MsgID>1</MsgID>
@@ -627,6 +630,8 @@ Deno.test("MSIX update API: 命令含 ForceUpdateToAnyVersion + HostedInstall �
     })
   );
   const respXml = await syncRes.text();
+  assert(respXml.includes("<Add>"));
+  assert(respXml.includes("<Exec>"));
   assert(respXml.includes("AppInstallation/Aspira.Agent_xyz/HostedInstall"));
   // ForceUpdateToAnyVersion = 0x40 = 64 in DeploymentOptions
   assert(respXml.includes("DeploymentOptions=&quot;64&quot;"));
