@@ -60,11 +60,13 @@ export class WnsClient {
    * 發送 raw push notification 到 device 的 ChannelURI
    *
    * @param channelUri device 上報的 https://*.notify.windows.com/... URL
-   * @param body 任意 binary（<=5KB），DMClient 服務不關心內容只關心觸發
+   * @param body 任意 binary（<=5KB）。**必須非空** — 真機驗證空 body 會被 OS
+   *             以 0x80070057 (E_INVALIDARG) 拒收（push body count=0 視為無效資料）。
+   *             默認帶 4 字節 'mdm\n' 觸發 DMClient 即可。
    */
   async sendRaw(
     channelUri: string,
-    body: Uint8Array = new Uint8Array(0)
+    body: Uint8Array = new TextEncoder().encode("mdm\n")
   ): Promise<WnsSendResult> {
     if (!/^https:\/\/[^.]+\.notify\.windows\.com\//i.test(channelUri)) {
       throw new Error(
