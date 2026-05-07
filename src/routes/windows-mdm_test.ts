@@ -415,9 +415,10 @@ Deno.test("MSIX install API + SyncML 通道：排入命令 → 設備 poll 拉�
   );
   assertEquals(installRes.status, 200);
   const installJson = await installRes.json();
-  assertExists(installJson.commandUuid);
+  assertExists(installJson.addUuid);
+  assertExists(installJson.execUuid);
 
-  // 設備 poll
+  // 設備 poll，回應同輪同時包含 Add ./AppInstallation/{PFN} + Exec HostedInstall
   const sync = `<SyncML xmlns="SYNCML:SYNCML1.2">
   <SyncHdr>
     <SessionID>1</SessionID><MsgID>1</MsgID>
@@ -436,14 +437,17 @@ Deno.test("MSIX install API + SyncML 通道：排入命令 → 設備 poll 拉�
     })
   );
   const respXml = await syncRes.text();
+  assert(respXml.includes("<Add>"));
   assert(respXml.includes("<Exec>"));
   assert(
     respXml.includes(
-      "EnterpriseModernAppManagement/AppInstallation/Microsoft.WindowsCalculator"
+      "EnterpriseModernAppManagement/AppInstallation/Microsoft.WindowsCalculator_8wekyb3d8bbwe</LocURI>"
     )
   );
-  // Data 含 ContentURL
-  assert(respXml.includes("cdn.example.com/calculator.msixbundle"));
+  assert(respXml.includes("HostedInstall"));
+  // Data 是 <Application PackageUri="..." /> XSD 真實格式
+  assert(respXml.includes("&lt;Application PackageUri="));
+  assert(respXml.includes("calculator.msixbundle"));
 
   cleanup(deviceId);
 });
@@ -601,7 +605,6 @@ Deno.test("MSIX update API: 命令含 ForceUpdateToAnyVersion + HostedInstall �
       body: JSON.stringify({
         packageFamilyName: "Aspira.Agent_xyz",
         contentUri: "https://cdn.example.com/agent-v2.msixbundle",
-        hashHex: "v2hash",
       }),
       headers: { "Content-Type": "application/json" },
     })
@@ -625,7 +628,8 @@ Deno.test("MSIX update API: 命令含 ForceUpdateToAnyVersion + HostedInstall �
   );
   const respXml = await syncRes.text();
   assert(respXml.includes("AppInstallation/Aspira.Agent_xyz/HostedInstall"));
-  assert(respXml.includes("ForceUpdateToAnyVersion"));
+  // ForceUpdateToAnyVersion = 0x40 = 64 in DeploymentOptions
+  assert(respXml.includes("DeploymentOptions=&quot;64&quot;"));
   assert(respXml.includes("agent-v2.msixbundle"));
 
   cleanup(deviceId);
@@ -697,14 +701,16 @@ Deno.test("Bulk install API: 多台 enqueue + 不存在的 udid 標 error 不中
   assertEquals(json.total, 3);
   assertEquals(json.queued, 2);
   assertEquals(json.failed, 1);
-  // 兩台正常設備有 commandUuid，第三台有 error
+  // 兩台正常設備各有 addUuid + execUuid（兩段式），第三台有 error
   const r1 = json.results.find((r: { udid: string }) => r.udid === udid1);
   const r2 = json.results.find((r: { udid: string }) => r.udid === udid2);
   const r3 = json.results.find(
     (r: { udid: string }) => r.udid === "windows-doesnt-exist"
   );
-  assertExists(r1.commandUuid);
-  assertExists(r2.commandUuid);
+  assertExists(r1.addUuid);
+  assertExists(r1.execUuid);
+  assertExists(r2.addUuid);
+  assertExists(r2.execUuid);
   assertEquals(r3.error, "device not found");
 
   cleanup(dev1);

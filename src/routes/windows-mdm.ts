@@ -22,6 +22,7 @@ import {
 import {
   buildRemoteWipe,
   buildMsixInstall,
+  buildMsixInstallAddNode,
   buildMsixUpdate,
   buildUpdateScan,
   buildMsixUninstall,
@@ -290,11 +291,13 @@ async function parseMsixParams(
   const packageFamilyName = body.packageFamilyName as string | undefined;
   const contentUri = body.contentUri as string | undefined;
   const hashHex = body.hashHex as string | undefined;
-  if (!packageFamilyName || !contentUri || !hashHex) {
+  // hashHex 不再是必需（XSD 中沒有 Hash 欄位；HTTPS 信任 MSIX 自身簽名）
+  // 但保留欄位入 params 給未來 UNC/SMB 場景用
+  if (!packageFamilyName || !contentUri) {
     return [
       null,
       {
-        json: { error: "packageFamilyName, contentUri, hashHex required" },
+        json: { error: "packageFamilyName, contentUri required" },
         status: 400,
       },
     ];
@@ -323,7 +326,12 @@ async function parseMsixParams(
   ];
 }
 
-/** POST /api/mdm/win/devices/:udid/apps/install — 派送 MSIX (HostedInstall) */
+/**
+ * POST /api/mdm/win/devices/:udid/apps/install — 派送 MSIX (HostedInstall)
+ *
+ * Spec 要求兩段式：先 Add ./AppInstallation/{PFN} 節點，再 Exec HostedInstall。
+ * 跳過 Add device 會回 404。MAX_COMMANDS_PER_RESPONSE>=2 保證同輪 SyncML 同時下發。
+ */
 w.post("/api/mdm/win/devices/:udid/apps/install", async (c) => {
   const udid = c.req.param("udid");
   const device = getMdmDevice(udid);
@@ -332,16 +340,22 @@ w.post("/api/mdm/win/devices/:udid/apps/install", async (c) => {
   }
   const [params, err] = await parseMsixParams(c);
   if (err) return c.json(err.json, err.status);
-  const commandUuid = enqueueWindowsCommand({
+  const addUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "MsixInstallAdd",
+    command: buildMsixInstallAddNode(params!.packageFamilyName),
+  });
+  const execUuid = enqueueWindowsCommand({
     deviceUdid: udid,
     commandType: "MsixInstall",
     command: buildMsixInstall(params!),
   });
   return c.json({
-    commandUuid,
+    addUuid,
+    execUuid,
     packageFamilyName: params!.packageFamilyName,
     note:
-      "Install queued. Device will pick up on next poll (1-60 min) or via WNS push.",
+      "Install queued (Add+Exec). Device will pick up on next poll (1-60 min).",
   });
 });
 
@@ -410,7 +424,8 @@ w.post("/api/mdm/win/devices/install/bulk", async (c) => {
 
   const results: Array<{
     udid: string;
-    commandUuid?: string;
+    addUuid?: string;
+    execUuid?: string;
     error?: string;
   }> = [];
   for (const udid of udids) {
@@ -419,14 +434,19 @@ w.post("/api/mdm/win/devices/install/bulk", async (c) => {
       results.push({ udid, error: "device not found" });
       continue;
     }
-    const commandUuid = enqueueWindowsCommand({
+    const addUuid = enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: "MsixInstallAdd",
+      command: buildMsixInstallAddNode(params!.packageFamilyName),
+    });
+    const execUuid = enqueueWindowsCommand({
       deviceUdid: udid,
       commandType: "MsixInstall",
       command: buildMsixInstall(params!),
     });
-    results.push({ udid, commandUuid });
+    results.push({ udid, addUuid, execUuid });
   }
-  const ok = results.filter((r) => r.commandUuid).length;
+  const ok = results.filter((r) => r.execUuid).length;
   return c.json({
     total: udids.length,
     queued: ok,

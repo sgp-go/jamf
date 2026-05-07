@@ -40,47 +40,85 @@ export function buildRemoteWipe(action: WipeAction = "doWipe"): SyncMLCommand {
 export interface MsixInstallParams {
   /** Package Family Name，例：Microsoft.WindowsCalculator_8wekyb3d8bbwe */
   packageFamilyName: string;
-  /** 簽署過的 .msix / .msixbundle / .appx HTTPS URL */
+  /** 簽署過的 .msix / .msixbundle / .appx HTTPS URL（XSD 中 PackageUri 屬性） */
   contentUri: string;
-  /** SHA-256 雜湊（hex 字串），對應 contentUri 內容 */
-  hashHex: string;
+  /**
+   * SHA-256 雜湊（hex 字串）
+   * @deprecated XSD 不含 Hash 欄位；HTTPS 場景下 device 信任 MSIX 自身簽名。
+   * 保留欄位避免破壞舊呼叫方，但本實作不再傳給 device。
+   */
+  hashHex?: string;
   /**
    * isLOB=true 走 HostedInstall（從我們的 HTTPS 拉，自家簽署的 LOB 應用，預設）
    * isLOB=false 走 StoreInstall（從 Microsoft Store 拉，需提供 PackageIdentityName/Publisher，本實作未支援）
    */
   isLOB?: boolean;
-  /**
-   * 強制升級到任意版本（可降版）。升級場景請傳 true；首次安裝可省略
-   */
+  /** 強制升級到任意版本（可降版） */
   forceUpdateToAnyVersion?: boolean;
   /** 強制關閉正在運行的應用以完成安裝/升級 */
   forceApplicationShutdown?: boolean;
   /** 延遲註冊（在應用關閉後才註冊新版本，平滑升級體驗） */
   deferRegistration?: boolean;
+  /** 額外依賴包 URI（XSD 中 <Dependencies><Dependency PackageUri="..."/></Dependencies>） */
+  dependencyUris?: string[];
 }
 
 /**
- * 建立 MSIX 安裝/升級命令（HostedInstall）
+ * EnterpriseModernAppManagement HostedInstall DeploymentOptions 位掩碼
+ *
+ * Spec 公開的 attribute 是 unsignedByte，但具體位含義 Microsoft 未公開列出。
+ * 以下對應為社區 / Intune 抓包逆向常用值，未經官方文檔確認。
+ */
+const DEPLOYMENT_OPT_FORCE_APP_SHUTDOWN = 0x01;
+const DEPLOYMENT_OPT_DEV_MODE = 0x02;
+const DEPLOYMENT_OPT_INSTALL_ALL_RESOURCES = 0x04;
+const DEPLOYMENT_OPT_FORCE_TARGET_APP_SHUTDOWN = 0x08;
+const DEPLOYMENT_OPT_FORCE_UPDATE_TO_ANY_VERSION = 0x40;
+const DEPLOYMENT_OPT_DEFER_REGISTRATION = 0x80;
+
+/**
+ * 建立 AppInstallation/{PFN} 節點的 Add 命令
+ *
+ * Spec 要求：要安裝新 LOB MSIX 必須先 Add 創建 PFN entity，再 Exec HostedInstall。
+ * 跳過 Add 直接 Exec → device 回 404 Not Found（真機驗證確認）。
+ * Update 場景下 PFN 節點已存在，不需要 Add，可以直接 Exec HostedInstall（含 ForceUpdateToAnyVersion）。
+ */
+export function buildMsixInstallAddNode(
+  packageFamilyName: string
+): SyncMLCommand {
+  const encodedPfn = encodeURIComponent(packageFamilyName);
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target:
+      `./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/${encodedPfn}`,
+    format: "node",
+  };
+}
+
+/**
+ * 建立 MSIX 安裝/升級的 Exec HostedInstall 命令
  *
  * EnterpriseModernAppManagement CSP HostedInstall 用於從 LOB HTTPS source 拉取
- * 自簽 MSIX 套件。同 PFN 高版本的 install 即覆蓋升級；要強制升級到任意版本（含降版）
- * 需傳 forceUpdateToAnyVersion=true。
+ * 自簽 MSIX 套件。同 PFN 高版本即覆蓋升級；強制覆蓋（含降版）需 forceUpdateToAnyVersion=true。
  *
  * 路徑：./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/<PFN>/HostedInstall
- * Format=xml；Data 是 <HostedInstallAction> XML（spec 文件 §HostedInstall）。
+ * Format=xml；Data 是 <HostedInstallAction> XML。
+ *
+ * 首次 install 場景必須先用 buildMsixInstallAddNode() 創建節點，再呼叫此函數。
+ * Update 場景可直接呼叫此函數（節點已存在）。
  */
 export function buildMsixInstall(params: MsixInstallParams): SyncMLCommand {
   const {
     packageFamilyName,
     contentUri,
-    hashHex,
     isLOB = true,
     forceUpdateToAnyVersion,
     forceApplicationShutdown,
     deferRegistration,
+    dependencyUris,
   } = params;
   if (!isLOB) {
-    // StoreInstall 需 PackageIdentityName + Publisher 而非 ContentURL/Hash，本實作專做 LOB
     throw new Error(
       "buildMsixInstall: isLOB=false (StoreInstall) 未支援；本實作專做 LOB HostedInstall"
     );
@@ -89,23 +127,31 @@ export function buildMsixInstall(params: MsixInstallParams): SyncMLCommand {
   const cspPath =
     `./User/Vendor/MSFT/EnterpriseModernAppManagement/AppInstallation/${encodedPfn}/HostedInstall`;
 
-  // HostedInstallAction XML：spec 要求 ContentURI 屬性 + Hash 子元素 + 各種 install option 子元素
-  const opts: string[] = [];
-  if (forceApplicationShutdown) {
-    opts.push("<ForceApplicationShutdown>true</ForceApplicationShutdown>");
-  }
+  // 真機 XSD（GitHub MicrosoftDocs/windows-itpro-docs）：
+  //   <Application PackageUri="https://..." DeploymentOptions="N">
+  //     <Dependencies><Dependency PackageUri="..."/></Dependencies>
+  //   </Application>
+  // 沒有 <HostedInstallAction>，沒有 <Hash>。Hash 不需要（HTTPS 信任 MSIX 簽名）。
+  let deploymentOptions = 0;
+  if (forceApplicationShutdown) deploymentOptions |= DEPLOYMENT_OPT_FORCE_APP_SHUTDOWN;
   if (forceUpdateToAnyVersion) {
-    opts.push("<ForceUpdateToAnyVersion>true</ForceUpdateToAnyVersion>");
+    deploymentOptions |= DEPLOYMENT_OPT_FORCE_UPDATE_TO_ANY_VERSION;
   }
-  if (deferRegistration) {
-    opts.push('<DeferRegistration>1</DeferRegistration>');
+  if (deferRegistration) deploymentOptions |= DEPLOYMENT_OPT_DEFER_REGISTRATION;
+
+  const attrs = [`PackageUri="${escapeAttr(contentUri)}"`];
+  if (deploymentOptions) {
+    attrs.push(`DeploymentOptions="${deploymentOptions}"`);
   }
-  const innerXml =
-    "<HostedInstallAction>" +
-    `<Source ContentURI="${escapeAttr(contentUri)}" />` +
-    `<Hash>${escapeText(hashHex)}</Hash>` +
-    opts.join("") +
-    "</HostedInstallAction>";
+  let innerXml = `<Application ${attrs.join(" ")}`;
+  if (dependencyUris && dependencyUris.length > 0) {
+    const deps = dependencyUris
+      .map((uri) => `<Dependency PackageUri="${escapeAttr(uri)}" />`)
+      .join("");
+    innerXml += `><Dependencies>${deps}</Dependencies></Application>`;
+  } else {
+    innerXml += " />";
+  }
 
   return {
     cmdId: "0",
