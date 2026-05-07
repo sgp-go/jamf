@@ -191,6 +191,7 @@ function initSchema() {
     "ALTER TABLE mdm_commands ADD COLUMN csp_path TEXT",
     "ALTER TABLE mdm_commands ADD COLUMN syncml_verb TEXT",
     "ALTER TABLE mdm_commands ADD COLUMN syncml_data TEXT",
+    "ALTER TABLE mdm_commands ADD COLUMN syncml_format TEXT",
     "ALTER TABLE mdm_commands ADD COLUMN session_msg_id TEXT",
   ];
   for (const sql of alters) {
@@ -644,21 +645,23 @@ export function queueWindowsCommand(
   commandType: string,
   cspPath: string,
   syncmlVerb: "Add" | "Replace" | "Exec" | "Get" | "Delete",
-  syncmlData?: string | null
+  syncmlData?: string | null,
+  syncmlFormat?: string | null
 ): number {
   const db = getDb();
   db.prepare(
     `INSERT INTO mdm_commands (
       command_uuid, device_udid, command_type, request_payload,
-      platform, csp_path, syncml_verb, syncml_data
-    ) VALUES (?, ?, ?, '', 'windows', ?, ?, ?)`
+      platform, csp_path, syncml_verb, syncml_data, syncml_format
+    ) VALUES (?, ?, ?, '', 'windows', ?, ?, ?, ?)`
   ).run(
     commandUuid,
     deviceUdid,
     commandType,
     cspPath,
     syncmlVerb,
-    syncmlData ?? null
+    syncmlData ?? null,
+    syncmlFormat ?? null
   );
   return db.lastInsertRowId;
 }

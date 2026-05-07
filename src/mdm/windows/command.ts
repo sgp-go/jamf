@@ -146,7 +146,10 @@ export function handleSyncMLRequest(opts: {
         verb: next.syncml_verb as SyncMLVerb,
         target: next.csp_path,
         data: next.syncml_data ?? undefined,
-        format: next.syncml_data ? "chr" : undefined,
+        // 優先用 enqueue 時指定的 format（如 AppInventoryQuery 需 xml）
+        // 沒指定則 fallback：有 data 預設 chr，無 data 不寫 format
+        format:
+          next.syncml_format ?? (next.syncml_data ? "chr" : undefined),
       },
     });
     // 立刻標 sent 並從 queue 移走（getNextQueuedWindowsCommand 只取 status='queued'）
@@ -221,7 +224,8 @@ export function enqueueWindowsCommand(opts: {
     opts.commandType,
     opts.command.target,
     opts.command.verb,
-    opts.command.data ?? null
+    opts.command.data ?? null,
+    opts.command.format ?? null
   );
   console.log(
     `[Win MDM] 命令已排入: ${commandUuid} type=${opts.commandType} udid=${opts.deviceUdid}`

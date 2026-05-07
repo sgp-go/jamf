@@ -115,6 +115,8 @@ export interface MdmCommandRow {
   csp_path: string | null;
   syncml_verb: SyncMLVerb | null;
   syncml_data: string | null;
+  /** SyncML Item Meta Format（chr/xml/int/bool/b64...）；缺省由 syncml_data 是否非空推導 */
+  syncml_format: string | null;
   session_msg_id: string | null;
 }
 
