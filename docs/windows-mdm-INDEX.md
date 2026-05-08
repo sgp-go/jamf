@@ -8,13 +8,14 @@
 |---|---|
 | Win10 22H2 Pro/Enterprise/Education | ✅ 真機（Surface Go 3）端到端驗證 |
 | 4 大功能：部署 / 派送（批量）/ 更新 | ✅ 真機驗證（含 inventory 反查） |
-| 4 大功能：清除個資（RemoteWipe） | ⏳ 協議層 OK，**未真機驗證**（需要可被 wipe 的虛擬機） |
+| 4 大功能：清除個資（RemoteWipe） | ✅ **VM 驗證**（Win11 ARM64 / UTM, 2026-05-07）— sent→ack 7s, device 進入「正在重設這部電腦」→ OOBE |
 | polling 自動觸發（5/15 min 雙段）| ✅ 真機驗證 |
 | WNS push 秒級觸發 | ✅ 真機驗證（6-9s 延遲） |
-| Win11 Pro/Enterprise/Education | ⏳ 協議層完全同源預期可用，**建議首批接入時單獨跑一台 Win11 真機/VM 確認** |
+| Win11 Pro ARM64 / x64 enrollment + inventory | ✅ **VM 驗證**（Win11 24H2 26100 ARM64 / UTM, 2026-05-07） |
+| Win11 ARM64 上 sideload **x64 MSIX** | ❌ **不支援**（OS 強制架構匹配，回 `0x80070005`）— ARM 客戶端必須用 ARM64 / neutral MSIX |
 | Win10/11 Home | ❌ 不支援（MDM client 限制） |
 
-> RemoteWipe 與 Win11 的協議邏輯與已驗證部分同源，預期可用。建議台灣團隊首批接入時跑一台 VM 各驗證一次。
+> Win11 ARM 環境（Apple Silicon 上的 UTM/Parallels）若要驗證 install/update/push，必須在 Win11 上重新 build ARM64 / neutral 架構的 MSIX（改 manifest 的 `ProcessorArchitecture` 欄位 + 重簽）。詳見 [`data/test/README.md`](../data/test/README.md)。
 
 ## 角色 A：剛接手的工程師
 

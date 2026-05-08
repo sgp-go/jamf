@@ -82,6 +82,33 @@ server response 中 `<MsgID>38</MsgID>` 跨 session 累加到大數（如 37、3
 
 **修法**：sessionId 變化時 `state.inFlight = {}`（commit `b0b1b57`）。
 
+### 測試場景陷阱：fake session 消耗命令
+
+**症狀**：用 curl 手動模擬 OMA-DM session 想看 server 響應內容（如 `curl -X POST http://localhost:3000/api/mdm/win/manage/<deviceId> -d '<SyncML SessionID="9999"...>'`）後，**真實 device** 怎麼 sync 都拉不到原本排隊的命令。
+DB 看到 `mdm_commands` 對應 row 的 `status='sent'`、`sent_at` 已填、`response_payload` 為空（沒人 ack）。
+
+**根因**：服務端不認證 session 來源。任何 POST 到 `/api/mdm/win/manage/<deviceId>` 帶合法 SyncML 都會：
+1. 從 queue 取出 `status='queued'` 的命令
+2. 標記 `status='sent'` 寫入 inFlight
+3. 在 SyncML response 中下發給呼叫方
+
+curl 模擬就是合法呼叫方，命令確實「發出去」了 —— 但發給了 curl，不是真實 device。device 之後 sync 時 queue 已空，永遠拿不到。
+
+**修法 — 重置命令狀態**：
+```bash
+sqlite3 data/agent_reports.db "
+  UPDATE mdm_commands
+  SET status='queued', sent_at=NULL, session_msg_id=NULL
+  WHERE command_uuid='<被消耗的-uuid>';
+"
+```
+然後讓 device 真實 sync（`Get-ScheduledTask -TaskPath '\Microsoft\Windows\EnterpriseMgmt\*' | Where-Object TaskName -match OMADMClient | Start-ScheduledTask`），看 `[Win MDM] 發送命令: ...` 出現。
+
+**避免方法**：
+- 想看 server 邏輯 → 用單元測試（`syncml_test.ts` / `command_test.ts`），測試在記憶體 DB 跑，不影響真實 device 隊列
+- 想看真實 SyncML 內容 → 看 device 端的 OMA-DM 日誌（`Microsoft-Windows-DeviceManagement-Enterprise-Diagnostics-Provider/Admin`）或 ngrok inspector（`http://localhost:4040/api/requests/http`）
+- 生產環境應加 mTLS 或 device cert 校驗，禁止匿名 curl 直連 manage 端點
+
 ---
 
 ## Inventory / 應用清單類

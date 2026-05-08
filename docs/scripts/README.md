@@ -1,6 +1,14 @@
-# Win10 真機驗證 PowerShell 腳本
+# Win10 真機驗證 PowerShell 腳本（重 build MSIX）
 
-這些腳本在 Win10 上跑（透過 SSH `powershell -EncodedCommand`），生成簽名 MSIX 與計算 PFN，配合 `src/mdm/windows/` 真機驗證使用。
+這些腳本在 Win10/11 上跑（透過 SSH `powershell -EncodedCommand`），生成簽名 MSIX 與計算 PFN。
+
+> 💡 **演示 / 接手不需要跑這些腳本**——git 倉庫 [`data/test/`](../../data/test/) 已附 3 個簽好的 demo MSIX，[`quick-start.md` 第 5 步](../windows-mdm-quick-start.md#第-5-步派送-demo-msix-安裝)直接拿來派送即可。
+>
+> **何時才需要來這裡重 build**：
+> - 改了源碼（如 `hello.cs` 加新功能）
+> - 改了 manifest（加 capability、改 ProcessorArchitecture）
+> - 換了 publisher cert（公司更換簽署主體）
+> - **Win11 ARM64 環境**（git 現成 MSIX 是 x64，ARM 上會 `0x80070005` 拒絕 sideload，必須重 build ARM64 / neutral 版）
 
 ## 環境前置
 

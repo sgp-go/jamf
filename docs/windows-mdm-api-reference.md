@@ -202,7 +202,28 @@ curl -X POST http://localhost:3000/api/mdm/win/devices/$UDID/wipe \
 | `doWipeProtected` | 受保護清除（重置後重新進 OOBE） |
 | `doWipePersistProvisionedData` | 保留預配資料（適合 Autopilot 重設） |
 
-**真機驗證需可被 wipe 的虛擬機**（VirtualBox / VMware）。
+#### VM 真機驗證時間線（Win11 24H2 ARM64 / UTM, 2026-05-07）
+
+| 階段 | 信號 | 累積耗時 |
+|---|---|---|
+| ① POST `/wipe` 排隊 | DB 狀態 `queued`，response 帶 `commandUuid` | 即時 |
+| ② Device 下次 OMA-DM sync 拉走命令 | 後端 log `[Win MDM] 發送命令: <uuid> csp=./Device/Vendor/MSFT/RemoteWipe/doWipeProtected verb=Exec`；DB 狀態 `sent` | sync 觸發後 1-2s |
+| ③ Device 回 ack | DB `responded_at` 填入；`response_payload={"cmd":"Exec","data":"200"}`；狀態 `acknowledged` | sent 後 ~7s |
+| ④ OS 開始 unprovision | EnterpriseMgmt 下所有 ScheduledTask 變 disabled（後續 trigger 會回 `0x80041326 SCHED_E_TASK_DISABLED`） | ack 後 1-3s |
+| ⑤ Device SSH/網路失聯 | Mac 端 `nc -zv -G 2 <ip> 22` Operation timed out；後端不再收到 `/api/mdm/win/manage/<id>` | ack 後 5-15s |
+| ⑥ 螢幕顯示「正在重設這部電腦」 | UTM/虛擬機畫面看到藍色全屏 + 進度條 | ack 後 15-45s |
+| ⑦ 自動重啟若干次 → 進 OOBE | 開箱畫面（語言選擇） | ack 後 5-15 min |
+
+**驗證要點**（接手者照此檢查）：
+1. ✅ DB `mdm_commands` 對應行 `status='acknowledged'` + `response_payload` 含 `data:"200"`
+2. ✅ 後端日誌出現 `[Win MDM] 發送命令: ... csp=./Device/Vendor/MSFT/RemoteWipe/...`
+3. ✅ Mac 對 device IP 的 SSH/Ping 在 ack 後 15s 內完全失聯
+4. ✅ Device 螢幕進入 OOBE = wipe 完整成功
+
+> ⚠️ **不要用 curl 模擬 OMA-DM session 來測試 wipe**（如 `curl -X POST .../api/mdm/win/manage/<deviceId>` 帶假 SyncML）。fake session 會把 `queued` 命令標 `sent` 發給 fake client，**真實 device 永遠拿不到**。
+> 修復：`UPDATE mdm_commands SET status='queued', sent_at=NULL WHERE command_uuid='...'`，再讓 device sync。詳見 [troubleshooting.md](./windows-mdm-troubleshooting.md#fake-session-消耗命令)。
+
+> ⚠️ **本驗證在 ARM64 Win11 VM 上完成**。x64 / ARM64 客戶端的 RemoteWipe 協議完全同源，但**首次接入新 OS 版本仍建議重複此驗證**確認時間線無變化。
 
 ---
 

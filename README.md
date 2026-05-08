@@ -62,6 +62,8 @@ bundle exec fastlane build_dev
 
 ## 文件目錄
 
+### Apple / Jamf Pro
+
 | 文件 | 說明 |
 |------|------|
 | [Apple Developer 配置指南](docs/apple-developer-setup.md) | Apple Developer Portal 設定、證書管理、**專案集成 Checklist** |
@@ -69,3 +71,12 @@ bundle exec fastlane build_dev
 | [App API 集成](docs/app-api-integration.md) | iOS Agent App 與後端的 API 對接規格、資料模型 |
 | [裝置註冊指南](docs/device-enrollment-guide.md) | ABM + Jamf Pro 裝置註冊完整流程 |
 | [裝置繫結步驟](docs/device-binding-steps.md) | iPad 實際繫結操作記錄與故障排除 |
+
+### Windows MDM 子系統（自建）
+
+| 文件 | 說明 |
+|------|------|
+| [📚 Windows MDM 文件總目錄](docs/windows-mdm-INDEX.md) | **入口**：4 種角色閱讀路徑、已驗證範圍、11 份詳細文檔導航 |
+| [🚀 30 分鐘快速上手](docs/windows-mdm-quick-start.md) | 從 0 跑通 enrollment + 4 大功能演示 + 秒級推送 |
+| [🏭 生產部署](docs/windows-mdm-production-deployment.md) | 服務端部署 SOP + 設備端生產化 + 待實現項清單 |
+| [📦 Demo MSIX 接手即用](data/test/README.md) | 已簽 demo MSIX + cert 公鑰、客戶端首次準備腳本 |
