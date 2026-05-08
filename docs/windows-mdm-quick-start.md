@@ -66,10 +66,8 @@ ngrok http 3000 --request-header-remove="Accept-Encoding"
 ```powershell
 # 假設專案 clone 在 D:\jamf_explore，根據實際路徑調整
 $repo = "D:\jamf_explore"
-Import-Certificate -FilePath "$repo\data\test\AspiraCert.cer"          -CertStoreLocation Cert:\LocalMachine\Root
-Import-Certificate -FilePath "$repo\data\test\AspiraCert.cer"          -CertStoreLocation Cert:\LocalMachine\TrustedPeople
-Import-Certificate -FilePath "$repo\data\test\CogrowMDMPushCert.cer"   -CertStoreLocation Cert:\LocalMachine\Root
-Import-Certificate -FilePath "$repo\data\test\CogrowMDMPushCert.cer"   -CertStoreLocation Cert:\LocalMachine\TrustedPeople
+Import-Certificate -FilePath "$repo\data\test\AspiraCert.cer" -CertStoreLocation Cert:\LocalMachine\Root
+Import-Certificate -FilePath "$repo\data\test\AspiraCert.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople
 
 $p = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock"
 if (-not (Test-Path $p)) { New-Item $p -Force | Out-Null }
@@ -81,7 +79,9 @@ New-ItemProperty $p -Name AllowAllTrustedApps              -Value 1 -PropertyTyp
 - `0x800B0109 CERT_E_UNTRUSTEDROOT`（cert 沒裝）
 - `0x80070005 拒絕存取`（Win11 24H2 sideload 沒開）
 
-> 如果客戶端沒法直接讀到專案目錄，把 `data/test/AspiraCert.cer` + `data/test/CogrowMDMPushCert.cer` 拷到客戶端任意目錄再 `Import-Certificate`。
+> 如果客戶端沒法直接讀到專案目錄，把 `data/test/AspiraCert.cer` 拷到客戶端任意目錄再 `Import-Certificate`。
+>
+> 演示秒級推送（§7）時還需要裝**自家 build 的 push MSIX 對應的 publisher cert**——那個 cert 從接手自己 build 的 push .msix 提取（不在 git 中），裝法相同。
 
 ### 3.2 GUI enrollment
 
@@ -120,15 +120,18 @@ sqlite3 data/agent_reports.db "SELECT COUNT(*) FROM mdm_windows_apps WHERE devic
 
 ### 5.1 用 git 中現成的 demo MSIX（推薦）
 
-git 倉庫 [`data/test/`](../data/test/) 已附 3 個簽好的 demo MSIX：
+git 倉庫 [`data/test/`](../data/test/) 已附 2 個簽好的 demo MSIX：
 
-| 檔案 | 用途 |
-|---|---|
-| `AspiraMdmDemo-1.0.msix` | install 演示 |
-| `AspiraMdmDemo-2.0.msix` | update 演示（同 PFN，version 2） |
-| `CogrowMDMPush-2.0.msix` | push-capable，配 `/push-config` 用 |
+| 檔案 | 用途 | 接手是否要重 build |
+|---|---|---|
+| `AspiraMdmDemo-1.0.msix` | install 演示 | ❌ 沿用 git |
+| `AspiraMdmDemo-2.0.msix` | update 演示（同 PFN，version 2） | ❌ 沿用 git |
 
-Deno 後端會自動把這個目錄 host 在 `/test/<filename>`，client 可直接下載。
+> ✅ install / update 兩個 MSIX **接手可直接沿用** git 中現成的——它們走 LOB sideload，OS 只校驗 publisher cert chain（裝 `AspiraCert.cer` 即可），**與 Microsoft Store / Azure 註冊無關**。任何 device 裝 cert 後都能 install。
+>
+> ⚠️ push 演示用的 push MSIX **不在 git 中、必須接手自己 build**（見 §7.1）—— PFN 綁 Microsoft Store 應用註冊，跨團隊不可共享。
+
+Deno 後端會自動把 `data/test/` host 在 `/test/<filename>`，client 可直接下載。接手自己 build 的 push MSIX 也放這個目錄即可被 host。
 
 ### 5.2 派送 install
 
@@ -198,9 +201,7 @@ grep -E "^WNS_" .env | wc -l   # 期望 4
 
 WNS push 需要客戶端**先有一個 push 接收器**（manifest 含 `pushNotification` BG Task 的 MSIX），OS 才會調 `CreatePushChannel` 拿 ChannelURI。
 
-> ⚠️ **接手團隊必須自行 build 一份 push MSIX**，跟完整 6 步：[`scripts/README.md` §接手：替換為你自己的應用標識](./scripts/README.md#接手替換為你自己的應用標識生產--獨立部署必做)（含改 `build-push-msix-v2.ps1` 三個變數、跑 build、驗 PFN、scp 拉回）。
->
-> 不能直接派送 git 中的 `data/test/CogrowMDMPush-2.0.msix`——它的 PFN (`CoGrow.CogrowMDMPush_r2dv7jx02rjxr`) 對應本 repo 的 demo Microsoft Store 應用，接手 `.env` 的 `WNS_PFN` 不一致 → WNS 不會路由消息。
+> ⚠️ **push MSIX 不在 git 中**（PFN 綁 cogrow Microsoft Store 註冊跨團隊不可共享）。接手必須自行 build，跟完整 6 步：[`scripts/README.md` §接手：替換為你自己的應用標識](./scripts/README.md#接手替換為你自己的應用標識生產--獨立部署必做)（含改 `build-push-msix-v2.ps1` 三個變數、跑 build、驗 PFN、scp 拉回 `data/test/`）。
 
 下面用 `<your-pfn>` 代表接手自家 push MSIX 的 PFN：
 
