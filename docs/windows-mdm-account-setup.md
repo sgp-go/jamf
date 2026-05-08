@@ -8,7 +8,7 @@
 
 ```bash
 WNS_PACKAGE_SID=ms-app://S-1-15-2-1253093273-833848983-1416962196-922505673-1233200576-2981719577-3762432075
-WNS_CLIENT_SECRET=Lkp8Q~r.YC6-...    # 只在 Azure 建立瞬間顯示一次，過了就要重新生成
+WNS_CLIENT_SECRET=<your-client-secret>    # 只在 Azure 建立瞬間顯示一次，過了就要重新生成
 WNS_PFN=CoGrow.CogrowMDMPush_r2dv7jx02rjxr
 WNS_STORE_PRODUCT_ID=9N9MPHFLQNXB
 ```
