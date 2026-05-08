@@ -198,7 +198,7 @@ grep -E "^WNS_" .env | wc -l   # 期望 4
 
 WNS push 需要客戶端**先有一個 push 接收器**（manifest 含 `pushNotification` BG Task 的 MSIX），OS 才會調 `CreatePushChannel` 拿 ChannelURI。
 
-> ⚠️ **接手團隊必須自行 build 一份 push MSIX**（用 [`docs/scripts/build-push-msix-v2.ps1`](./scripts/build-push-msix-v2.ps1)），manifest 的 `Identity Name` + `Publisher` 改成自家註冊應用對應的值。
+> ⚠️ **接手團隊必須自行 build 一份 push MSIX**，跟完整 6 步：[`scripts/README.md` §接手：替換為你自己的應用標識](./scripts/README.md#接手替換為你自己的應用標識生產--獨立部署必做)（含改 `build-push-msix-v2.ps1` 三個變數、跑 build、驗 PFN、scp 拉回）。
 >
 > 不能直接派送 git 中的 `data/test/CogrowMDMPush-2.0.msix`——它的 PFN (`CoGrow.CogrowMDMPush_r2dv7jx02rjxr`) 對應本 repo 的 demo Microsoft Store 應用，接手 `.env` 的 `WNS_PFN` 不一致 → WNS 不會路由消息。
 

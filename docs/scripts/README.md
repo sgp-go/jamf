@@ -49,6 +49,85 @@ ssh -i ~/.ssh/win10_mdm_test -o UserKnownHostsFile=$HOME/.ssh/known_hosts.win10m
 scp -i ~/.ssh/win10_mdm_test AHS@192.168.50.68:/Temp/AspiraMdmDemo-1.0.msix data/test/
 ```
 
+## 接手：替換為你自己的應用標識（生產 / 獨立部署必做）
+
+接手團隊**獨立註冊 Microsoft Store / Azure AD 應用**後，必須重 build push MSIX 才能讓 WNS push 走通。完整 6 步：
+
+### Step 1：完成 Microsoft Store + Azure AD 應用註冊
+
+跟著 [`windows-mdm-account-setup.md`](../windows-mdm-account-setup.md) 5 個步驟做完，拿到：
+- `WNS_PACKAGE_SID`（`ms-app://S-1-15-2-...`）
+- `WNS_CLIENT_SECRET`（Azure 一次性顯示）
+- `WNS_PFN`（`<YourPublisherDisplayName>.<YourAppName>_<13-char-hash>`）
+- `WNS_STORE_PRODUCT_ID`（`9N9...` 或類似）
+- **Identity Publisher GUID**（`CN=<UUID>` 形式，由 Microsoft Store 給的 publisher 字符串）
+- **Identity Name**（你 Reserve 的應用名，例如 `YourCorp.YourMDMPush`）
+
+### Step 2：寫進 `.env`
+
+```bash
+WNS_PACKAGE_SID=ms-app://<your-package-sid>
+WNS_CLIENT_SECRET=<your-client-secret>
+WNS_PFN=<your-pfn>
+WNS_STORE_PRODUCT_ID=<your-store-product-id>
+```
+
+### Step 3：改 `build-push-msix-v2.ps1` 三個變數（**核心動作**）
+
+打開 `docs/scripts/build-push-msix-v2.ps1`，找到 L11-13：
+
+```diff
+- $identityName = 'CoGrow.CogrowMDMPush'                              # ← demo 值
+- $publisher    = 'CN=27397969-3D59-40F4-A9A2-AEEC09535DB3'           # ← demo 值
+- $publisherDN  = 'CoGrow'                                             # ← demo 值
++ $identityName = 'YourCorp.YourMDMPush'                              # ← 改成你的
++ $publisher    = 'CN=<YOUR-PUBLISHER-GUID-FROM-PARTNER-CENTER>'      # ← 改成你的
++ $publisherDN  = 'YourCorp'                                          # ← 改成你的
+```
+
+> ⚠️ `$publisher` 必須**逐字符**等於 Microsoft Partner Center 給你的 publisher 字符串（通常是 `CN=<GUID>` 形式）。差一個空格 / 大小寫 PFN 都會算錯。
+
+### Step 4：跑腳本 build + 簽
+
+把改好的 `build-push-msix-v2.ps1` 透過 SSH 在 Win10/11 上跑：
+
+```bash
+B64=$(python3 -c "import base64; print(base64.b64encode(open('docs/scripts/build-push-msix-v2.ps1','r').read().encode('utf-16-le')).decode())")
+ssh -i <key> <user>@<win-build-machine> "powershell -EncodedCommand $B64"
+```
+
+腳本輸出最後會打印 `EXPECTED_PFN: ...`。
+
+### Step 5：用 `get-pfn.ps1` 驗證 PFN 一致
+
+PFN 必須等於 `.env` 的 `WNS_PFN`，否則 WNS 不路由：
+
+```bash
+B64=$(python3 -c "import base64; print(base64.b64encode(open('docs/scripts/get-pfn.ps1','r').read().encode('utf-16-le')).decode())")
+ssh ... "powershell -EncodedCommand $B64 -ArgumentList 'YourCorp.YourMDMPush' 'CN=<YOUR-GUID>'"
+# 輸出應等於 .env WNS_PFN
+```
+
+### Step 6：scp 拉回 + 派送
+
+```bash
+scp -i <key> <user>@<win-build-machine>:/Temp/YourCorpMDMPush-2.0.msix data/test/
+
+# 接著走 quick-start §7.1 派送 install
+curl -X POST http://localhost:3000/api/mdm/win/devices/$UDID/apps/install \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"packageFamilyName\": \"$WNS_PFN\",
+    \"contentUri\": \"https://<ngrok-url>/test/YourCorpMDMPush-2.0.msix\"
+  }"
+```
+
+完成後 device 上報 ChannelURI 入庫，後續秒級 push 就緒（流程接 quick-start §7.2 / §7.3）。
+
+> 💡 也可以重新生成 `data/test/CogrowMDMPushCert.cer` 並覆蓋（從新 .msix 提取，方法見 [`data/test/README.md` 重 build 場景](../../data/test/README.md#重-build-場景與步驟)），讓客戶端裝到的 cert 跟新 publisher 對得上。
+
+---
+
 ## push-capable MSIX manifest 三件套
 
 build-push-msix-v2.ps1 的 manifest 三大關鍵聲明（任缺一個 device 的 OS 都不會把 push 路由到該 PFN）：
