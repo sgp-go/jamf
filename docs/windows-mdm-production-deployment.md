@@ -148,10 +148,11 @@ sudo mkdir -p /var/log/jamf-mdm && sudo chown mdm:mdm /var/log/jamf-mdm
 
 ```bash
 # WNS（A 路徑必需；B 路徑不需）
-WNS_PACKAGE_SID=ms-app://S-1-15-2-...
-WNS_CLIENT_SECRET=...
-WNS_PFN=CoGrow.CogrowMDMPush_r2dv7jx02rjxr
-WNS_STORE_PRODUCT_ID=9N9MPHFLQNXB
+# 接手團隊請依 [account-setup.md](./windows-mdm-account-setup.md) 註冊自家應用後填入
+WNS_PACKAGE_SID=ms-app://<your-package-sid>
+WNS_CLIENT_SECRET=<your-client-secret>
+WNS_PFN=<your-pfn>
+WNS_STORE_PRODUCT_ID=<your-store-product-id>
 
 # 其他（保留欄位，當前 stub）
 JAMF_CLIENT_ID=...

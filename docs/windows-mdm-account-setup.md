@@ -7,11 +7,18 @@
 寫進 `.env` 的四個值（範例見 `.env.example`）：
 
 ```bash
-WNS_PACKAGE_SID=ms-app://S-1-15-2-1253093273-833848983-1416962196-922505673-1233200576-2981719577-3762432075
+WNS_PACKAGE_SID=ms-app://<your-package-sid>
 WNS_CLIENT_SECRET=<your-client-secret>    # 只在 Azure 建立瞬間顯示一次，過了就要重新生成
-WNS_PFN=CoGrow.CogrowMDMPush_r2dv7jx02rjxr
-WNS_STORE_PRODUCT_ID=9N9MPHFLQNXB
+WNS_PFN=<your-pfn>                        # 形如 CoGrow.CogrowMDMPush_r2dv7jx02rjxr
+WNS_STORE_PRODUCT_ID=<your-store-product-id>
 ```
+
+> ⚠️ **接手團隊必須註冊自己的 Microsoft Store / Azure AD 應用**，**不能沿用本 repo 的 demo 值**。原因：
+> - `CLIENT_SECRET` 屬於應用註冊綁定的私密憑據，無法跨團隊共享
+> - `PACKAGE_SID` 跟著應用走，WNS 推送會根據 SID 路由到對應應用
+> - **連帶：git 中的 `data/test/CogrowMDMPush-2.0.msix` 是按本 demo 的 PFN/Publisher 簽的，接手團隊做 push 演示時必須重 build 自己 PFN 的 push MSIX**（install 演示不受影響）
+>
+> 接手第 1 週優先做完整套註冊（見 [production-deployment §13 P1 #4](./windows-mdm-production-deployment.md#13-待實現項清單)）。
 
 | 變數 | 用途 |
 |------|------|
@@ -216,11 +223,11 @@ https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade
 ### 寫入
 
 ```bash
-# .env
-WNS_PACKAGE_SID=ms-app://S-1-15-2-1253093273-833848983-1416962196-922505673-1233200576-2981719577-3762432075
-WNS_CLIENT_SECRET=<your-client-secret-here-only-shown-once-on-creation>
-WNS_PFN=CoGrow.CogrowMDMPush_r2dv7jx02rjxr
-WNS_STORE_PRODUCT_ID=9N9MPHFLQNXB
+# .env（接手團隊請替換成自己註冊應用的值）
+WNS_PACKAGE_SID=ms-app://<your-package-sid>
+WNS_CLIENT_SECRET=<your-client-secret>
+WNS_PFN=<your-pfn>
+WNS_STORE_PRODUCT_ID=<your-store-product-id>
 ```
 
 ### OAuth 換 token 驗證

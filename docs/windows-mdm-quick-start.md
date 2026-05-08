@@ -181,11 +181,13 @@ device 套用後**最遲 5 分鐘內自動 poll**，再也不用手動同步。
 
 `.env` 必須配齊（見 [account-setup.md](./windows-mdm-account-setup.md) 怎麼申請）：
 ```bash
-WNS_PACKAGE_SID=ms-app://s-1-15-2-...
-WNS_CLIENT_SECRET=...
-WNS_PFN=CoGrow.CogrowMDMPush_r2dv7jx02rjxr
-WNS_STORE_PRODUCT_ID=9N9MPHFLQNXB
+WNS_PACKAGE_SID=ms-app://<your-package-sid>
+WNS_CLIENT_SECRET=<your-client-secret>
+WNS_PFN=<your-pfn>
+WNS_STORE_PRODUCT_ID=<your-store-product-id>
 ```
+
+> ⚠️ 接手團隊**必須註冊自己的 Microsoft Store / Azure AD 應用**取得這 4 個值。不能沿用本 repo 歷史中的 demo 值（CLIENT_SECRET 已輪替；其他值跟著應用註冊綁定無法跨團隊共享）。
 
 驗證：
 ```bash
@@ -196,16 +198,22 @@ grep -E "^WNS_" .env | wc -l   # 期望 4
 
 WNS push 需要客戶端**先有一個 push 接收器**（manifest 含 `pushNotification` BG Task 的 MSIX），OS 才會調 `CreatePushChannel` 拿 ChannelURI。
 
+> ⚠️ **接手團隊必須自行 build 一份 push MSIX**（用 [`docs/scripts/build-push-msix-v2.ps1`](./scripts/build-push-msix-v2.ps1)），manifest 的 `Identity Name` + `Publisher` 改成自家註冊應用對應的值。
+>
+> 不能直接派送 git 中的 `data/test/CogrowMDMPush-2.0.msix`——它的 PFN (`CoGrow.CogrowMDMPush_r2dv7jx02rjxr`) 對應本 repo 的 demo Microsoft Store 應用，接手 `.env` 的 `WNS_PFN` 不一致 → WNS 不會路由消息。
+
+下面用 `<your-pfn>` 代表接手自家 push MSIX 的 PFN：
+
 ```bash
 curl -X POST http://localhost:3000/api/mdm/win/devices/$UDID/apps/install \
   -H "Content-Type: application/json" \
   -d '{
-    "packageFamilyName": "CoGrow.CogrowMDMPush_r2dv7jx02rjxr",
-    "contentUri": "https://<ngrok-url>/test/CogrowMDMPush-2.0.msix"
+    "packageFamilyName": "<your-pfn>",
+    "contentUri": "https://<ngrok-url>/test/<your-push-msix-filename>.msix"
   }'
 ```
 
-> ⚠️ 必須用 **v2** (`CogrowMDMPush-2.0.msix`)。v1 manifest 寫了 BG Task 但**沒實作 DLL**，OS 收 push 後找不到 PushHandler class 會丟棄消息。
+> ⚠️ 必須用 **v2 級別**的 push MSIX（含真實 `IBackgroundTask` DLL）。v1 manifest 寫了 BG Task 但**沒實作 DLL**，OS 收 push 後找不到 PushHandler class 會丟棄消息。本 repo 的 `build-push-msix-v2.ps1` 是 v2 範本。
 >
 > ⚠️ PFN 必須**逐字符**等於 `.env` 的 `WNS_PFN`，否則 WNS 不路由消息到該 PFN。
 
@@ -215,9 +223,9 @@ curl -X POST http://localhost:3000/api/mdm/win/devices/$UDID/apps/install \
 sqlite3 data/agent_reports.db "
   SELECT package_family_name, version, install_state
   FROM mdm_windows_apps
-  WHERE device_udid='$UDID' AND package_family_name LIKE 'CoGrow%';
+  WHERE device_udid='$UDID' AND package_family_name='<your-pfn>';
 "
-# 預期：CoGrow.CogrowMDMPush_r2dv7jx02rjxr | 2.0.0.0 | 0
+# 預期：<your-pfn> | 2.0.0.0 | 0
 ```
 
 `install_state=0` 表示成功裝上。
