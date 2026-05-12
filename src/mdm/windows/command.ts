@@ -107,7 +107,7 @@ export function handleSyncMLRequest(opts: {
     });
     delete state.inFlight[s.cmdRef];
     console.log(
-      `[Win MDM] 命令完成: ${commandUuid} cmd=${s.cmd} status=${dbStatus}`
+      `[Win MDM] 命令完成: ${commandUuid} cmd=${s.cmd} status=${dbStatus} syncmlCode=${s.data}`
     );
   }
 
