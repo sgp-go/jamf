@@ -39,3 +39,10 @@ AgentApp/fastlane/test_output/
 # 內部文件
 docs/工作量評估*.md
 .claude/
+
+# Node 產品化版本（app/）
+node_modules/
+dist/
+.tsbuildinfo
+*.tsbuildinfo
+app/db/migrations/meta/_journal.json.bak
