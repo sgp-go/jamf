@@ -1,4 +1,3 @@
-import { serve } from "@hono/node-server";
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { apiReference } from "@scalar/hono-api-reference";
 import { cors } from "hono/cors";
@@ -95,11 +94,10 @@ app.onError((err, c) => {
 });
 
 const port = Number(process.env.PORT ?? 3000);
-serve({ fetch: app.fetch, port }, ({ port: p }) => {
-  console.log(`Server running on http://localhost:${p}`);
-  console.log(`API docs:    http://localhost:${p}/docs`);
-  console.log(`OpenAPI:     http://localhost:${p}/openapi.json`);
-});
+Deno.serve({ port }, app.fetch);
+console.log(`Server running on http://localhost:${port}`);
+console.log(`API docs:    http://localhost:${port}/docs`);
+console.log(`OpenAPI:     http://localhost:${port}/openapi.json`);
 
 // Webhook 推送排程器：10 秒輪詢 webhook_deliveries 取到期 row 推送
 // 失敗 30s/5min/30min 三段退避，超過寫 dead；可用 requeueDelivery 補推
