@@ -2,6 +2,9 @@
 bin/
 obj/
 
+# build.ps1 outputs (publish staging + .msi)
+build/
+
 # IDE
 .vs/
 .vscode/

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CoGrow MDM Agent — main installer package definition.
+
+  UpgradeCode is the immutable identity of this product line. Never change it.
+  ProductCode is auto-generated each build (asterisk in Package/@ProductCode is
+  the WiX default when omitted); the ProductCode is what the platform stores in
+  apps.bundle_id and what EDA-CSP queries for install status.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+    Name="CoGrow MDM Agent"
+    Manufacturer="CoGrow"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="AD59A7AF-5325-4104-9695-5ACCECA889C2"
+    Scope="perMachine"
+    Compressed="yes"
+    InstallerVersion="500">
+
+    <SummaryInformation
+      Description="CoGrow MDM Agent — device telemetry service"
+      Manufacturer="CoGrow" />
+
+    <!-- Block downgrade; uninstall older versions automatically on upgrade. -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+      Schedule="afterInstallInitialize" />
+
+    <!-- Embed all payload into the .msi itself (single-file distribution). -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Feature Id="MainFeature" Title="CoGrow MDM Agent" Level="1" Display="expand">
+      <ComponentGroupRef Id="ServiceComponents" />
+    </Feature>
+
+  </Package>
+
+  <!-- Install directory: C:\Program Files\CoGrow\MDM Agent\ -->
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="ManufacturerFolder" Name="CoGrow">
+        <Directory Id="INSTALLFOLDER" Name="MDM Agent" />
+      </Directory>
+    </StandardDirectory>
+  </Fragment>
+
+</Wix>

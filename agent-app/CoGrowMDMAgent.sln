@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CoGrowMDMAgent", "src\CoGro
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CoGrowMDMAgent.Tests", "src\CoGrowMDMAgent.Tests\CoGrowMDMAgent.Tests.csproj", "{74DA37F9-CA5B-4CA7-8F7D-140E43C0F3CB}"
 EndProject
+Project("{B7DD6F7E-DEF8-4E67-B5B7-07EF123DB6F0}") = "CoGrowMDMAgent.Installer", "src\CoGrowMDMAgent.Installer\CoGrowMDMAgent.Installer.wixproj", "{38BA0C61-554F-4381-B7E9-EB504089A76F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,9 +28,14 @@ Global
 		{74DA37F9-CA5B-4CA7-8F7D-140E43C0F3CB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{74DA37F9-CA5B-4CA7-8F7D-140E43C0F3CB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{74DA37F9-CA5B-4CA7-8F7D-140E43C0F3CB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{38BA0C61-554F-4381-B7E9-EB504089A76F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{38BA0C61-554F-4381-B7E9-EB504089A76F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{38BA0C61-554F-4381-B7E9-EB504089A76F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{38BA0C61-554F-4381-B7E9-EB504089A76F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{7AB51509-C833-4D37-8EC8-0D4C8AD8A373} = {5E204410-873A-45E8-A966-FFA650E49E14}
 		{74DA37F9-CA5B-4CA7-8F7D-140E43C0F3CB} = {5E204410-873A-45E8-A966-FFA650E49E14}
+		{38BA0C61-554F-4381-B7E9-EB504089A76F} = {5E204410-873A-45E8-A966-FFA650E49E14}
 	EndGlobalSection
 EndGlobal

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Service registration + payload files.
+
+  Layout:
+    - ServiceExeComponent  owns CoGrowMDMAgent.exe and its ServiceInstall /
+                           ServiceControl entries. Windows Installer requires
+                           ServiceInstall to live in the same component as the
+                           service binary it manages.
+    - PayloadFiles         catches everything else `dotnet publish` produced
+                           (appsettings.json, native interop dlls, etc) via the
+                           v5+ <Files> harvest element.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Fragment>
+    <ComponentGroup Id="ServiceComponents" Directory="INSTALLFOLDER">
+
+      <!-- Service binary + Windows service registration -->
+      <Component Id="ServiceExeComponent" Bitness="always64">
+        <File
+          Id="CoGrowMDMAgentExe"
+          Source="$(var.PublishDir)\CoGrowMDMAgent.exe"
+          KeyPath="yes" />
+
+        <ServiceInstall
+          Id="CoGrowMDMAgentServiceInstall"
+          Type="ownProcess"
+          Vital="yes"
+          Name="CoGrowMDMAgent"
+          DisplayName="CoGrow MDM Agent"
+          Description="Reports device telemetry to the CoGrow MDM platform."
+          Start="auto"
+          Account="LocalSystem"
+          ErrorControl="normal"
+          Interactive="no" />
+
+        <ServiceControl
+          Id="CoGrowMDMAgentServiceControl"
+          Name="CoGrowMDMAgent"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+
+      <!--
+        Logging / hosting config used by Microsoft.Extensions.Hosting on
+        startup. Dev-only appsettings.Development.json is intentionally not
+        shipped. With PublishSingleFile=true the rest of the .NET 8 runtime
+        is embedded inside CoGrowMDMAgent.exe, so no other payload files
+        need to be enumerated.
+      -->
+      <Component Id="AppSettingsComponent" Bitness="always64">
+        <File
+          Id="AppSettingsJson"
+          Source="$(var.PublishDir)\appsettings.json"
+          KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
