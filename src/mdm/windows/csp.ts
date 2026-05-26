@@ -398,6 +398,209 @@ function boolReplace(target: string, value: boolean): SyncMLCommand {
 }
 
 // ============================================================
+// Registry CSP（任意註冊表讀寫）
+// ============================================================
+
+/**
+ * Registry CSP 對應的 Windows hive。
+ * MDM 場景幾乎只用 HKLM（HKCU 限當前登入用戶 session）。
+ * 完整 hive 對應：
+ *   - HKLM = HKEY_LOCAL_MACHINE
+ *   - HKCU = HKEY_CURRENT_USER
+ *   - HKU  = HKEY_USERS
+ *   - HKCR = HKEY_CLASSES_ROOT
+ *   - HKCC = HKEY_CURRENT_CONFIG
+ */
+export type RegistryHive = "HKLM" | "HKCU" | "HKU" | "HKCR" | "HKCC";
+
+/**
+ * Registry value 類型對應的 SyncML Format。
+ *   - string       → REG_SZ        Format=chr
+ *   - expandString → REG_EXPAND_SZ Format=chr  含環境變數的字串
+ *   - int          → REG_DWORD     Format=int
+ *   - binary       → REG_BINARY    Format=b64  二進制資料以 base64 編碼
+ */
+export type RegistryValueType = "string" | "expandString" | "int" | "binary";
+
+/** 單一 registry value 寫入規格 */
+export interface RegistryEntry {
+  /** Value 名稱（注意：寫入 hive 的 default value 不適用 Registry CSP）*/
+  name: string;
+  /** Value 類型 */
+  type: RegistryValueType;
+  /**
+   * Value 內容：
+   *   - string / expandString：UTF-16 字串
+   *   - int：32-bit 無正負號整數
+   *   - binary：原始 bytes（Uint8Array）；helper 內部 base64 編碼
+   */
+  value: string | number | Uint8Array;
+}
+
+/**
+ * 將 Windows 註冊表路徑正規化為 Registry CSP 用的 LocURI 片段。
+ * 例：`SOFTWARE\Policies\CoGrowMDM\Agent` → `SOFTWARE/Policies/CoGrowMDM/Agent`
+ *
+ * 規範：
+ *   - 反斜杠統一改成正斜杠
+ *   - 去掉前後多餘的 `/`
+ *   - 不做 URL encode（CSP path 內各層級允許空格與大部分字符）
+ */
+function normalizeRegistryPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+/**
+ * 組裝 Registry CSP 的 LocURI。
+ *
+ * Format：`./Device/Vendor/MSFT/Registry/{HIVE}/{SubPath}/{ValueName}`
+ *
+ * 若 valueName 省略則指向整個 key（用於 Delete 整 key、或 Get 列舉子值）。
+ *
+ * 參考：
+ *   https://learn.microsoft.com/en-us/windows/client-management/mdm/registry-csp
+ */
+function buildRegistryTarget(opts: {
+  hive: RegistryHive;
+  path: string;
+  valueName?: string;
+}): string {
+  const subPath = normalizeRegistryPath(opts.path);
+  const base = `./Device/Vendor/MSFT/Registry/${opts.hive}/${subPath}`;
+  return opts.valueName ? `${base}/${opts.valueName}` : base;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  // Deno + Node 18+ 都有全域 btoa；用 chunk 避免 stack 爆掉
+  let s = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    s += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(s);
+}
+
+function encodeRegistryValue(entry: RegistryEntry): { data: string; format: string } {
+  switch (entry.type) {
+    case "string":
+    case "expandString":
+      if (typeof entry.value !== "string") {
+        throw new TypeError(
+          `Registry entry "${entry.name}" type=${entry.type} requires string value`,
+        );
+      }
+      return { data: entry.value, format: "chr" };
+
+    case "int":
+      if (typeof entry.value !== "number" || !Number.isInteger(entry.value)) {
+        throw new TypeError(
+          `Registry entry "${entry.name}" type=int requires integer value`,
+        );
+      }
+      if (entry.value < 0 || entry.value > 0xffffffff) {
+        throw new RangeError(
+          `Registry entry "${entry.name}" type=int out of REG_DWORD range (0..2^32-1)`,
+        );
+      }
+      return { data: String(entry.value), format: "int" };
+
+    case "binary":
+      if (!(entry.value instanceof Uint8Array)) {
+        throw new TypeError(
+          `Registry entry "${entry.name}" type=binary requires Uint8Array value`,
+        );
+      }
+      return { data: bytesToBase64(entry.value), format: "b64" };
+  }
+}
+
+/**
+ * 寫入單一註冊表值（Replace 動作；不存在時 device 會自動建立 key + value）。
+ *
+ * Replace 對 Registry CSP 等同 upsert：value 不存在新建、存在則覆寫。
+ * MDM 場景下幾乎所有寫入都用 Replace（Add 也可但語意較嚴格）。
+ */
+export function buildRegistrySet(opts: {
+  hive: RegistryHive;
+  path: string;
+  entry: RegistryEntry;
+}): SyncMLCommand {
+  const { data, format } = encodeRegistryValue(opts.entry);
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: buildRegistryTarget({
+      hive: opts.hive,
+      path: opts.path,
+      valueName: opts.entry.name,
+    }),
+    format,
+    data,
+  };
+}
+
+/**
+ * 批次寫入同一 key 下的多個 value。
+ * 回傳多條 Replace 命令，由 buildSyncML 同輪下發。
+ *
+ * 典型用途：注入 Agent App 配置
+ *   buildRegistrySetBatch({
+ *     hive: "HKLM",
+ *     path: "SOFTWARE/Policies/CoGrowMDM/Agent",
+ *     entries: [
+ *       { name: "device_id",   type: "string", value: "windows-..." },
+ *       { name: "agent_token", type: "string", value: "at_..." },
+ *       { name: "api_endpoint", type: "string", value: "https://..." },
+ *     ],
+ *   });
+ */
+export function buildRegistrySetBatch(opts: {
+  hive: RegistryHive;
+  path: string;
+  entries: RegistryEntry[];
+}): SyncMLCommand[] {
+  return opts.entries.map((entry) =>
+    buildRegistrySet({ hive: opts.hive, path: opts.path, entry }),
+  );
+}
+
+/**
+ * 讀取單一註冊表值。
+ *
+ * 回應透過 Results 元素返回，由 command.ts 解析。Format 由 device 決定。
+ * 若 valueName 省略則 Get 整個 key（device 回傳子節點列表，需另行解析）。
+ */
+export function buildRegistryGet(opts: {
+  hive: RegistryHive;
+  path: string;
+  valueName?: string;
+}): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Get",
+    target: buildRegistryTarget(opts),
+  };
+}
+
+/**
+ * 刪除註冊表值或整個 key。
+ *
+ * - 帶 valueName：刪除單一 value（key 保留）
+ * - 省略 valueName：刪除整個 key（含底下所有 value 與子 key）
+ */
+export function buildRegistryDelete(opts: {
+  hive: RegistryHive;
+  path: string;
+  valueName?: string;
+}): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Delete",
+    target: buildRegistryTarget(opts),
+  };
+}
+
+// ============================================================
 // 內部工具
 // ============================================================
 
