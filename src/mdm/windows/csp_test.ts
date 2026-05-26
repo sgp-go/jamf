@@ -13,6 +13,11 @@ import {
   buildRegistrySetBatch,
   buildRegistryGet,
   buildRegistryDelete,
+  buildMsiInstall,
+  buildMsiUninstall,
+  buildMsiStatusQuery,
+  buildMsiLastErrorQuery,
+  buildMsiLastErrorDescQuery,
 } from "./csp.ts";
 
 Deno.test("buildRemoteWipe: 預設 doWipe", () => {
@@ -427,5 +432,177 @@ Deno.test("buildRegistry*: HKCU / HKU 等其他 hive 支援", () => {
   assertEquals(
     hku.target,
     "./Device/Vendor/MSFT/Registry/HKU/.DEFAULT/Test/v"
+  );
+});
+
+// ============================================================
+// EnterpriseDesktopAppManagement (.msi 派發)
+// ============================================================
+
+const SAMPLE_PRODUCT_ID = "{B91CF9B4-1234-5678-9ABC-DEF012345678}";
+const SAMPLE_MSI_URI = "https://cdn.cogrow.com/agents/agent-1.0.0.msi";
+
+Deno.test("buildMsiInstall: Add /DownloadInstall + Format=chr", () => {
+  const cmd = buildMsiInstall({
+    productId: SAMPLE_PRODUCT_ID,
+    productVersion: "1.0.0.0",
+    contentUri: SAMPLE_MSI_URI,
+    fileHashHex: "abc123def456",
+  });
+  assertEquals(cmd.verb, "Add");
+  assertEquals(cmd.format, "chr");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI/%7BB91CF9B4-1234-5678-9ABC-DEF012345678%7D/DownloadInstall"
+  );
+});
+
+Deno.test("buildMsiInstall: MsiInstallJob XML 結構符合 spec", () => {
+  const cmd = buildMsiInstall({
+    productId: SAMPLE_PRODUCT_ID,
+    productVersion: "1.0.0.0",
+    contentUri: SAMPLE_MSI_URI,
+    fileHashHex: "deadbeef",
+  });
+  const data = cmd.data ?? "";
+  assertEquals(data.startsWith("<MsiInstallJob "), true);
+  // id 屬性帶 ProductCode（含大括號）
+  assertEquals(
+    data.includes(`id="${SAMPLE_PRODUCT_ID}"`),
+    true
+  );
+  assertEquals(
+    data.includes(`<Product Version="1.0.0.0">`),
+    true
+  );
+  assertEquals(
+    data.includes(`<ContentURL>${SAMPLE_MSI_URI}</ContentURL>`),
+    true
+  );
+  assertEquals(data.includes("<Validation><FileHash>deadbeef</FileHash></Validation>"), true);
+  // 預設 enforcement
+  assertEquals(data.includes("<CommandLine>/quiet /norestart</CommandLine>"), true);
+  assertEquals(data.includes("<TimeOut>10</TimeOut>"), true);
+  assertEquals(data.includes("<RetryCount>3</RetryCount>"), true);
+  assertEquals(data.includes("<RetryInterval>5</RetryInterval>"), true);
+});
+
+Deno.test("buildMsiInstall: 不帶 fileHashHex 時 Validation 元素省略", () => {
+  const cmd = buildMsiInstall({
+    productId: SAMPLE_PRODUCT_ID,
+    productVersion: "1.0.0.0",
+    contentUri: SAMPLE_MSI_URI,
+  });
+  assertEquals((cmd.data ?? "").includes("<Validation>"), false);
+});
+
+Deno.test("buildMsiInstall: 自訂 commandLine / timeOut / retry 覆蓋預設", () => {
+  const cmd = buildMsiInstall({
+    productId: SAMPLE_PRODUCT_ID,
+    productVersion: "2.0",
+    contentUri: SAMPLE_MSI_URI,
+    commandLine: "/passive /norestart ALLUSERS=1",
+    timeOutMinutes: 30,
+    retryCount: 5,
+    retryIntervalMinutes: 2,
+  });
+  const data = cmd.data ?? "";
+  assertEquals(
+    data.includes("<CommandLine>/passive /norestart ALLUSERS=1</CommandLine>"),
+    true
+  );
+  assertEquals(data.includes("<TimeOut>30</TimeOut>"), true);
+  assertEquals(data.includes("<RetryCount>5</RetryCount>"), true);
+  assertEquals(data.includes("<RetryInterval>2</RetryInterval>"), true);
+});
+
+Deno.test("buildMsiInstall: ProductCode 自動轉大寫並補大括號", () => {
+  const cmd = buildMsiInstall({
+    productId: "b91cf9b4-1234-5678-9abc-def012345678", // 小寫、無大括號
+    productVersion: "1.0",
+    contentUri: SAMPLE_MSI_URI,
+  });
+  // LocURI 中是 URL encoded 帶大括號
+  assertEquals(
+    cmd.target.includes("%7BB91CF9B4-1234-5678-9ABC-DEF012345678%7D"),
+    true
+  );
+  // XML id 也應大寫帶括號
+  assertEquals(
+    (cmd.data ?? "").includes('id="{B91CF9B4-1234-5678-9ABC-DEF012345678}"'),
+    true
+  );
+});
+
+Deno.test("buildMsiInstall: contentUri 含 & 字元應 XML escape", () => {
+  const cmd = buildMsiInstall({
+    productId: SAMPLE_PRODUCT_ID,
+    productVersion: "1.0",
+    contentUri: "https://cdn.example.com/file.msi?token=a&sig=b",
+  });
+  // & 在 <ContentURL> text 內必須 escape
+  assertEquals((cmd.data ?? "").includes("token=a&amp;sig=b"), true);
+});
+
+Deno.test("buildMsiInstall: installContext=User 路徑改 ./User", () => {
+  const cmd = buildMsiInstall({
+    productId: SAMPLE_PRODUCT_ID,
+    productVersion: "1.0",
+    contentUri: SAMPLE_MSI_URI,
+    installContext: "User",
+  });
+  assertEquals(cmd.target.startsWith("./User/Vendor/MSFT/"), true);
+});
+
+Deno.test("buildMsiInstall: 非法 ProductCode 拋 TypeError", () => {
+  assertThrows(
+    () =>
+      buildMsiInstall({
+        productId: "not-a-guid",
+        productVersion: "1.0",
+        contentUri: SAMPLE_MSI_URI,
+      }),
+    TypeError
+  );
+});
+
+Deno.test("buildMsiUninstall: Exec /{ProductID}/Uninstall", () => {
+  const cmd = buildMsiUninstall(SAMPLE_PRODUCT_ID);
+  assertEquals(cmd.verb, "Exec");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI/%7BB91CF9B4-1234-5678-9ABC-DEF012345678%7D/Uninstall"
+  );
+  assertEquals(cmd.data, undefined);
+});
+
+Deno.test("buildMsiStatusQuery: Get /{ProductID}/Status", () => {
+  const cmd = buildMsiStatusQuery(SAMPLE_PRODUCT_ID);
+  assertEquals(cmd.verb, "Get");
+  assertEquals(cmd.target.endsWith("/Status"), true);
+  assertEquals(cmd.data, undefined);
+});
+
+Deno.test("buildMsiLastErrorQuery / buildMsiLastErrorDescQuery: Get /LastError(Desc)", () => {
+  const err = buildMsiLastErrorQuery(SAMPLE_PRODUCT_ID);
+  assertEquals(err.verb, "Get");
+  assertEquals(err.target.endsWith("/LastError"), true);
+
+  const desc = buildMsiLastErrorDescQuery(SAMPLE_PRODUCT_ID);
+  assertEquals(desc.target.endsWith("/LastErrorDesc"), true);
+});
+
+Deno.test("buildMsiUninstall / Status / LastError: User context 切換到 ./User 路徑", () => {
+  assertEquals(
+    buildMsiUninstall(SAMPLE_PRODUCT_ID, "User").target.startsWith("./User/"),
+    true
+  );
+  assertEquals(
+    buildMsiStatusQuery(SAMPLE_PRODUCT_ID, "User").target.startsWith("./User/"),
+    true
+  );
+  assertEquals(
+    buildMsiLastErrorQuery(SAMPLE_PRODUCT_ID, "User").target.startsWith("./User/"),
+    true
   );
 });

@@ -191,6 +191,257 @@ export function buildUpdateScan(): SyncMLCommand {
   };
 }
 
+// ============================================================
+// EnterpriseDesktopAppManagement (EDA) — Win32 .msi 派發
+// ============================================================
+//
+// 與 EnterpriseModernAppManagement (MSIX) 對照：
+//   ─────────────────────┬───────────────────┬─────────────────────────────
+//   能力                  MSIX                .msi (EDA)
+//   ─────────────────────┼───────────────────┼─────────────────────────────
+//   Entity key            PFN                ProductCode {GUID}
+//   Install verb / format Exec / xml          Add / chr
+//   Install LocURI 末段    /HostedInstall     /DownloadInstall
+//   Install data XML root <Application ...>  <MsiInstallJob ...>
+//   Uninstall             Delete /AppStore   Exec /{ProductID}/Uninstall
+//   Status                透過 inventory     /{ProductID}/Status
+//
+// 參考：https://learn.microsoft.com/en-us/windows/client-management/mdm/enterprisedesktopappmanagement-csp
+
+/** MSI ProductCode GUID 格式校驗（含或不含大括號皆允許輸入；helper 內部統一帶括號）*/
+const MSI_PRODUCT_ID_REGEX =
+  /^\{?[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\}?$/;
+
+/**
+ * 正規化 ProductCode：大寫 + 帶大括號，符合 MSI ProductCode 標準寫法。
+ * 例：`b91cf9b4-1234-5678-9abc-def012345678` → `{B91CF9B4-1234-5678-9ABC-DEF012345678}`
+ */
+function normalizeProductId(productId: string): string {
+  if (!MSI_PRODUCT_ID_REGEX.test(productId)) {
+    throw new TypeError(
+      `Invalid MSI ProductCode "${productId}"；需 GUID 格式（含/不含大括號）`,
+    );
+  }
+  const upper = productId.toUpperCase();
+  return upper.startsWith("{") ? upper : `{${upper}}`;
+}
+
+/**
+ * MSI 派發單個依賴包描述。
+ *
+ * MsiInstallJob 規範下每個 Product 也可以是依賴，但實務上多個依賴需各自獨立
+ * 完整 install command 派發；本介面僅保留必要欄位給呼叫端參考。
+ */
+export interface MsiDependency {
+  /** 依賴 MSI 的 ProductCode（GUID 格式）*/
+  productId: string;
+  /** 依賴 MSI 的 Version */
+  productVersion: string;
+  /** 依賴 MSI 的下載 URL */
+  contentUri: string;
+  /** SHA-256 hex 雜湊（選填）*/
+  fileHashHex?: string;
+}
+
+/** MSI 派發參數 */
+export interface MsiInstallParams {
+  /**
+   * MSI ProductCode（GUID）。對應 .msi 內 `Property` 表的 ProductCode 欄位。
+   * 可用 `msiexec /a /qb /lvx*` 或 PowerShell `Get-Package` 取出。
+   */
+  productId: string;
+  /** MSI 版本字串，對應 .msi `ProductVersion` 屬性（如 "1.0.0.0" / "2.3"）*/
+  productVersion: string;
+  /** 簽署過的 .msi HTTPS URL */
+  contentUri: string;
+  /**
+   * SHA-256 雜湊（hex 字串，不含大括號或前綴）。
+   * 強烈建議帶上：device 會用此 hash 校驗下載完整性，避免中間人替換。
+   * HTTPS 場景下也可省略（device 信任 TLS 通道），但保險起見預設要求。
+   */
+  fileHashHex?: string;
+  /** msiexec 命令行；預設 "/quiet /norestart"（無互動 + 不重啟）*/
+  commandLine?: string;
+  /** 安裝整體超時（分鐘），到期未完成視為失敗。預設 10 */
+  timeOutMinutes?: number;
+  /** 下載失敗重試次數。預設 3 */
+  retryCount?: number;
+  /** 重試間隔（分鐘）。預設 5 */
+  retryIntervalMinutes?: number;
+  /**
+   * 安裝範圍：
+   *   - "Device"（預設）：per-machine 安裝，所有用戶都能用，需 system 權限
+   *   - "User"：per-user 安裝，僅當前登入用戶（罕用）
+   */
+  installContext?: "Device" | "User";
+  /** 依賴包描述（資訊性質；目前 helper 不自動派發依賴）*/
+  dependencies?: MsiDependency[];
+}
+
+/** EDA-CSP base path（依 installContext 不同對應 ./Device 或 ./User）*/
+function edaBase(context: "Device" | "User" = "Device"): string {
+  return `./${context}/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI`;
+}
+
+/**
+ * 組裝 MsiInstallJob XML（DownloadInstall 命令的 data）。
+ *
+ * 結構（依 EDA-CSP spec）：
+ *   <MsiInstallJob id="{GUID}">
+ *     <Product Version="...">
+ *       <Download>
+ *         <ContentURLList>
+ *           <ContentURL>https://...</ContentURL>
+ *         </ContentURLList>
+ *       </Download>
+ *       <Validation>
+ *         <FileHash>hex</FileHash>
+ *       </Validation>
+ *       <Enforcement>
+ *         <CommandLine>/quiet /norestart</CommandLine>
+ *         <TimeOut>10</TimeOut>
+ *         <RetryCount>3</RetryCount>
+ *         <RetryInterval>5</RetryInterval>
+ *       </Enforcement>
+ *     </Product>
+ *   </MsiInstallJob>
+ *
+ * 注意：data 是 chr 格式（不是 xml），整個 XML 字串會被 SyncML 層用 CDATA 包起來。
+ */
+function buildMsiInstallJobXml(params: MsiInstallParams): string {
+  const productId = normalizeProductId(params.productId);
+  const enforcement = [
+    `<CommandLine>${escapeText(params.commandLine ?? "/quiet /norestart")}</CommandLine>`,
+    `<TimeOut>${params.timeOutMinutes ?? 10}</TimeOut>`,
+    `<RetryCount>${params.retryCount ?? 3}</RetryCount>`,
+    `<RetryInterval>${params.retryIntervalMinutes ?? 5}</RetryInterval>`,
+  ].join("");
+
+  const validation = params.fileHashHex
+    ? `<Validation><FileHash>${escapeText(params.fileHashHex)}</FileHash></Validation>`
+    : "";
+
+  return (
+    `<MsiInstallJob id="${escapeAttr(productId)}">` +
+    `<Product Version="${escapeAttr(params.productVersion)}">` +
+    `<Download><ContentURLList>` +
+    `<ContentURL>${escapeText(params.contentUri)}</ContentURL>` +
+    `</ContentURLList></Download>` +
+    validation +
+    `<Enforcement>${enforcement}</Enforcement>` +
+    `</Product>` +
+    `</MsiInstallJob>`
+  );
+}
+
+/**
+ * 建立 .msi 派發命令（Add /DownloadInstall）。
+ *
+ * 設備收到後：
+ *   1. 從 contentUri 下載 .msi（含 retry）
+ *   2. （若帶 fileHash）SHA-256 校驗
+ *   3. msiexec /i agent.msi {commandLine}
+ *   4. 結果記錄到 ./MSI/{ProductID}/Status / LastError / LastErrorDesc
+ *
+ * 後端可隨時 Get /Status 查進度（用 buildMsiStatusQuery）。
+ */
+export function buildMsiInstall(params: MsiInstallParams): SyncMLCommand {
+  const productId = normalizeProductId(params.productId);
+  const context = params.installContext ?? "Device";
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target: `${edaBase(context)}/${encodeURIComponent(productId)}/DownloadInstall`,
+    format: "chr",
+    data: buildMsiInstallJobXml(params),
+  };
+}
+
+/**
+ * 建立 .msi 卸載命令（Exec /{ProductID}/Uninstall）。
+ *
+ * 設備執行 `msiexec /x {ProductID} /quiet`。沒有額外參數（卸載命令行由 OS 決定）。
+ */
+export function buildMsiUninstall(
+  productId: string,
+  context: "Device" | "User" = "Device",
+): SyncMLCommand {
+  const normalized = normalizeProductId(productId);
+  return {
+    cmdId: "0",
+    verb: "Exec",
+    target: `${edaBase(context)}/${encodeURIComponent(normalized)}/Uninstall`,
+  };
+}
+
+/**
+ * 查詢 MSI 安裝狀態（Get /{ProductID}/Status）。
+ *
+ * Status 回傳整數狀態碼（EDA-CSP spec）：
+ *   10  Initialized
+ *   20  Download In Progress
+ *   25  Pending Download Retry
+ *   30  Download Failed
+ *   40  Download Completed
+ *   48  Pending User Session
+ *   50  Enforcement (Install) In Progress
+ *   60  Enforcement Completed（成功終態）
+ *   70  Enforcement Pending Retry
+ *   80  Enforcement Failed（失敗終態）
+ *
+ * 失敗時搭配 buildMsiLastErrorQuery 拿 Win32 error code。
+ */
+export function buildMsiStatusQuery(
+  productId: string,
+  context: "Device" | "User" = "Device",
+): SyncMLCommand {
+  const normalized = normalizeProductId(productId);
+  return {
+    cmdId: "0",
+    verb: "Get",
+    target: `${edaBase(context)}/${encodeURIComponent(normalized)}/Status`,
+  };
+}
+
+/**
+ * 查詢 MSI 最後一次安裝錯誤碼（Get /{ProductID}/LastError）。
+ *
+ * 回傳值為 Win32 / MSI error code（hex string），例 0x80070643（MSI install failed）。
+ * 對應描述用 buildMsiLastErrorDescQuery 拿（人類可讀字串）。
+ */
+export function buildMsiLastErrorQuery(
+  productId: string,
+  context: "Device" | "User" = "Device",
+): SyncMLCommand {
+  const normalized = normalizeProductId(productId);
+  return {
+    cmdId: "0",
+    verb: "Get",
+    target: `${edaBase(context)}/${encodeURIComponent(normalized)}/LastError`,
+  };
+}
+
+/**
+ * 查詢 MSI 最後一次安裝錯誤描述（Get /{ProductID}/LastErrorDesc）。
+ *
+ * 回傳本地化的錯誤描述字串。失敗診斷時搭配 LastError 一起取。
+ */
+export function buildMsiLastErrorDescQuery(
+  productId: string,
+  context: "Device" | "User" = "Device",
+): SyncMLCommand {
+  const normalized = normalizeProductId(productId);
+  return {
+    cmdId: "0",
+    verb: "Get",
+    target: `${edaBase(context)}/${encodeURIComponent(normalized)}/LastErrorDesc`,
+  };
+}
+
+// ============================================================
+// EnterpriseModernAppManagement (MSIX) — AppInventory 查詢
+// ============================================================
+
 /**
  * AppInventoryQuery 條件參數（按 EnterpriseModernAppManagement CSP spec）
  *
