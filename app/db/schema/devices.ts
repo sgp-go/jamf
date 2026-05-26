@@ -15,7 +15,7 @@ import {
 import { asmInstances } from "./asm.ts";
 import { jamfInstances } from "./jamf.ts";
 import { selfMdmConfigs } from "./self-mdm.ts";
-import { schools, tenants } from "./tenants.ts";
+import { deviceGroups, tenants } from "./tenants.ts";
 
 export const platformEnum = pgEnum("device_platform", ["apple", "windows"]);
 export const enrollmentStatusEnum = pgEnum("mdm_enrollment_status", [
@@ -38,7 +38,7 @@ export const commandStatusEnum = pgEnum("mdm_command_status", [
  * MDM 設備（Apple + Windows 共用本表）。
  *
  * - tenant_id：所有查詢的第一條件
- * - school_id：實體歸屬
+ * - device_group_id：設備分組歸屬（操作員可見性邊界 + 批次派送單位）
  * - jamf_instance_id：若同時被 Jamf 管理（遷移過渡期可能與 self_mdm_managed=true 並存）
  * - self_mdm_managed：是否被本系統的自建 MDM 直接管理
  * - asm_instance_id：DEP 註冊來源（若非 DEP 註冊則為 null）
@@ -48,7 +48,7 @@ export const mdmDevices = pgTable(
   {
     id: uuid().primaryKey().defaultRandom(),
     tenantId: uuid().notNull().references(() => tenants.id, { onDelete: "cascade" }),
-    schoolId: uuid().references(() => schools.id, { onDelete: "set null" }),
+    deviceGroupId: uuid().references(() => deviceGroups.id, { onDelete: "set null" }),
     jamfInstanceId: uuid().references(() => jamfInstances.id, { onDelete: "set null" }),
     asmInstanceId: uuid().references(() => asmInstances.id, { onDelete: "set null" }),
     selfMdmConfigId: uuid().references(() => selfMdmConfigs.id, { onDelete: "set null" }),
@@ -101,7 +101,7 @@ export const mdmDevices = pgTable(
   },
   (t) => [
     index("mdm_devices_tenant_idx").on(t.tenantId),
-    index("mdm_devices_school_idx").on(t.schoolId),
+    index("mdm_devices_device_group_idx").on(t.deviceGroupId),
     index("mdm_devices_jamf_idx").on(t.jamfInstanceId),
     index("mdm_devices_platform_idx").on(t.platform),
     uniqueIndex("mdm_devices_tenant_udid_uq")

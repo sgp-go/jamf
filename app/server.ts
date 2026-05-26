@@ -5,8 +5,8 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { AppError } from "~/lib/errors.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
-import { schoolsAdminApp } from "~/routes/v1/admin/schools.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
 import { devicesApp } from "~/routes/v1/devices.ts";
@@ -34,7 +34,7 @@ app.route("/api/v1", devicesApp);
 app.route("/api/v1", jamfDevicesApp);
 app.route("/api/v1", agentApp);
 app.route("/api/v1", tenantsAdminApp);
-app.route("/api/v1", schoolsAdminApp);
+app.route("/api/v1", deviceGroupsAdminApp);
 app.route("/api/v1", jamfInstancesAdminApp);
 
 app.doc("/openapi.json", {

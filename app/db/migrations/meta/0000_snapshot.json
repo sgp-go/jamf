@@ -1,5 +1,5 @@
 {
-  "id": "f772bd83-c0e7-477d-b96e-28945eb0d0e5",
+  "id": "9b51628c-9857-4a51-bce3-0974d3d1b2de",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -957,8 +957,8 @@
           "primaryKey": false,
           "notNull": true
         },
-        "school_id": {
-          "name": "school_id",
+        "device_group_id": {
+          "name": "device_group_id",
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
@@ -1016,6 +1016,24 @@
         "os_version": {
           "name": "os_version",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jamf_device_id": {
+          "name": "jamf_device_id",
+          "type": "varchar(32)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jamf_management_id": {
+          "name": "jamf_management_id",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_synced_at": {
+          "name": "last_synced_at",
+          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         },
@@ -1176,11 +1194,11 @@
           "method": "btree",
           "with": {}
         },
-        "mdm_devices_school_idx": {
-          "name": "mdm_devices_school_idx",
+        "mdm_devices_device_group_idx": {
+          "name": "mdm_devices_device_group_idx",
           "columns": [
             {
-              "expression": "school_id",
+              "expression": "device_group_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1280,6 +1298,28 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "mdm_devices_jamf_instance_device_id_uq": {
+          "name": "mdm_devices_jamf_instance_device_id_uq",
+          "columns": [
+            {
+              "expression": "jamf_instance_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "jamf_device_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"mdm_devices\".\"jamf_device_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1296,12 +1336,12 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "mdm_devices_school_id_schools_id_fk": {
-          "name": "mdm_devices_school_id_schools_id_fk",
+        "mdm_devices_device_group_id_device_groups_id_fk": {
+          "name": "mdm_devices_device_group_id_device_groups_id_fk",
           "tableFrom": "mdm_devices",
-          "tableTo": "schools",
+          "tableTo": "device_groups",
           "columnsFrom": [
-            "school_id"
+            "device_group_id"
           ],
           "columnsTo": [
             "id"
@@ -1480,114 +1520,6 @@
             "id"
           ],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.jamf_instance_school_bindings": {
-      "name": "jamf_instance_school_bindings",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "jamf_instance_id": {
-          "name": "jamf_instance_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "school_id": {
-          "name": "school_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "jamf_site_id": {
-          "name": "jamf_site_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "jamf_building_id": {
-          "name": "jamf_building_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "extra": {
-          "name": "extra",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "jamf_binding_instance_school_uq": {
-          "name": "jamf_binding_instance_school_uq",
-          "columns": [
-            {
-              "expression": "jamf_instance_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "jamf_binding_school_idx": {
-          "name": "jamf_binding_school_idx",
-          "columns": [
-            {
-              "expression": "school_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "jamf_instance_school_bindings_jamf_instance_id_jamf_instances_id_fk": {
-          "name": "jamf_instance_school_bindings_jamf_instance_id_jamf_instances_id_fk",
-          "tableFrom": "jamf_instance_school_bindings",
-          "tableTo": "jamf_instances",
-          "columnsFrom": [
-            "jamf_instance_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -2037,8 +1969,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.schools": {
-      "name": "schools",
+    "public.device_groups": {
+      "name": "device_groups",
       "schema": "",
       "columns": {
         "id": {
@@ -2066,6 +1998,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "jamf_instance_id": {
+          "name": "jamf_instance_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2081,11 +2019,64 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "device_groups_tenant_idx": {
+          "name": "device_groups_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_groups_tenant_code_uq": {
+          "name": "device_groups_tenant_code_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "code",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "device_groups_jamf_instance_uq": {
+          "name": "device_groups_jamf_instance_uq",
+          "columns": [
+            {
+              "expression": "jamf_instance_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"device_groups\".\"jamf_instance_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
-        "schools_tenant_id_tenants_id_fk": {
-          "name": "schools_tenant_id_tenants_id_fk",
-          "tableFrom": "schools",
+        "device_groups_tenant_id_tenants_id_fk": {
+          "name": "device_groups_tenant_id_tenants_id_fk",
+          "tableFrom": "device_groups",
           "tableTo": "tenants",
           "columnsFrom": [
             "tenant_id"
@@ -2094,6 +2085,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "device_groups_jamf_instance_id_jamf_instances_id_fk": {
+          "name": "device_groups_jamf_instance_id_jamf_instances_id_fk",
+          "tableFrom": "device_groups",
+          "tableTo": "jamf_instances",
+          "columnsFrom": [
+            "jamf_instance_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },

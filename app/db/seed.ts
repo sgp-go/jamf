@@ -12,7 +12,7 @@ const sql = postgres(databaseUrl, { max: 1, prepare: false });
 const db = drizzle(sql, { schema, casing: "snake_case" });
 
 /**
- * 開發用 seed：建立一個 demo tenant + 1 所學校 + 1 個 Jamf instance + 1 個 ASM。
+ * 開發用 seed：建立一個 demo tenant + 1 個 device group + 1 個 Jamf instance + 1 個 ASM。
  * 已存在就 skip（slug / displayName 為 idempotent key）。
  */
 async function main() {
@@ -38,11 +38,11 @@ async function main() {
   }
 
   await db
-    .insert(schema.schools)
+    .insert(schema.deviceGroups)
     .values({
       tenantId,
-      code: "demo-elementary",
-      displayName: "Demo 國小",
+      code: "demo-group",
+      displayName: "Demo 分組",
     })
     .onConflictDoNothing();
 

@@ -15,13 +15,14 @@ import type { CommandPayload } from "~/services/jamf/types.ts";
 
 export async function listDevicesInTenant(opts: {
   tenantId: string;
-  schoolId?: string;
+  deviceGroupId?: string;
   search?: string;
   page: number;
   limit: number;
 }) {
   const conditions: SQL[] = [eq(mdmDevices.tenantId, opts.tenantId)];
-  if (opts.schoolId) conditions.push(eq(mdmDevices.schoolId, opts.schoolId));
+  if (opts.deviceGroupId)
+    conditions.push(eq(mdmDevices.deviceGroupId, opts.deviceGroupId));
   if (opts.search) {
     const like = `%${opts.search}%`;
     const matchSerial = ilike(mdmDevices.serialNumber, like);

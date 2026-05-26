@@ -12,8 +12,8 @@ import { DeviceService } from "~/services/jamf/devices.ts";
  *   的理由是同一台機器可能換過 Jamf 帳號（重新註冊），這時 serialNumber 不變
  *   但 jamf_device_id 變，視為新 row 是正確的；反過來 Jamf 內 id 改不了。
  *
- * 也會強制把同 school 的 jamfInstanceId 寫進 device（這樣後續命令派發直接讀
- * device.jamfInstanceId 不必再 join schools）。
+ * 也會強制把同 device_group 的 jamfInstanceId 寫進 device（這樣後續命令派發直接讀
+ * device.jamfInstanceId 不必再 join device_groups）。
  */
 export interface SyncResult {
   pagesFetched: number;
@@ -27,8 +27,8 @@ export async function syncDevicesFromJamf(opts: {
   tenantId: string;
   jamfInstanceId: string;
 }): Promise<SyncResult> {
-  // 先確認該 jamf 被某 school 綁定（沒綁也允許，devices 的 school_id 留 null）
-  const school = await db.query.schools.findFirst({
+  // 先確認該 jamf 被某 device_group 綁定（沒綁也允許，devices 的 device_group_id 留 null）
+  const deviceGroup = await db.query.deviceGroups.findFirst({
     where: (t, { and: andOp, eq: eqOp }) =>
       andOp(eqOp(t.tenantId, opts.tenantId), eqOp(t.jamfInstanceId, opts.jamfInstanceId)),
     columns: { id: true },
@@ -55,7 +55,7 @@ export async function syncDevicesFromJamf(opts: {
         .insert(mdmDevices)
         .values({
           tenantId: opts.tenantId,
-          schoolId: school?.id ?? null,
+          deviceGroupId: deviceGroup?.id ?? null,
           jamfInstanceId: opts.jamfInstanceId,
           platform: "apple",
           udid: null,
@@ -70,7 +70,7 @@ export async function syncDevicesFromJamf(opts: {
           // partial unique index 需要在這裡帶上相同的 WHERE 子句才能匹配
           targetWhere: sql`${mdmDevices.jamfDeviceId} IS NOT NULL`,
           set: {
-            schoolId: school?.id ?? sql`${mdmDevices.schoolId}`,
+            deviceGroupId: deviceGroup?.id ?? sql`${mdmDevices.deviceGroupId}`,
             serialNumber: d.serialNumber ?? sql`${mdmDevices.serialNumber}`,
             deviceName: d.name ?? sql`${mdmDevices.deviceName}`,
             jamfManagementId: d.managementId ?? sql`${mdmDevices.jamfManagementId}`,

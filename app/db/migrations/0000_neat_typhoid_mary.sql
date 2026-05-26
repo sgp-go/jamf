@@ -100,7 +100,7 @@ CREATE TABLE "mdm_commands" (
 CREATE TABLE "mdm_devices" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
-	"school_id" uuid,
+	"device_group_id" uuid,
 	"jamf_instance_id" uuid,
 	"asm_instance_id" uuid,
 	"self_mdm_config_id" uuid,
@@ -110,6 +110,9 @@ CREATE TABLE "mdm_devices" (
 	"device_name" text,
 	"model" text,
 	"os_version" text,
+	"jamf_device_id" varchar(32),
+	"jamf_management_id" varchar(64),
+	"last_synced_at" timestamp with time zone,
 	"push_token" text,
 	"push_magic" text,
 	"unlock_token" text,
@@ -145,16 +148,6 @@ CREATE TABLE "mdm_migrations" (
 	"error_message" text,
 	"started_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"completed_at" timestamp with time zone
-);
---> statement-breakpoint
-CREATE TABLE "jamf_instance_school_bindings" (
-	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"jamf_instance_id" uuid NOT NULL,
-	"school_id" uuid NOT NULL,
-	"jamf_site_id" integer,
-	"jamf_building_id" integer,
-	"extra" jsonb,
-	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "jamf_instances" (
@@ -208,11 +201,12 @@ CREATE TABLE "self_mdm_configs" (
 	CONSTRAINT "self_mdm_configs_tenantId_unique" UNIQUE("tenant_id")
 );
 --> statement-breakpoint
-CREATE TABLE "schools" (
+CREATE TABLE "device_groups" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"tenant_id" uuid NOT NULL,
 	"code" varchar(64) NOT NULL,
 	"display_name" text NOT NULL,
+	"jamf_instance_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -237,18 +231,18 @@ ALTER TABLE "dep_tokens" ADD CONSTRAINT "dep_tokens_asm_instance_id_asm_instance
 ALTER TABLE "mdm_commands" ADD CONSTRAINT "mdm_commands_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_commands" ADD CONSTRAINT "mdm_commands_device_id_mdm_devices_id_fk" FOREIGN KEY ("device_id") REFERENCES "public"."mdm_devices"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_devices" ADD CONSTRAINT "mdm_devices_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "mdm_devices" ADD CONSTRAINT "mdm_devices_school_id_schools_id_fk" FOREIGN KEY ("school_id") REFERENCES "public"."schools"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "mdm_devices" ADD CONSTRAINT "mdm_devices_device_group_id_device_groups_id_fk" FOREIGN KEY ("device_group_id") REFERENCES "public"."device_groups"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_devices" ADD CONSTRAINT "mdm_devices_jamf_instance_id_jamf_instances_id_fk" FOREIGN KEY ("jamf_instance_id") REFERENCES "public"."jamf_instances"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_devices" ADD CONSTRAINT "mdm_devices_asm_instance_id_asm_instances_id_fk" FOREIGN KEY ("asm_instance_id") REFERENCES "public"."asm_instances"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_devices" ADD CONSTRAINT "mdm_devices_self_mdm_config_id_self_mdm_configs_id_fk" FOREIGN KEY ("self_mdm_config_id") REFERENCES "public"."self_mdm_configs"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_migrations" ADD CONSTRAINT "mdm_migrations_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_migrations" ADD CONSTRAINT "mdm_migrations_device_id_mdm_devices_id_fk" FOREIGN KEY ("device_id") REFERENCES "public"."mdm_devices"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "jamf_instance_school_bindings" ADD CONSTRAINT "jamf_instance_school_bindings_jamf_instance_id_jamf_instances_id_fk" FOREIGN KEY ("jamf_instance_id") REFERENCES "public"."jamf_instances"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "jamf_instances" ADD CONSTRAINT "jamf_instances_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "jamf_token_cache" ADD CONSTRAINT "jamf_token_cache_jamf_instance_id_jamf_instances_id_fk" FOREIGN KEY ("jamf_instance_id") REFERENCES "public"."jamf_instances"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "mdm_device_certificates" ADD CONSTRAINT "mdm_device_certificates_self_mdm_config_id_self_mdm_configs_id_fk" FOREIGN KEY ("self_mdm_config_id") REFERENCES "public"."self_mdm_configs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "self_mdm_configs" ADD CONSTRAINT "self_mdm_configs_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "schools" ADD CONSTRAINT "schools_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_groups" ADD CONSTRAINT "device_groups_tenant_id_tenants_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."tenants"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "device_groups" ADD CONSTRAINT "device_groups_jamf_instance_id_jamf_instances_id_fk" FOREIGN KEY ("jamf_instance_id") REFERENCES "public"."jamf_instances"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "agent_reports_device_time_idx" ON "agent_reports" USING btree ("device_id","reported_at");--> statement-breakpoint
 CREATE INDEX "agent_reports_tenant_idx" ON "agent_reports" USING btree ("tenant_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "device_usage_device_date_uq" ON "device_usage_stats" USING btree ("device_id","date");--> statement-breakpoint
@@ -264,18 +258,20 @@ CREATE INDEX "mdm_commands_device_idx" ON "mdm_commands" USING btree ("device_id
 CREATE INDEX "mdm_commands_status_idx" ON "mdm_commands" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "mdm_commands_tenant_idx" ON "mdm_commands" USING btree ("tenant_id");--> statement-breakpoint
 CREATE INDEX "mdm_devices_tenant_idx" ON "mdm_devices" USING btree ("tenant_id");--> statement-breakpoint
-CREATE INDEX "mdm_devices_school_idx" ON "mdm_devices" USING btree ("school_id");--> statement-breakpoint
+CREATE INDEX "mdm_devices_device_group_idx" ON "mdm_devices" USING btree ("device_group_id");--> statement-breakpoint
 CREATE INDEX "mdm_devices_jamf_idx" ON "mdm_devices" USING btree ("jamf_instance_id");--> statement-breakpoint
 CREATE INDEX "mdm_devices_platform_idx" ON "mdm_devices" USING btree ("platform");--> statement-breakpoint
 CREATE UNIQUE INDEX "mdm_devices_tenant_udid_uq" ON "mdm_devices" USING btree ("tenant_id","udid") WHERE "mdm_devices"."udid" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "mdm_devices_tenant_serial_uq" ON "mdm_devices" USING btree ("tenant_id","serial_number") WHERE "mdm_devices"."serial_number" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "mdm_devices_windows_device_id_uq" ON "mdm_devices" USING btree ("windows_device_id") WHERE "mdm_devices"."windows_device_id" IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "mdm_devices_jamf_instance_device_id_uq" ON "mdm_devices" USING btree ("jamf_instance_id","jamf_device_id") WHERE "mdm_devices"."jamf_device_id" IS NOT NULL;--> statement-breakpoint
 CREATE INDEX "mdm_migrations_tenant_idx" ON "mdm_migrations" USING btree ("tenant_id");--> statement-breakpoint
 CREATE INDEX "mdm_migrations_serial_idx" ON "mdm_migrations" USING btree ("serial_number");--> statement-breakpoint
-CREATE UNIQUE INDEX "jamf_binding_instance_school_uq" ON "jamf_instance_school_bindings" USING btree ("jamf_instance_id","school_id");--> statement-breakpoint
-CREATE INDEX "jamf_binding_school_idx" ON "jamf_instance_school_bindings" USING btree ("school_id");--> statement-breakpoint
 CREATE INDEX "jamf_instances_tenant_idx" ON "jamf_instances" USING btree ("tenant_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "jamf_instances_tenant_baseurl_uq" ON "jamf_instances" USING btree ("tenant_id","base_url");--> statement-breakpoint
 CREATE INDEX "jamf_token_cache_expiry_idx" ON "jamf_token_cache" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "mdm_device_certs_udid_idx" ON "mdm_device_certificates" USING btree ("device_udid");--> statement-breakpoint
-CREATE INDEX "mdm_device_certs_serial_idx" ON "mdm_device_certificates" USING btree ("cert_serial");
+CREATE INDEX "mdm_device_certs_serial_idx" ON "mdm_device_certificates" USING btree ("cert_serial");--> statement-breakpoint
+CREATE INDEX "device_groups_tenant_idx" ON "device_groups" USING btree ("tenant_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "device_groups_tenant_code_uq" ON "device_groups" USING btree ("tenant_id","code");--> statement-breakpoint
+CREATE UNIQUE INDEX "device_groups_jamf_instance_uq" ON "device_groups" USING btree ("jamf_instance_id") WHERE "device_groups"."jamf_instance_id" IS NOT NULL;

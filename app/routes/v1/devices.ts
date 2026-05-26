@@ -27,15 +27,18 @@ const tenantParam = z.object({
 const tenantDeviceParam = tenantParam.extend({
   deviceId: z.string().uuid().openapi({ param: { name: "deviceId", in: "path" } }),
 });
-const tenantSchoolParam = tenantParam.extend({
-  schoolId: z.string().uuid().openapi({ param: { name: "schoolId", in: "path" } }),
+const tenantDeviceGroupParam = tenantParam.extend({
+  deviceGroupId: z
+    .string()
+    .uuid()
+    .openapi({ param: { name: "deviceGroupId", in: "path" } }),
 });
 
 const deviceItemSchema = z
   .object({
     id: z.string().uuid(),
     tenantId: z.string().uuid(),
-    schoolId: z.string().uuid().nullable(),
+    deviceGroupId: z.string().uuid().nullable(),
     jamfInstanceId: z.string().uuid().nullable(),
     serialNumber: z.string().nullable(),
     udid: z.string().nullable(),
@@ -50,13 +53,13 @@ const deviceItemSchema = z
   .openapi("Device");
 
 const listQuery = paginationQuery.extend({
-  schoolId: z.string().uuid().optional(),
+  deviceGroupId: z.string().uuid().optional(),
   search: z.string().optional().openapi({
     description: "在 serial / device name / udid 模糊比對",
   }),
 });
 
-const schoolListQuery = paginationQuery.extend({
+const deviceGroupListQuery = paginationQuery.extend({
   search: z.string().optional(),
 });
 
@@ -83,7 +86,7 @@ const commandBodySchema = z
 function toItem(row: {
   id: string;
   tenantId: string;
-  schoolId: string | null;
+  deviceGroupId: string | null;
   jamfInstanceId: string | null;
   serialNumber: string | null;
   udid: string | null;
@@ -98,7 +101,7 @@ function toItem(row: {
   return {
     id: row.id,
     tenantId: row.tenantId,
-    schoolId: row.schoolId,
+    deviceGroupId: row.deviceGroupId,
     jamfInstanceId: row.jamfInstanceId,
     serialNumber: row.serialNumber,
     udid: row.udid,
@@ -131,12 +134,12 @@ const listSpec = createRoute({
   },
 });
 
-const listBySchoolSpec = createRoute({
+const listByDeviceGroupSpec = createRoute({
   method: "get",
-  path: "/tenants/{tenantId}/schools/{schoolId}/devices",
+  path: "/tenants/{tenantId}/device-groups/{deviceGroupId}/devices",
   tags: ["Devices"],
-  summary: "列出指定學校的設備",
-  request: { params: tenantSchoolParam, query: schoolListQuery },
+  summary: "列出指定 device group 的設備",
+  request: { params: tenantDeviceGroupParam, query: deviceGroupListQuery },
   responses: {
     200: {
       description: "Device list",
@@ -246,11 +249,11 @@ export const devicesApp = new OpenAPIHono({ defaultHook: validationFailedHook })
 
 devicesApp.openapi(listSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
-  const { page, limit, schoolId, search } = c.req.valid("query");
+  const { page, limit, deviceGroupId, search } = c.req.valid("query");
 
   const { rows, total } = await listDevicesInTenant({
     tenantId,
-    schoolId,
+    deviceGroupId,
     search,
     page,
     limit,
@@ -265,12 +268,12 @@ devicesApp.openapi(listSpec, async (c) => {
   );
 });
 
-devicesApp.openapi(listBySchoolSpec, async (c) => {
-  const { tenantId, schoolId } = c.req.valid("param");
+devicesApp.openapi(listByDeviceGroupSpec, async (c) => {
+  const { tenantId, deviceGroupId } = c.req.valid("param");
   const { page, limit, search } = c.req.valid("query");
   const { rows, total } = await listDevicesInTenant({
     tenantId,
-    schoolId,
+    deviceGroupId,
     search,
     page,
     limit,

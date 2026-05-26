@@ -16,7 +16,7 @@ import {
  * 三個關鍵屬性：
  * 1. 買單方：對應簽合約 / 計費的單位
  * 2. 資料隔離邊界：所有 query 第一個 WHERE 都是 tenant_id = ?
- * 3. 業務範圍上限：tenant 下的學校、Jamf、設備、命令一律不會洩漏到別的 tenant
+ * 3. 業務範圍上限：tenant 下的device group、Jamf、設備、命令一律不會洩漏到別的 tenant
  */
 const TENANT_DESCRIPTION = [
   "**租戶（Tenant）= 買單方 / 合約主體 / 資料隔離邊界。**",
@@ -25,11 +25,11 @@ const TENANT_DESCRIPTION = [
   "",
   "| 採購模式 | tenant 對應 |",
   "|---|---|",
-  "| 教育部統購統管（常見） | 1 tenant = 1 教育部，底下掛 N 所學校 |",
-  "| 單校自購（少數） | 1 tenant = 1 所學校 |",
+  "| 教育部統購統管（常見） | 1 tenant = 1 教育部，底下掛 N 所device group |",
+  "| 單校自購（少數） | 1 tenant = 1 所device group |",
   "| 多教育部都是客戶 | N tenant，彼此完全隔離 |",
   "",
-  "資料隔離保證：所有後端 query 都以 `tenant_id` 為第一條件，跨 tenant 完全看不到對方的學校、設備、命令歷史、上報資料。",
+  "資料隔離保證：所有後端 query 都以 `tenant_id` 為第一條件，跨 tenant 完全看不到對方的device group、設備、命令歷史、上報資料。",
 ].join("\n");
 
 const tenantSchema = z
@@ -124,10 +124,10 @@ const createRouteSpec = createRoute({
     "",
     "1. `POST /admin/tenants/{tenantId}/jamf-instances` — 錄入各校的 Jamf 憑據（baseUrl / clientId / clientSecret）",
     "2. `POST /admin/tenants/{tenantId}/jamf-instances/{id}/verify` — 真打 OAuth 端點驗證憑據有效",
-    "3. `POST /admin/tenants/{tenantId}/schools` — 建立學校並綁定到對應 Jamf 實例（1:1）",
+    "3. `POST /admin/tenants/{tenantId}/device-groups` — 建立device group並綁定到對應 Jamf 實例（1:1）",
     "4. `POST /admin/tenants/{tenantId}/jamf-instances/{id}/sync-devices` — 從 Jamf 同步設備清單進 `mdm_devices`",
     "",
-    "之後操作員就能用 `/api/v1/tenants/{tenantId}/devices/*` 統一視角管理所有學校的設備。",
+    "之後操作員就能用 `/api/v1/tenants/{tenantId}/devices/*` 統一視角管理所有device group的設備。",
   ].join("\n"),
   request: {
     body: { content: { "application/json": { schema: createBody } } },
@@ -169,7 +169,7 @@ const detailRouteSpec = createRoute({
   security,
   summary: "取得 tenant 詳情",
   description:
-    "回傳單一 tenant 的設定。底下的學校、Jamf 實例、設備清單請呼叫各自端點（`/admin/tenants/{tenantId}/schools` 等）。",
+    "回傳單一 tenant 的設定。底下的device group、Jamf 實例、設備清單請呼叫各自端點（`/admin/tenants/{tenantId}/device-groups` 等）。",
   request: { params: idParam },
   responses: {
     200: {
@@ -213,7 +213,7 @@ const deleteRouteSpec = createRoute({
   description: [
     "**警告：此操作不可逆。** 會 cascade 刪除該 tenant 底下：",
     "",
-    "- 全部學校（`schools`）",
+    "- 全部 device group（`device_groups`）",
     "- 全部 Jamf 實例（`jamf_instances`）+ token 快取",
     "- 全部 ASM 實例（`asm_instances`）+ DEP token / DEP devices",
     "- 全部設備記錄（`mdm_devices`）",

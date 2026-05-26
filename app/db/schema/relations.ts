@@ -4,20 +4,20 @@ import { asmInstances, depDevices, depTokens } from "./asm.ts";
 import { mdmCommands, mdmDevices, mdmMigrations } from "./devices.ts";
 import { jamfInstances, jamfTokenCache } from "./jamf.ts";
 import { mdmDeviceCertificates, selfMdmConfigs } from "./self-mdm.ts";
-import { schools, tenants } from "./tenants.ts";
+import { deviceGroups, tenants } from "./tenants.ts";
 
 export const tenantsRelations = relations(tenants, ({ many, one }) => ({
-  schools: many(schools),
+  deviceGroups: many(deviceGroups),
   jamfInstances: many(jamfInstances),
   asmInstances: many(asmInstances),
   devices: many(mdmDevices),
   selfMdmConfig: one(selfMdmConfigs),
 }));
 
-export const schoolsRelations = relations(schools, ({ one, many }) => ({
-  tenant: one(tenants, { fields: [schools.tenantId], references: [tenants.id] }),
+export const deviceGroupsRelations = relations(deviceGroups, ({ one, many }) => ({
+  tenant: one(tenants, { fields: [deviceGroups.tenantId], references: [tenants.id] }),
   jamfInstance: one(jamfInstances, {
-    fields: [schools.jamfInstanceId],
+    fields: [deviceGroups.jamfInstanceId],
     references: [jamfInstances.id],
   }),
   devices: many(mdmDevices),
@@ -26,7 +26,7 @@ export const schoolsRelations = relations(schools, ({ one, many }) => ({
 export const jamfInstancesRelations = relations(jamfInstances, ({ one, many }) => ({
   tenant: one(tenants, { fields: [jamfInstances.tenantId], references: [tenants.id] }),
   tokenCache: one(jamfTokenCache),
-  school: one(schools), // 1:1，school 那邊持有 FK
+  deviceGroup: one(deviceGroups), // 1:1，device_group 那邊持有 FK
   devices: many(mdmDevices),
 }));
 
@@ -74,7 +74,10 @@ export const mdmDeviceCertificatesRelations = relations(
 
 export const mdmDevicesRelations = relations(mdmDevices, ({ one, many }) => ({
   tenant: one(tenants, { fields: [mdmDevices.tenantId], references: [tenants.id] }),
-  school: one(schools, { fields: [mdmDevices.schoolId], references: [schools.id] }),
+  deviceGroup: one(deviceGroups, {
+    fields: [mdmDevices.deviceGroupId],
+    references: [deviceGroups.id],
+  }),
   jamfInstance: one(jamfInstances, {
     fields: [mdmDevices.jamfInstanceId],
     references: [jamfInstances.id],

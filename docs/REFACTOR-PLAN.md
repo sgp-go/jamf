@@ -12,7 +12,7 @@
 | ORM / DB | `jsr:@db/sqlite` + 手寫 SQL | **Drizzle ORM + node-postgres** | 型別安全的 schema-first DSL，產品化遷移工具齊全 |
 | 入參驗證 | 無 / 手寫 type guard | **Zod + `@hono/zod-openapi`** | schema 同時當 validator、TypeScript 型別、OpenAPI 3.1 來源 |
 | API 文件 | 手寫 markdown | `@hono/zod-openapi` + **`@scalar/hono-api-reference`** | `/openapi.json` 自動產生，`/docs` 提供互動式 UI（Scalar 比 Swagger UI 現代） |
-| 多租戶 | env 單組憑據 | **DB 驅動租戶配置** | 學校 N → ASM N → Jamf 1..N 的對應 |
+| 多租戶 | env 單組憑據 | **DB 驅動租戶配置** | device_group N → ASM N → Jamf 1..N 的對應 |
 | 機密儲存 | `.env` + `certs/` 檔案 | DB 加密欄位（envelope encryption）+ 物件儲存 | 同一台後端服務多客戶共用 |
 
 > APNS HTTP/2 長連線在 Node 上由 `http2` 內建，無需 `--unstable-http`；Apple-MDM 用的 client cert 透過 `node:tls` 的 `ca/cert/key` 傳入即可。
@@ -21,12 +21,12 @@
 
 ```
 tenant              // 一個產品客戶（通常 = 一個學區 / 教育局 / 廠商簽約方）
- ├─ school          // 學校：實體設備分組單位
+ ├─ device_group    // 設備分組單位（操作員可見性邊界 + 批次派送單位）
  │   └─ device      // 設備（指向所屬 jamf_instance 或自建 mdm）
  │
  ├─ jamf_instance   // Jamf Pro 實例（1 tenant 可以有 0..N 個）
  │   ├─ base_url, client_id, client_secret(encrypted)
- │   └─ scope: 哪些 school 透過這個實例管理
+ │   └─ scope: 哪些 device_group 透過這個實例管理
  │
  ├─ asm_instance    // Apple School Manager（1 tenant 可以有 0..N 個）
  │   └─ dep_token   // DEP token（.p7m 解出來後存的 OAuth 憑據）
@@ -42,7 +42,7 @@ tenant              // 一個產品客戶（通常 = 一個學區 / 教育局 / 
 - **跨 tenant 隔離**：所有 query 一律以 `tenant_id` 為第一條件；service 層強制注入 `tenantId` context
 - **APNS topic 唯一性**：自建 MDM 在 Apple Push Certificate Portal 上每張憑證對應一個 topic，因此 `mdm_config` 與 `apns_*` 1:1
 - **DEP token 過期**：`dep_tokens.expires_at` index，到期前 7 天觸發提醒任務
-- **學校跨 tenant 共享 ASM**（少見但可能）：暫不支援，需要時用 `asm_instance.shared_with_tenant_ids[]`
+- **device_group 跨 tenant 共享 ASM**（少見但可能）：暫不支援，需要時用 `asm_instance.shared_with_tenant_ids[]`
 
 ## 3. 並存遷移策略
 
@@ -158,7 +158,7 @@ curl -X POST "http://localhost:3000/api/v1/admin/tenants/$TENANT_ID/jamf-instanc
 pnpm install
 pnpm db:generate     # 從 schema 產生 SQL（已產出 0000_*.sql，再改 schema 才需重跑）
 pnpm db:migrate      # 套用到 Postgres
-pnpm db:seed         # 建立 demo tenant / school / jamf instance
+pnpm db:seed         # 建立 demo tenant / device_group / jamf instance
 pnpm dev             # tsx watch 啟動，預設 :3000
 # http://localhost:3000/docs       Scalar 互動式文件
 # http://localhost:3000/openapi.json
