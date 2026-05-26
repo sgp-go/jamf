@@ -10,6 +10,11 @@ import {
   saveAgentReport,
   upsertUsageStats,
 } from "~/services/agent.ts";
+import {
+  authorizeAgentReport,
+  extractBearerToken,
+} from "~/services/install-agent.ts";
+import { publishEvent } from "~/services/webhooks/index.ts";
 
 /**
  * /api/v1/tenants/{tenantId}/agent/*
@@ -120,7 +125,27 @@ const reportRoute = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/agent/reports",
   tags: ["Agent"],
-  summary: "Agent App 上報設備狀態",
+  summary: "Agent App 上報設備狀態（iOS + Windows 共用）",
+  description: [
+    "**鑑權**：若 device 已透過 `install-agent` 簽發 token，必須帶 `Authorization: Bearer <agent_token>`",
+    "（未簽發 token 的 device 維持 anonymous，相容 iOS 既有 Agent App）。",
+    "",
+    "**Windows extraData 建議結構**：",
+    "```json",
+    '{ "platform": "windows",',
+    '  "windows": {',
+    '    "winget_version": "1.7.10861",',
+    '    "defender_enabled": true,',
+    '    "firewall_enabled": true,',
+    '    "pending_updates": 3,',
+    '    "is_local_admin": false }',
+    "}",
+    "```",
+    "",
+    "iOS 端維持既有欄位即可，無 `extraData.windows` 子物件。",
+    "",
+    "**事件**：成功後觸發 webhook `agent.reported`。",
+  ].join("\n"),
   request: {
     params: tenantParam,
     body: { content: { "application/json": { schema: reportBody } } },
@@ -184,6 +209,14 @@ const usageReportRoute = createRoute({
   path: "/tenants/{tenantId}/agent/usage",
   tags: ["Agent"],
   summary: "上報設備使用時長（同設備同日 upsert）",
+  description: [
+    "**鑑權**：同 `/agent/reports`，若 device 已簽發 token 則必須帶 Bearer。",
+    "",
+    "**錯峰策略**：建議 Windows Agent 在凌晨 0:00-5:00 之間用 `hash(udid) % 300`",
+    "落到固定分鐘上報，避免 8000 台同時打。",
+    "",
+    "**事件**：成功後觸發 webhook `agent.usage_reported`。",
+  ].join("\n"),
   request: {
     params: tenantParam,
     body: { content: { "application/json": { schema: usageBody } } },
@@ -257,6 +290,11 @@ agentApp.openapi(reportRoute, async (c) => {
     udid: body.udid ?? null,
   });
 
+  await authorizeAgentReport({
+    device,
+    token: extractBearerToken(c.req.header("authorization")),
+  });
+
   const saved = await saveAgentReport({
     tenantId,
     deviceId: device.id,
@@ -271,6 +309,25 @@ agentApp.openapi(reportRoute, async (c) => {
     appVersion: body.appVersion,
     extraData: body.extraData,
     reportedAt: body.reportedAt,
+  });
+
+  // 非阻塞觸發 webhook：失敗不影響 Agent 上報成功，但會在 webhook_deliveries
+  // 留 pending row 由 scheduler 重試
+  void publishEvent({
+    tenantId,
+    eventType: "agent.reported",
+    data: {
+      device_id: device.id,
+      report_id: saved.id,
+      serial_number: body.serialNumber,
+      os_version: body.osVersion ?? null,
+      app_version: body.appVersion ?? null,
+      battery_level: body.batteryLevel ?? null,
+      storage_available_mb: body.storageAvailableMb ?? null,
+      reported_at: body.reportedAt ?? new Date().toISOString(),
+    },
+  }).catch((err) => {
+    console.error("[agent.reported] publishEvent failed", err);
   });
 
   return c.json(
@@ -349,11 +406,31 @@ agentApp.openapi(usageReportRoute, async (c) => {
     serialNumber: body.serialNumber,
   });
 
+  await authorizeAgentReport({
+    device,
+    token: extractBearerToken(c.req.header("authorization")),
+  });
+
   const { ids } = await upsertUsageStats({
     tenantId,
     deviceId: device.id,
     sessionId: body.sessionId,
     stats: body.stats,
+  });
+
+  // Usage 上報觸發 webhook 給台灣後端做學生使用統計分析
+  void publishEvent({
+    tenantId,
+    eventType: "agent.usage_reported",
+    data: {
+      device_id: device.id,
+      serial_number: body.serialNumber,
+      session_id: body.sessionId ?? null,
+      stats: body.stats,
+      saved_count: ids.length,
+    },
+  }).catch((err) => {
+    console.error("[agent.usage_reported] publishEvent failed", err);
   });
 
   return c.json({ ok: true as const, data: { savedCount: ids.length } }, 200);

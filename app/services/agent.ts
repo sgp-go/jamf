@@ -10,15 +10,26 @@ import { AppError } from "~/lib/errors.ts";
  * 找不到時自動 upsert 一筆「未透過 MDM 註冊但有 Agent」的設備記錄，
  * 後續若被 MDM 註冊上來，由 mdm checkin 流程把同一 serial 的 row 合併補欄位。
  */
+/**
+ * 解析 Agent 上報的 (tenantId, serialNumber) → 找到或建立 mdm_devices row。
+ *
+ * 同時回傳 agent_token_hash 供 handler 做鑑權判斷：
+ *   - null：尚未透過 install-agent 簽發 token（相容 iOS 無 token 上報）
+ *   - 非 null：必須帶匹配 Bearer token 否則 401
+ *
+ * 找不到 row 時自動建立 platform="apple" 的「Agent-only」設備（iOS 場景）。
+ * Windows Agent 第一次上報前一定先走 install-agent，row 已存在 + token 已設，
+ * 不會走 insert 分支。
+ */
 export async function resolveAgentDevice(opts: {
   tenantId: string;
   serialNumber: string;
   udid?: string | null;
-}): Promise<{ id: string }> {
+}): Promise<{ id: string; agentTokenHash: string | null }> {
   const existing = await db.query.mdmDevices.findFirst({
     where: (t, { and: andOp, eq: eqOp }) =>
       andOp(eqOp(t.tenantId, opts.tenantId), eqOp(t.serialNumber, opts.serialNumber)),
-    columns: { id: true },
+    columns: { id: true, agentTokenHash: true },
   });
   if (existing) return existing;
 
@@ -32,7 +43,10 @@ export async function resolveAgentDevice(opts: {
       enrollmentStatus: "pending",
       enrollmentType: "agent_only",
     })
-    .returning({ id: mdmDevices.id });
+    .returning({
+      id: mdmDevices.id,
+      agentTokenHash: mdmDevices.agentTokenHash,
+    });
   if (!created) {
     throw new AppError(500, "device_upsert_failed", "Failed to upsert device row");
   }
