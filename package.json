@@ -10,6 +10,7 @@
     "dev": "tsx watch --env-file-if-exists=.env app/server.ts",
     "start": "node --env-file-if-exists=.env --import tsx app/server.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test 'app/**/*.test.ts'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env app/db/migrate.ts",
     "db:push": "drizzle-kit push",

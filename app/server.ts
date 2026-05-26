@@ -11,6 +11,7 @@ import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
 import { devicesApp } from "~/routes/v1/devices.ts";
 import { jamfDevicesApp } from "~/routes/v1/jamf-devices.ts";
+import { startWebhookScheduler } from "~/services/webhooks/index.ts";
 
 /**
  * 統一的 validation 失敗 → 標準錯誤信封。
@@ -93,5 +94,9 @@ serve({ fetch: app.fetch, port }, ({ port: p }) => {
   console.log(`API docs:    http://localhost:${p}/docs`);
   console.log(`OpenAPI:     http://localhost:${p}/openapi.json`);
 });
+
+// Webhook 推送排程器：10 秒輪詢 webhook_deliveries 取到期 row 推送
+// 失敗 30s/5min/30min 三段退避，超過寫 dead；可用 requeueDelivery 補推
+startWebhookScheduler();
 
 export type AppType = typeof app;
