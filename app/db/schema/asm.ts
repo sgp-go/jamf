@@ -13,9 +13,13 @@ import {
 import { tenants } from "./tenants.ts";
 
 /**
- * Apple School Manager 實例。
- * 一個 tenant 可有多個 ASM（不同教育局 / 不同採購批次）。
+ * Apple School Manager / Apple Business Manager 實例。
+ * 一個 tenant 可有多個 ASM/ABM（不同教育局 / 不同採購批次）。
  * 與 jamfInstances 是多對多：實際綁定關係由設備上的 jamf_instance_id 自然決定。
+ *
+ * organization_id：對方 ABM/ASM 後台「Enrollment Information」可見的數字 ID，
+ *   用於 iOS Custom App cross-organization 派發（我方 App Store Connect 後台
+ *   把此 ID 加入 Authorized Organizations 後，對方 ASM 後台就能看到 App）。
  */
 export const asmInstances = pgTable(
   "asm_instances",
@@ -26,6 +30,7 @@ export const asmInstances = pgTable(
     orgName: text(),
     orgEmail: text(),
     orgAddress: text(),
+    organizationId: varchar({ length: 64 }),
     isActive: boolean().notNull().default(true),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
@@ -33,7 +38,12 @@ export const asmInstances = pgTable(
       .defaultNow()
       .$onUpdate(() => new Date()),
   },
-  (t) => [index("asm_instances_tenant_idx").on(t.tenantId)],
+  (t) => [
+    index("asm_instances_tenant_idx").on(t.tenantId),
+    uniqueIndex("asm_instances_org_id_uq")
+      .on(t.organizationId)
+      .where(sql`${t.organizationId} IS NOT NULL`),
+  ],
 );
 
 /**
