@@ -7,6 +7,7 @@ import { AppError } from "~/lib/errors.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { appsAdminApp } from "~/routes/v1/admin/apps.ts";
 import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
+import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
@@ -41,6 +42,7 @@ app.route("/api/v1", tenantsAdminApp);
 app.route("/api/v1", deviceGroupsAdminApp);
 app.route("/api/v1", jamfInstancesAdminApp);
 app.route("/api/v1", appsAdminApp);
+app.route("/api/v1", installAgentAdminApp);
 
 app.doc("/openapi.json", {
   openapi: "3.1.0",

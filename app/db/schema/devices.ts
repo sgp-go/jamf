@@ -85,6 +85,12 @@ export const mdmDevices = pgTable(
     lostModeFootnote: text(),
     lostModeEnabledAt: timestamp({ withTimezone: true }),
 
+    // Agent App 對接（install-agent 一鍵流程）
+    agentTokenHash: varchar({ length: 128 }),
+    agentTokenIssuedAt: timestamp({ withTimezone: true }),
+    agentInstalledAt: timestamp({ withTimezone: true }),
+    agentAppId: uuid(),
+
     selfMdmManaged: boolean().notNull().default(false),
     enrollmentType: varchar({ length: 32 }).default("dep"),
     enrollmentStatus: enrollmentStatusEnum().notNull().default("pending"),
