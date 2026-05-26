@@ -33,6 +33,80 @@ export function buildRemoteWipe(action: WipeAction = "doWipe"): SyncMLCommand {
 }
 
 // ============================================================
+// RemoteLock 說明（無對應 CSP，方案另見 Agent App）
+// ============================================================
+//
+// **Windows 10/11 Pro 沒有「立即鎖屏」標準 CSP**。
+//
+// MS-docs 列出的相關 CSP 都是策略型，非「臨時鎖一下」：
+//   - Policy CSP DeviceLock/*  → idle 多久鎖屏、密碼強度等策略
+//   - SurfaceHub/Properties/ScreenTimeoutSeconds  → 僅 Surface Hub 適用
+//   - RemoteFind/Phone        → Windows Mobile 用，桌面版不適用
+//
+// **業界生產做法**：透過 Agent App（我們 W1-9 規劃中的 Service）接收
+// push 後本地呼叫 user32.dll!LockWorkStation()，這是 W1 之後的解。
+//
+// **臨時 workaround**：派 Reboot 命令（buildReboot），重啟後必然要重新
+// 登入，達到「強制中斷使用 + 鎖屏」的效果。對 Lost Mode 簡化版（W1-8 範圍）
+// 已足夠。
+//
+// 真正純鎖屏的 CSP 由 W1-9 Agent App + push 通道實現。
+
+// ============================================================
+// Reboot（遠端重啟）
+// ============================================================
+
+/**
+ * 遠端重啟設備。Exec ./Device/Vendor/MSFT/Reboot/RebootNow（或 Schedule/Single）。
+ *
+ * 路徑：
+ *   - RebootNow            立即重啟（會通知用戶 5 分鐘倒數）
+ *   - Schedule/Single      指定時間重啟（datetime ISO 8601）
+ *   - Schedule/DailyRecurrent  每日重複
+ *
+ * 真機回應：命令排隊 → push 觸發 SyncML session → 設備 ack →
+ * 約 5 分鐘倒數 → 系統重啟。
+ */
+export type RebootMode = "RebootNow" | "ScheduleSingle" | "ScheduleDailyRecurrent";
+
+export function buildReboot(mode: RebootMode = "RebootNow", scheduledTime?: string): SyncMLCommand {
+  if (mode === "RebootNow") {
+    return {
+      cmdId: "0",
+      verb: "Exec",
+      target: "./Device/Vendor/MSFT/Reboot/RebootNow",
+    };
+  }
+  if (mode === "ScheduleSingle") {
+    if (!scheduledTime) {
+      throw new Error("buildReboot: ScheduleSingle 需提供 scheduledTime (ISO 8601)");
+    }
+    return {
+      cmdId: "0",
+      verb: "Exec",
+      target: "./Device/Vendor/MSFT/Reboot/Schedule/Single",
+      format: "chr",
+      data: scheduledTime,
+    };
+  }
+  if (mode === "ScheduleDailyRecurrent") {
+    if (!scheduledTime) {
+      throw new Error(
+        "buildReboot: ScheduleDailyRecurrent 需提供 scheduledTime (ISO 8601，每日該時間)",
+      );
+    }
+    return {
+      cmdId: "0",
+      verb: "Exec",
+      target: "./Device/Vendor/MSFT/Reboot/Schedule/DailyRecurrent",
+      format: "chr",
+      data: scheduledTime,
+    };
+  }
+  throw new Error(`buildReboot: unknown mode ${mode}`);
+}
+
+// ============================================================
 // MSIX 應用安裝（EnterpriseModernAppManagement）
 // ============================================================
 

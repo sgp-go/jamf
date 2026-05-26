@@ -1,5 +1,6 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@^1";
 import {
+  buildReboot,
   buildRemoteWipe,
   buildMsixInstall,
   buildMsixInstallAddNode,
@@ -25,6 +26,30 @@ Deno.test("buildRemoteWipe: 預設 doWipe", () => {
   assertEquals(cmd.verb, "Exec");
   assertEquals(cmd.target, "./Device/Vendor/MSFT/RemoteWipe/doWipe");
   assertEquals(cmd.data, undefined);
+});
+
+Deno.test("buildReboot: 預設 RebootNow", () => {
+  const cmd = buildReboot();
+  assertEquals(cmd.verb, "Exec");
+  assertEquals(cmd.target, "./Device/Vendor/MSFT/Reboot/RebootNow");
+  assertEquals(cmd.data, undefined);
+});
+
+Deno.test("buildReboot: ScheduleSingle 帶 ISO 時間", () => {
+  const cmd = buildReboot("ScheduleSingle", "2026-06-01T02:00:00Z");
+  assertEquals(cmd.target, "./Device/Vendor/MSFT/Reboot/Schedule/Single");
+  assertEquals(cmd.format, "chr");
+  assertEquals(cmd.data, "2026-06-01T02:00:00Z");
+});
+
+Deno.test("buildReboot: ScheduleSingle 無時間參數拋錯", () => {
+  assertThrows(() => buildReboot("ScheduleSingle"), Error);
+});
+
+Deno.test("buildReboot: ScheduleDailyRecurrent", () => {
+  const cmd = buildReboot("ScheduleDailyRecurrent", "02:00:00");
+  assertEquals(cmd.target, "./Device/Vendor/MSFT/Reboot/Schedule/DailyRecurrent");
+  assertEquals(cmd.data, "02:00:00");
 });
 
 Deno.test("buildRemoteWipe: 三種動作各對應獨立 CSP 路徑", () => {

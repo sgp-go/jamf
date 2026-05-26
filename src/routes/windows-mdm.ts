@@ -20,6 +20,7 @@ import {
   projectWindowsDevice,
 } from "../mdm/windows/command.ts";
 import {
+  buildReboot,
   buildRemoteWipe,
   buildMsixInstall,
   buildMsixInstallAddNode,
@@ -610,6 +611,29 @@ w.post("/api/mdm/win/devices/:udid/push", async (c) => {
     }
     throw e;
   }
+});
+
+/** POST /api/mdm/win/devices/:udid/reboot — 排入 Reboot 命令 */
+w.post("/api/mdm/win/devices/:udid/reboot", async (c) => {
+  const udid = c.req.param("udid");
+  const device = getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+
+  const cmd = buildReboot("RebootNow");
+  const commandUuid = enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "Reboot",
+    command: cmd,
+  });
+
+  return c.json({
+    commandUuid,
+    action: "RebootNow",
+    note:
+      "Command queued. Device will reboot after WNS push or next poll (5-15 min countdown shown to user).",
+  });
 });
 
 /** POST /api/mdm/win/devices/:udid/wipe — 排入 RemoteWipe */
