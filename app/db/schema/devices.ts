@@ -187,6 +187,34 @@ export const mdmMigrations = pgTable(
   ],
 );
 
+/**
+ * Windows 設備上的 App 清單（裝置回報 AppInventory 後 upsert）。
+ *
+ * 對應 src/ 端 mdm_windows_apps（SQLite，W2 OMA-DM 協議層搬遷時遷過來）。
+ * 差異：device_udid TEXT FK → deviceId UUID FK + 多了 tenantId。
+ */
+export const mdmWindowsApps = pgTable(
+  "mdm_windows_apps",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid().notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    deviceId: uuid()
+      .notNull()
+      .references(() => mdmDevices.id, { onDelete: "cascade" }),
+    packageFamilyName: text().notNull(),
+    displayName: text(),
+    version: text(),
+    installState: varchar({ length: 32 }),
+    lastSyncedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("mdm_windows_apps_device_pfn_uq").on(t.deviceId, t.packageFamilyName),
+    index("mdm_windows_apps_device_idx").on(t.deviceId),
+    index("mdm_windows_apps_tenant_idx").on(t.tenantId),
+  ],
+);
+
 export type MdmDevice = typeof mdmDevices.$inferSelect;
 export type NewMdmDevice = typeof mdmDevices.$inferInsert;
 export type MdmCommand = typeof mdmCommands.$inferSelect;
+export type MdmWindowsApp = typeof mdmWindowsApps.$inferSelect;
