@@ -4,24 +4,26 @@ import { db } from "~/db/client.ts";
 import { apps } from "~/db/schema/apps.ts";
 import { mdmCommands, mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
+import { buildMsiInstall, buildMsiStatusQuery } from "~/services/mdm/windows/csp.ts";
+import { getActiveSelfMdmConfig } from "~/services/mdm/self-mdm-config.ts";
+import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 
 /**
  * Agent App 一鍵安裝流程：把「給設備派 Agent App」這個業務動作封裝為單一 API。
  *
- * 對台灣後端視角就是一個 endpoint，內部我方做三件事：
+ * 對台灣後端視角就是一個 endpoint，內部我方做兩件事：
  *   1. 為該設備簽發 Agent Token（hex string），只回給呼叫端一次，DB 只存 sha256 hash
- *   2. 透過 Registry CSP 在設備 HKLM 寫入 Agent 配置（device_id + token + endpoint）
- *   3. 透過 EDA-CSP 派發 Agent .msi（指向 /apps/{appId}/download/...）
+ *   2. 透過 EDA-CSP 派發 Agent .msi，並把 device_id/token/endpoint/tenant 以
+ *      msiexec public property 帶進 MsiInstallJob 的 CommandLine，由 MSI 安裝時
+ *      寫入 HKLM（Registry CSP 在 Win10 22H2 已不可用 → 所有 LocURI 回 404）。
  *
- * 順序：先寫註冊表後派 .msi。Agent Service 安裝完啟動時讀註冊表已就緒，
- * 避免 race condition（詳見 brain/wiki/agent-app-device-binding.md）。
+ * 配置隨 MSI 原子落地，Agent Service 安裝完啟動時讀 HKLM 已就緒，無 race
+ * （device-binding 演進詳見 brain/wiki/agent-app-device-binding.md）。
  *
  * 命令進 mdm_commands 隊列後由 OMA-DM 協議層拉走透過 SyncML 派發到設備。
  * 完成狀態由協議層更新（status: queued → sent → acknowledged）。
  * Webhook agent.installed 在 acknowledged 時觸發（W2-W3 接協議層 ack 流程）。
  */
-
-const DEFAULT_REGISTRY_PATH = "SOFTWARE/Policies/CoGrowMDM/Agent";
 
 export interface InstallAgentInput {
   tenantId: string;
@@ -33,8 +35,8 @@ export interface InstallAgentInput {
    */
   apiEndpoint: string;
   /**
-   * 自訂註冊表路徑。預設 SOFTWARE/Policies/CoGrowMDM/Agent。
-   * 通常不需改；只有客戶要走自己 publisher 命名空間時用。
+   * @deprecated HKLM 路徑現由 agent MSI（Product.wxs）固定為
+   * SOFTWARE\Policies\CoGrowMDM\Agent，此參數已不生效（保留兼容舊呼叫端）。
    */
   registryPath?: string;
 }
@@ -43,7 +45,7 @@ export interface InstallAgentResult {
   deviceId: string;
   /** 一次性返回給呼叫端的 raw token；DB 只保存 hash。後續無法復原。 */
   agentToken: string;
-  /** 對應排入 mdm_commands 的命令 ID（Registry + Agent App install 3 條 SyncML 命令）*/
+  /** 排入 mdm_commands 的命令 ID（MSI Add + Exec + Status，共 3 條）*/
   commandIds: string[];
 }
 
@@ -99,8 +101,68 @@ export async function installAgentOnDevice(
   const agentToken = randomBytes(32).toString("hex");
   const agentTokenHash = createHash("sha256").update(agentToken).digest("hex");
 
-  const registryPath = input.registryPath ?? DEFAULT_REGISTRY_PATH;
   const tenantId = input.tenantId;
+
+  // 取 active config 的 publicBaseUrl 拼 MSI 下載 URL。
+  // 設備的 EnterpriseDesktopAppManagement 需要完整公網 HTTPS URL，
+  // app.fileUrl 只是相對路徑（/api/v1/apps/{id}/download/...），必須在此拼上 baseUrl。
+  const config = await getActiveSelfMdmConfig();
+  const baseUrl = config.publicBaseUrl.replace(/\/+$/, "");
+  const contentUri = `${baseUrl}${app.fileUrl}`;
+
+  // 配置注入：Registry CSP 在 Win10 22H2 不可用（所有 LocURI 不分 verb 都回 404），
+  // 改由 msiexec public property 帶進 MsiInstallJob 的 CommandLine，MSI 安裝時寫入
+  // HKLM\SOFTWARE\Policies\CoGrowMDM\Agent（見 agent-app Product.wxs RegistryValue
+  // 與 RegistryConfig.cs KeyPath）。值皆 UUID/hex/URL（無空格），不需引號。
+  const configProps = [
+    `DEVICE_ID=${device.id}`,
+    `AGENT_TOKEN=${agentToken}`,
+    `API_ENDPOINT=${input.apiEndpoint}`,
+    `TENANT_ID=${tenantId}`,
+  ].join(" ");
+  const installCommandLine = `${app.installArgs ?? "/quiet /norestart"} ${configProps}`;
+
+  // csp.ts 純函數生成「終態」SyncML 命令——command.ts 取出後直接下發。
+  //   1. MSI DownloadInstall：Add + MsiInstallJob XML（CommandLine 帶配置 property）
+  //   2. MSI Status：Get（供後端輪詢安裝進度）
+  let msiInstall: SyncMLCommand;
+  let msiInstallExec: SyncMLCommand;
+  let msiStatus: SyncMLCommand;
+  try {
+    msiInstall = buildMsiInstall({
+      productId: app.bundleId,
+      productVersion: app.version,
+      contentUri,
+      fileHashHex: app.fileHash,
+      commandLine: installCommandLine,
+    });
+    // EDA-CSP DownloadInstall 兩段式（真機驗證）：Add 創建 install job（設備端
+    // 狀態停在 Ready，不會自動下載），必須再 Exec 同一 LocURI 才觸發 BITS 下載 +
+    // msiexec 安裝。缺 Exec → job 永遠停在 Ready。對齊 MSIX HostedInstall 的
+    // Add+Exec 模式。Exec 復用 Add 的 target/data（MsiInstallJob XML）。
+    msiInstallExec = { ...msiInstall, cmdId: "0", verb: "Exec" as const };
+    msiStatus = buildMsiStatusQuery(app.bundleId);
+  } catch (err) {
+    // buildMsiInstall 內部 normalizeProductId 對非 GUID 的 bundleId 拋 TypeError
+    throw new AppError(
+      400,
+      "invalid_product_code",
+      `app.bundleId 必須是合法 MSI ProductCode GUID：${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  // 組裝成 mdm_commands 行：MSI 派發 = Add（建 job）+ Exec（觸發下載安裝）+
+  // Status（查進度）三條；cspPath/verb/data/format 皆終態
+  const commandRows: {
+    commandType: "msi_install" | "msi_status_query";
+    cmd: SyncMLCommand;
+  }[] = [
+    { commandType: "msi_install" as const, cmd: msiInstall }, // Add：創建 job
+    { commandType: "msi_install" as const, cmd: msiInstallExec }, // Exec：觸發下載安裝
+    { commandType: "msi_status_query" as const, cmd: msiStatus },
+  ];
 
   const result = await db.transaction(async (tx) => {
     // 1. 更新 device 上的 token 紀錄
@@ -113,63 +175,23 @@ export async function installAgentOnDevice(
       })
       .where(eq(mdmDevices.id, device.id));
 
-    // 2. 排入 3 條 SyncML 命令到 mdm_commands 隊列
-    //    OMA-DM 協議層會從 status=queued 拉走、生成 SyncML、透過 push/poll 送到設備
-    const commands = [
-      {
-        commandType: "registry_set" as const,
-        cspPath:
-          `./Device/Vendor/MSFT/Registry/HKLM/${registryPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "")}`,
-        syncmlVerb: "Replace",
-        syncmlData: JSON.stringify({
-          values: {
-            device_id: device.id,
-            agent_token: agentToken,
-            api_endpoint: input.apiEndpoint,
-            tenant_id: tenantId,
-          },
-        }),
-        syncmlFormat: "registry_batch",
-      },
-      {
-        commandType: "msi_install" as const,
-        cspPath:
-          `./Device/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI/${app.bundleId}/DownloadInstall`,
-        syncmlVerb: "Add",
-        syncmlData: JSON.stringify({
-          productId: app.bundleId,
-          productVersion: app.version,
-          contentUri: app.fileUrl,
-          fileHashHex: app.fileHash,
-          commandLine: app.installArgs ?? "/quiet /norestart",
-        }),
-        syncmlFormat: "chr",
-      },
-      {
-        commandType: "msi_status_query" as const,
-        cspPath:
-          `./Device/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI/${app.bundleId}/Status`,
-        syncmlVerb: "Get",
-        syncmlData: null,
-        syncmlFormat: null,
-      },
-    ];
-
+    // 2. 批次排入終態命令到 mdm_commands 隊列
+    //    OMA-DM 協議層會從 status=queued 拉走、包成 SyncML、透過 push/poll 送到設備
     const inserted = await tx
       .insert(mdmCommands)
       .values(
-        commands.map((c) => ({
+        commandRows.map(({ commandType, cmd }) => ({
           tenantId,
           deviceId: device.id,
           commandUuid: crypto.randomUUID(),
           platform: "windows" as const,
-          commandType: c.commandType,
+          commandType,
           status: "queued" as const,
           requestPayload: {
-            cspPath: c.cspPath,
-            syncmlVerb: c.syncmlVerb,
-            syncmlFormat: c.syncmlFormat,
-            syncmlData: c.syncmlData,
+            cspPath: cmd.target,
+            syncmlVerb: cmd.verb,
+            syncmlFormat: cmd.format ?? null,
+            syncmlData: cmd.data ?? null,
             // 給後續審計 / 重放使用的 install-agent context
             installAgent: {
               appId: app.id,
@@ -177,10 +199,10 @@ export async function installAgentOnDevice(
               appBundleId: app.bundleId,
             },
           },
-          cspPath: c.cspPath,
-          syncmlVerb: c.syncmlVerb,
-          syncmlData: c.syncmlData,
-          syncmlFormat: c.syncmlFormat ?? undefined,
+          cspPath: cmd.target,
+          syncmlVerb: cmd.verb,
+          syncmlData: cmd.data ?? null,
+          syncmlFormat: cmd.format ?? undefined,
         })),
       )
       .returning({ id: mdmCommands.id });

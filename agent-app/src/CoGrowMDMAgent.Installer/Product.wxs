@@ -30,8 +30,22 @@
     <!-- Embed all payload into the .msi itself (single-file distribution). -->
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
+    <!--
+      Agent config injected at install time via msiexec public properties.
+      The backend (install-agent) passes these on the EDA-CSP MsiInstallJob
+      CommandLine: DEVICE_ID / AGENT_TOKEN / API_ENDPOINT / TENANT_ID.
+      Secure="yes" lets public properties survive the managed (system-context,
+      UI-less) install that MDM performs. Registry CSP is unavailable on
+      Win10 22H2 (every LocURI returns 404), so config lands via the MSI itself.
+    -->
+    <Property Id="DEVICE_ID" Secure="yes" />
+    <Property Id="AGENT_TOKEN" Secure="yes" />
+    <Property Id="API_ENDPOINT" Secure="yes" />
+    <Property Id="TENANT_ID" Secure="yes" />
+
     <Feature Id="MainFeature" Title="CoGrow MDM Agent" Level="1" Display="expand">
       <ComponentGroupRef Id="ServiceComponents" />
+      <ComponentRef Id="AgentConfigRegistry" />
     </Feature>
 
   </Package>
@@ -43,6 +57,22 @@
         <Directory Id="INSTALLFOLDER" Name="MDM Agent" />
       </Directory>
     </StandardDirectory>
+  </Fragment>
+
+  <!--
+    Agent config written to HKLM at install time from the msiexec properties.
+    Key MUST match CoGrowMDMAgent RegistryConfig.cs KeyPath
+    (SOFTWARE\Policies\CoGrowMDM\Agent) and the four value names it reads.
+  -->
+  <Fragment>
+    <Component Id="AgentConfigRegistry" Directory="INSTALLFOLDER">
+      <RegistryKey Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent">
+        <RegistryValue Name="device_id" Type="string" Value="[DEVICE_ID]" KeyPath="yes" />
+        <RegistryValue Name="agent_token" Type="string" Value="[AGENT_TOKEN]" />
+        <RegistryValue Name="api_endpoint" Type="string" Value="[API_ENDPOINT]" />
+        <RegistryValue Name="tenant_id" Type="string" Value="[TENANT_ID]" />
+      </RegistryKey>
+    </Component>
   </Fragment>
 
 </Wix>
