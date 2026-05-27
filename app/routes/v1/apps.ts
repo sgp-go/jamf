@@ -46,14 +46,56 @@ export const appsApp = new OpenAPIHono({ defaultHook: validationFailedHook });
 appsApp.openapi(downloadSpec, async (c) => {
   const { appId } = c.req.valid("param");
   const file = await resolveAppFile(appId);
-  const nodeStream = createReadStream(file.path);
-  const webStream = Readable.toWeb(nodeStream) as ReadableStream<Uint8Array>;
-  return new Response(webStream, {
+  const total = file.size;
+  // Accept-Ranges 必須宣告：EDA-CSP 用 BITS 下載 .msi，BITS 強依賴 HTTP Range
+  // 支持；缺它 BITS 會拒絕下載（設備端 HEAD 後不發 GET）。
+  const baseHeaders: Record<string, string> = {
+    "Content-Type": "application/octet-stream",
+    "Accept-Ranges": "bytes",
+    "Content-Disposition": `attachment; filename="${file.filename.replace(/"/g, "")}"`,
+  };
+
+  // HEAD：BITS 下載前探測 Content-Length + Accept-Ranges，不回 body
+  if (c.req.method === "HEAD") {
+    return new Response(null, {
+      status: 200,
+      headers: { ...baseHeaders, "Content-Length": String(total) },
+    });
+  }
+
+  // Range 請求（BITS 分塊 / 斷點續傳）→ 206 Partial Content
+  const rangeHeader = c.req.header("range");
+  if (rangeHeader) {
+    const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+    if (!m || (!m[1] && !m[2])) {
+      return new Response("Invalid Range", {
+        status: 416,
+        headers: { ...baseHeaders, "Content-Range": `bytes */${total}` },
+      });
+    }
+    const start = m[1] ? parseInt(m[1], 10) : 0;
+    const end = m[2] ? Math.min(parseInt(m[2], 10), total - 1) : total - 1;
+    if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= total) {
+      return new Response("Range Not Satisfiable", {
+        status: 416,
+        headers: { ...baseHeaders, "Content-Range": `bytes */${total}` },
+      });
+    }
+    const chunk = createReadStream(file.path, { start, end });
+    return new Response(Readable.toWeb(chunk) as ReadableStream<Uint8Array>, {
+      status: 206,
+      headers: {
+        ...baseHeaders,
+        "Content-Range": `bytes ${start}-${end}/${total}`,
+        "Content-Length": String(end - start + 1),
+      },
+    });
+  }
+
+  // 完整下載
+  const full = createReadStream(file.path);
+  return new Response(Readable.toWeb(full) as ReadableStream<Uint8Array>, {
     status: 200,
-    headers: {
-      "Content-Type": "application/octet-stream",
-      "Content-Length": String(file.size),
-      "Content-Disposition": `attachment; filename="${file.filename.replace(/"/g, "")}"`,
-    },
+    headers: { ...baseHeaders, "Content-Length": String(total) },
   });
 });
