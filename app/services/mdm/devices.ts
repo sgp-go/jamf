@@ -17,12 +17,13 @@
  * - deviceInfo 同上 jsonb 處理。
  */
 
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import {
   type MdmDevice,
   mdmDevices,
 } from "~/db/schema/devices.ts";
+import { mdmDeviceCertificates } from "~/db/schema/self-mdm.ts";
 
 export async function getMdmDevice(udid: string): Promise<MdmDevice | undefined> {
   return db.query.mdmDevices.findFirst({
@@ -35,6 +36,96 @@ export async function getMdmDeviceByWindowsId(
 ): Promise<MdmDevice | undefined> {
   return db.query.mdmDevices.findFirst({
     where: eq(mdmDevices.windowsDeviceId, windowsDeviceId),
+  });
+}
+
+export async function listMdmDevicesByPlatform(
+  platform: "apple" | "windows",
+): Promise<MdmDevice[]> {
+  // core query（db.select）而非 relational findMany：後者在本專案 relations
+  // graph 下對 list 查詢有數秒級延遲（findFirst 不受影響）。list 端點不需要
+  // eager-load relations，core query 直接生成單表 SELECT，毫秒級返回。
+  return db
+    .select()
+    .from(mdmDevices)
+    .where(eq(mdmDevices.platform, platform))
+    .orderBy(desc(mdmDevices.createdAt));
+}
+
+/**
+ * Windows enrollment 落庫：upsert device row（by windowsDeviceId）。
+ * 多租戶：帶 tenantId + selfMdmConfigId（從 enrollment 時的 self_mdm_config 來）。
+ *
+ * 不存在 → INSERT；已存在（重 enroll）→ UPDATE 並標 enrolled。
+ *
+ * @returns device id (UUID)
+ */
+export async function enrollWindowsDevice(input: {
+  tenantId: string;
+  selfMdmConfigId: string;
+  udid: string;
+  windowsDeviceId: string;
+  windowsHardwareId?: string | null;
+  deviceName?: string | null;
+  osVersion?: string | null;
+}): Promise<string> {
+  const existing = await db.query.mdmDevices.findFirst({
+    where: eq(mdmDevices.windowsDeviceId, input.windowsDeviceId),
+    columns: { id: true },
+  });
+
+  if (existing) {
+    await db
+      .update(mdmDevices)
+      .set({
+        udid: input.udid,
+        windowsHardwareId: input.windowsHardwareId ?? null,
+        deviceName: input.deviceName ?? null,
+        osVersion: input.osVersion ?? null,
+        enrollmentStatus: "enrolled",
+        enrollmentType: "ppkg",
+        selfMdmConfigId: input.selfMdmConfigId,
+        selfMdmManaged: true,
+        enrolledAt: new Date(),
+      })
+      .where(eq(mdmDevices.id, existing.id));
+    return existing.id;
+  }
+
+  const [row] = await db
+    .insert(mdmDevices)
+    .values({
+      tenantId: input.tenantId,
+      selfMdmConfigId: input.selfMdmConfigId,
+      platform: "windows",
+      udid: input.udid,
+      windowsDeviceId: input.windowsDeviceId,
+      windowsHardwareId: input.windowsHardwareId ?? null,
+      deviceName: input.deviceName ?? null,
+      osVersion: input.osVersion ?? null,
+      enrollmentStatus: "enrolled",
+      enrollmentType: "ppkg",
+      selfMdmManaged: true,
+      enrolledAt: new Date(),
+    })
+    .returning({ id: mdmDevices.id });
+  return row.id;
+}
+
+/**
+ * 存設備憑證到 mdm_device_certificates（enrollment 簽發後）。
+ */
+export async function insertDeviceCertificate(input: {
+  selfMdmConfigId: string;
+  deviceUdid: string;
+  certificatePem: string;
+  subject: string;
+}): Promise<void> {
+  await db.insert(mdmDeviceCertificates).values({
+    selfMdmConfigId: input.selfMdmConfigId,
+    deviceUdid: input.deviceUdid,
+    subject: input.subject,
+    certificatePem: input.certificatePem,
   });
 }
 

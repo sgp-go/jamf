@@ -12,7 +12,7 @@
  *   抽 tenantId 寫入
  */
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import {
   type MdmCommand,
@@ -101,6 +101,28 @@ export async function getMdmCommand(
   return db.query.mdmCommands.findFirst({
     where: eq(mdmCommands.commandUuid, commandUuid),
   });
+}
+
+/**
+ * 列設備命令歷史（by udid，最新優先）。含 udid → deviceId lookup。
+ */
+export async function listMdmCommands(
+  deviceUdid: string,
+  opts?: { limit?: number },
+): Promise<MdmCommand[]> {
+  const device = await db.query.mdmDevices.findFirst({
+    where: eq(mdmDevices.udid, deviceUdid),
+    columns: { id: true },
+  });
+  if (!device) return [];
+
+  // core query：避開 relational findMany 的 list 延遲（見 devices.ts 同類註解）
+  return db
+    .select()
+    .from(mdmCommands)
+    .where(eq(mdmCommands.deviceId, device.id))
+    .orderBy(desc(mdmCommands.queuedAt))
+    .limit(opts?.limit ?? 50);
 }
 
 export type MdmCommandStatus =

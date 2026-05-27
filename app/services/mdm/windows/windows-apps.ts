@@ -11,9 +11,13 @@
  * - upsert 對齊 schema：on conflict (device_id, package_family_name) update
  */
 
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "~/db/client.ts";
-import { mdmDevices, mdmWindowsApps } from "~/db/schema/devices.ts";
+import {
+  type MdmWindowsApp,
+  mdmDevices,
+  mdmWindowsApps,
+} from "~/db/schema/devices.ts";
 
 export interface UpsertWindowsAppFields {
   deviceUdid: string;
@@ -60,4 +64,24 @@ export async function upsertWindowsApp(fields: UpsertWindowsAppFields): Promise<
         lastSyncedAt: sql`now()`,
       },
     });
+}
+
+/**
+ * 列設備已知 Windows App 清單（by udid）。含 udid → deviceId lookup。
+ */
+export async function listWindowsAppsByDevice(
+  deviceUdid: string,
+): Promise<MdmWindowsApp[]> {
+  const device = await db.query.mdmDevices.findFirst({
+    where: eq(mdmDevices.udid, deviceUdid),
+    columns: { id: true },
+  });
+  if (!device) return [];
+
+  // core query：避開 relational findMany 的 list 延遲（見 devices.ts 同類註解）
+  return db
+    .select()
+    .from(mdmWindowsApps)
+    .where(eq(mdmWindowsApps.deviceId, device.id))
+    .orderBy(asc(mdmWindowsApps.packageFamilyName));
 }

@@ -14,7 +14,7 @@
  */
 
 import forge from "node-forge";
-import { signWindowsDeviceCsr, getCaRootDer } from "../crypto.ts";
+import { type CaKeyPair, getCaRootDer, signWindowsDeviceCsr } from "../crypto.ts";
 import { buildWapProvisioningDoc } from "./provisioning.ts";
 
 const ENROLL_NS = "http://schemas.microsoft.com/windows/pki/2009/01/enrollment";
@@ -61,6 +61,11 @@ export interface EnrollmentResponseConfig {
   wnsPfn?: string;
   /** 提供商 ID，預設 "Aspira MDM" */
   providerId?: string;
+  /**
+   * per-tenant CA（多租戶：從 self_mdm_config.caCertPem/caKeyPemEnc 載入）。
+   * 不傳則 fallback 到 crypto.ts 的檔案系統 CA（src/ 單租戶相容）。
+   */
+  ca?: CaKeyPair;
 }
 
 /** Enrollment 回應結果（同時回傳簽出的設備證書供入庫） */
@@ -86,16 +91,17 @@ export function buildEnrollmentResponse(
     csrPem,
     wnsPfn,
     providerId,
+    ca,
   } = config;
 
   // 1. 用 CA 簽發裝置證書
-  const deviceCertPem = signWindowsDeviceCsr(csrPem, deviceId);
+  const deviceCertPem = signWindowsDeviceCsr(csrPem, deviceId, ca);
 
   // 2. 取 CA 根 PEM（給 provisioning doc 嵌入信任）
   const caCertPem = forge.pki.certificateToPem(
     forge.pki.certificateFromAsn1(
       forge.asn1.fromDer(
-        String.fromCharCode(...getCaRootDer())
+        String.fromCharCode(...getCaRootDer(ca))
       ) as forge.asn1.Asn1
     )
   );

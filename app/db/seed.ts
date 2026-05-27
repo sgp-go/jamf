@@ -68,7 +68,36 @@ async function main() {
     })
     .onConflictDoNothing();
 
-  console.log(`Seeded demo tenant: ${tenantId}`);
+  // self_mdm_config：自建 MDM 的 per-tenant CA + enrollment 配置。
+  // CA 從 src/ 既有的 certs/ca_*.pem 讀進來重用，這樣 W1-8 真機 enroll 過的
+  // device cert 仍被同一根 CA 認（換 CA 會讓既有 device cert 失效）。
+  let caCertPem: string | null = null;
+  let caKeyPem: string | null = null;
+  try {
+    caCertPem = Deno.readTextFileSync("certs/ca_cert.pem");
+    caKeyPem = Deno.readTextFileSync("certs/ca_key.pem");
+  } catch {
+    console.warn(
+      "[seed] certs/ca_*.pem 不存在，self_mdm_config CA 留 null（enrollment 前需補 CA）",
+    );
+  }
+
+  await db
+    .insert(schema.selfMdmConfigs)
+    .values({
+      tenantId,
+      publicBaseUrl: process.env.SEED_PUBLIC_BASE_URL ??
+        "https://example.ngrok-free.app",
+      caCertPem,
+      caKeyPemEnc: caKeyPem ? encryptSecret(caKeyPem) : null,
+    })
+    .onConflictDoNothing({ target: schema.selfMdmConfigs.tenantId });
+
+  console.log(
+    `Seeded demo tenant: ${tenantId} (self_mdm_config CA: ${
+      caCertPem ? "from certs/" : "null"
+    })`,
+  );
 }
 
 await main();

@@ -13,6 +13,7 @@ import { agentApp } from "~/routes/v1/agent.ts";
 import { appsApp } from "~/routes/v1/apps.ts";
 import { devicesApp } from "~/routes/v1/devices.ts";
 import { jamfDevicesApp } from "~/routes/v1/jamf-devices.ts";
+import windowsMdm from "~/routes/windows-mdm.ts";
 import { startWebhookScheduler } from "~/services/webhooks/index.ts";
 
 /**
@@ -42,6 +43,10 @@ app.route("/api/v1", deviceGroupsAdminApp);
 app.route("/api/v1", jamfInstancesAdminApp);
 app.route("/api/v1", appsAdminApp);
 app.route("/api/v1", installAgentAdminApp);
+
+// Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
+// mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。
+app.route("/", windowsMdm);
 
 app.doc("/openapi.json", {
   openapi: "3.1.0",

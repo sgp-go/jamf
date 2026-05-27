@@ -17,7 +17,24 @@ function ensureCertsDir(): void {
 // CA 憑證（自建根憑證，用於簽發裝置憑證）
 // ============================================================
 
-/** 取得或生成 CA 憑證和金鑰 */
+/** CA 金鑰對（憑證 + 私鑰的 forge object） */
+export interface CaKeyPair {
+  cert: forge.pki.Certificate;
+  key: forge.pki.PrivateKey;
+}
+
+/**
+ * 從 PEM 字串載入 CA 金鑰對（多租戶：CA 存在 self_mdm_configs.caCertPem /
+ * caKeyPemEnc，enrollment 時 decrypt 後傳進來，不走檔案系統）。
+ */
+export function loadCa(caCertPem: string, caKeyPem: string): CaKeyPair {
+  return {
+    cert: forge.pki.certificateFromPem(caCertPem),
+    key: forge.pki.privateKeyFromPem(caKeyPem),
+  };
+}
+
+/** 取得或生成 CA 憑證和金鑰（檔案系統 fallback，src/ 單租戶 + seed CA 生成用） */
 export function getOrCreateCA(): { cert: forge.pki.Certificate; key: forge.pki.PrivateKey } {
   ensureCertsDir();
   const certPath = `${CERTS_DIR}/ca_cert.pem`;
@@ -137,9 +154,9 @@ export function getCACertDerBase64(): string {
   return forge.util.encode64(derBytes);
 }
 
-/** 取得 CA 憑證的 DER bytes（給 .ppkg 嵌入用） */
-export function getCaRootDer(): Uint8Array {
-  const ca = getOrCreateCA();
+/** 取得 CA 憑證的 DER bytes（給 .ppkg 嵌入用）。caOverride 給多租戶 per-tenant CA */
+export function getCaRootDer(caOverride?: CaKeyPair): Uint8Array {
+  const ca = caOverride ?? getOrCreateCA();
   const derBytes = forge.asn1.toDer(forge.pki.certificateToAsn1(ca.cert)).getBytes();
   return Uint8Array.from(derBytes, (c: string) => c.charCodeAt(0));
 }
@@ -154,7 +171,11 @@ export function getCaRootDer(): Uint8Array {
  * @param deviceId - Windows DeviceID（GUID 格式），用作 CN
  * @returns 簽好的憑證 PEM
  */
-export function signWindowsDeviceCsr(csrPem: string, deviceId: string): string {
+export function signWindowsDeviceCsr(
+  csrPem: string,
+  deviceId: string,
+  caOverride?: CaKeyPair,
+): string {
   const csr = forge.pki.certificationRequestFromPem(csrPem);
 
   // 驗證 CSR self-signature（確保設備擁有對應的私鑰）
@@ -165,7 +186,7 @@ export function signWindowsDeviceCsr(csrPem: string, deviceId: string): string {
     throw new Error("CSR 未含 public key");
   }
 
-  const ca = getOrCreateCA();
+  const ca = caOverride ?? getOrCreateCA();
   const cert = forge.pki.createCertificate();
 
   cert.publicKey = csr.publicKey;
