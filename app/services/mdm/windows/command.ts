@@ -25,6 +25,7 @@ import {
   queueWindowsCommand,
   updateMdmCommand,
 } from "~/services/mdm/commands.ts";
+import { isInternalCommandType } from "~/services/mdm/command-events.ts";
 import { upsertWindowsApp } from "~/services/mdm/windows/windows-apps.ts";
 import { parseSyncML, buildSyncML, type SyncMLCommand } from "./syncml.ts";
 import { parseInventoryData, isInventoryResult } from "./inventory.ts";
@@ -271,12 +272,9 @@ export async function enqueueWindowsCommand(opts: {
     `[Win MDM] 命令已排入: ${commandUuid} type=${opts.commandType} udid=${opts.deviceUdid}`,
   );
   // Fire-and-forget WNS push（不 await，不 throw 影響 enqueue）
-  // 排除自身：push 工具命令本身不觸發（PushSetPfn / PushGetChannelUri / PollConfig）
-  if (
-    opts.commandType !== "PushSetPfn" &&
-    opts.commandType !== "PushGetChannelUri" &&
-    !opts.commandType.startsWith("PollConfig")
-  ) {
+  // 排除自身：協議工具命令（PushSetPfn / PushGetChannelUri / PollConfig）不觸發 push，
+  // 與 webhook 上報共用同一組「內部命令」定義（command-events.ts）
+  if (!isInternalCommandType(opts.commandType)) {
     triggerWnsPush(opts.deviceUdid).catch((e) => {
       console.warn(
         `[Win MDM] WNS push 觸發失敗（不影響 enqueue）: ${e instanceof Error ? e.message : String(e)}`,

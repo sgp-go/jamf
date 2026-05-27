@@ -19,6 +19,7 @@ import {
   mdmCommands,
   mdmDevices,
 } from "~/db/schema/devices.ts";
+import { publishCommandEvent } from "./command-events.ts";
 
 type SyncMLVerb = "Add" | "Replace" | "Exec" | "Get" | "Delete";
 
@@ -67,6 +68,18 @@ export async function queueWindowsCommand(
       syncmlFormat: input.syncmlFormat ?? null,
     })
     .returning({ id: mdmCommands.id });
+
+  // 排隊成功 → 觸發 command.queued（內部工具命令會在 publishCommandEvent 內被過濾）
+  publishCommandEvent({
+    tenantId: device.tenantId,
+    deviceId: device.id,
+    commandUuid: input.commandUuid,
+    commandType: input.commandType,
+    status: "queued",
+    platform: "windows",
+    cspPath: input.cspPath,
+  });
+
   return row.id;
 }
 
@@ -166,10 +179,33 @@ export async function updateMdmCommand(
     }
   }
 
-  await db
+  // returning 拿回觸發 webhook 所需欄位（零額外查詢）；status='sent' 與 ack/error
+  // 都會走到這裡，故狀態流的 sent / completed / failed 事件統一在此觸發
+  const [updated] = await db
     .update(mdmCommands)
     .set(patch)
-    .where(eq(mdmCommands.commandUuid, commandUuid));
+    .where(eq(mdmCommands.commandUuid, commandUuid))
+    .returning({
+      tenantId: mdmCommands.tenantId,
+      deviceId: mdmCommands.deviceId,
+      commandUuid: mdmCommands.commandUuid,
+      commandType: mdmCommands.commandType,
+      status: mdmCommands.status,
+      platform: mdmCommands.platform,
+      cspPath: mdmCommands.cspPath,
+    });
+
+  if (updated) {
+    publishCommandEvent({
+      tenantId: updated.tenantId,
+      deviceId: updated.deviceId,
+      commandUuid: updated.commandUuid,
+      commandType: updated.commandType,
+      status: updated.status,
+      platform: updated.platform,
+      cspPath: updated.cspPath,
+    });
+  }
 }
 
 function parseJsonField(

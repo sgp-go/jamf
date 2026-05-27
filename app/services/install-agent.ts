@@ -6,6 +6,7 @@ import { mdmCommands, mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
 import { buildMsiInstall, buildMsiStatusQuery } from "~/services/mdm/windows/csp.ts";
 import { getActiveSelfMdmConfig } from "~/services/mdm/self-mdm-config.ts";
+import { publishCommandEvent } from "~/services/mdm/command-events.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 
 /**
@@ -158,10 +159,11 @@ export async function installAgentOnDevice(
   const commandRows: {
     commandType: "msi_install" | "msi_status_query";
     cmd: SyncMLCommand;
+    commandUuid: string;
   }[] = [
-    { commandType: "msi_install" as const, cmd: msiInstall }, // Add：創建 job
-    { commandType: "msi_install" as const, cmd: msiInstallExec }, // Exec：觸發下載安裝
-    { commandType: "msi_status_query" as const, cmd: msiStatus },
+    { commandType: "msi_install" as const, cmd: msiInstall, commandUuid: crypto.randomUUID() }, // Add：創建 job
+    { commandType: "msi_install" as const, cmd: msiInstallExec, commandUuid: crypto.randomUUID() }, // Exec：觸發下載安裝
+    { commandType: "msi_status_query" as const, cmd: msiStatus, commandUuid: crypto.randomUUID() },
   ];
 
   const result = await db.transaction(async (tx) => {
@@ -180,10 +182,10 @@ export async function installAgentOnDevice(
     const inserted = await tx
       .insert(mdmCommands)
       .values(
-        commandRows.map(({ commandType, cmd }) => ({
+        commandRows.map(({ commandType, cmd, commandUuid }) => ({
           tenantId,
           deviceId: device.id,
-          commandUuid: crypto.randomUUID(),
+          commandUuid,
           platform: "windows" as const,
           commandType,
           status: "queued" as const,
@@ -209,6 +211,20 @@ export async function installAgentOnDevice(
 
     return { commandIds: inserted.map((r) => r.id) };
   });
+
+  // 此路徑直插 mdm_commands（事務原子性需求）繞過 queueWindowsCommand，
+  // 故在事務提交後補發 command.queued（fire-and-forget，與集中掛鉤行為一致）
+  for (const { commandType, cmd, commandUuid } of commandRows) {
+    publishCommandEvent({
+      tenantId,
+      deviceId: device.id,
+      commandUuid,
+      commandType,
+      status: "queued",
+      platform: "windows",
+      cspPath: cmd.target,
+    });
+  }
 
   return {
     deviceId: device.id,
