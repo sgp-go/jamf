@@ -54,13 +54,30 @@ GUI 步驟：
 4. Export → customization.xml + Build PPKG（GUI 自動處理 schema）
 5. 拿到 .ppkg 後可用本目錄 `build-ppkg.ps1` 模板做 server-driven 變體 build
 
-## Server 端對接設計（後段）
+## Server 端對接（2026-05-28 已實作 + 端到端驗證 ✅）
 
-```
-GET /api/v1/admin/tenants/{tid}/enrollment/ppkg-config
-  → 返回完整 customization XML（含 enrollment URL + secret + 設備配額）
-  → 部署人員 SCP 到 Win10 工具機 → 跑 build-ppkg.ps1 → 拿 .ppkg → USB 部署
-```
+`GET /api/v1/admin/tenants/{tid}/enrollment/ppkg-config?upn={upn}&secret={secret}`
+- Admin Bearer auth；自帶 `upn` + `secret` query（server 不持久化 enrollment 凭据）
+- Server 填本 tenant 的 `self_mdm_config.public_base_url` + `slug` + `displayName`
+- 返回 `application/xml` + `Content-Disposition: attachment`
+- 真實 schema（從 Win10 GUI 反向工程）：
+  `Common/Workplace/Enrollments/UPN[UPN+Name attrs]/{AuthPolicy,DiscoveryServiceFullUrl,Secret}`
+
+端到端流程（2026-05-28 在 192.168.50.68 跑通）：
+1. `curl -H "Authorization: Bearer ..." ".../enrollment/ppkg-config?upn=...&secret=..."` → 拿 1013 bytes XML
+2. SCP XML 到 Win10 工具機
+3. `powershell -File build-ppkg.ps1`（ICD CLI）→ exit 0，5899 bytes .ppkg（WIM magic `MSWIM`）
+4. .ppkg 插 USB 進新設備觸發 zero-touch enrollment
+
+實作位置：
+- `app/services/admin/enrollment-ppkg.ts` — `generatePpkgCustomizations({tenantId, upn, secret})`
+- `app/routes/v1/admin/enrollment-ppkg.ts` — GET endpoint zod-openapi
+
+未來擴展（按需）：
+- AuthPolicy 支援 `Certificate` / `Federated`（目前固定 OnPremise）
+- 加 WiFi profile 段（`ConnectivityProfiles/WLANSetting`）
+- 加本機 Account 段（學生 standard + admin）
+- enrollment secret 落表 + server 驗證（取代 admin 自帶 query）
 
 ## 用法（手動跑）
 

@@ -7,6 +7,7 @@ import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { appsAdminApp } from "~/routes/v1/admin/apps.ts";
 import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
 import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
+import { enrollmentPpkgAdminApp } from "~/routes/v1/admin/enrollment-ppkg.ts";
 import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
 import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
@@ -46,6 +47,7 @@ app.route("/api/v1", devicesAdminApp);
 app.route("/api/v1", jamfInstancesAdminApp);
 app.route("/api/v1", appsAdminApp);
 app.route("/api/v1", installAgentAdminApp);
+app.route("/api/v1", enrollmentPpkgAdminApp);
 app.route("/api/v1", profilesAdminApp);
 
 // Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
