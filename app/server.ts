@@ -9,6 +9,7 @@ import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
 import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
 import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
+import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
 import { appsApp } from "~/routes/v1/apps.ts";
@@ -45,6 +46,7 @@ app.route("/api/v1", devicesAdminApp);
 app.route("/api/v1", jamfInstancesAdminApp);
 app.route("/api/v1", appsAdminApp);
 app.route("/api/v1", installAgentAdminApp);
+app.route("/api/v1", profilesAdminApp);
 
 // Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
 // mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。
