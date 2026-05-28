@@ -89,15 +89,13 @@ interface GeneratePpkgInput {
 - ✅ OnPremise — 2026-05-28 真機驗證通過
 - ⏳ `authPolicy="Certificate"` — helper throw 501 `ppkg_section_not_validated`（業務未確認是否需要 Certificate 模式；OnPremise 已足夠）
 - ✅ `wifi[]` — 2026-05-28 Win10 ICD GUI export 反向工程完成 + 5 unit test
-- ✅ `localAccounts[]` — 2026-05-28 Win10 ICD GUI export 反向工程完成（Standard Users 真機驗證；Administrators 推測值未真機驗證）+ 4 unit test
+- ✅ `localAccounts[]` — 2026-05-28 Win10 ICD GUI export 反向工程完成（Standard Users + Administrators 兩個 enum 都真機驗證）+ 4 unit test
 
 `renderWifiSection` 與 `renderAccountsSection` 的 XML 結構（節點名 / attribute / enum 字面值）來自 [GUI-REVERSE-CHECKLIST.md](./GUI-REVERSE-CHECKLIST.md) 流程拿到的權威樣本。
 
 Certificate 段持續 throw 501 直到業務確認需求。
 
 18 個 unit test（11 新增）覆蓋 OnPremise XML 格式 + WiFi 各 SecurityType 路徑 + Accounts standard/admin 路徑 + escape + 多 SSID/多 user 並列 + 三段共存（`app/services/admin/enrollment-ppkg.test.ts`）。
-
-**Administrators follow-up**：當前 isAdmin=true 渲染 `<UserGroup>Administrators</UserGroup>` 為推測值。下次 RDP 在 GUI 給某 user 選 Administrator UserGroup 後 export 驗證 — 若實際字面值不同（如 "Administrator" 單數或其他），同步改 USER_GROUP_ADMIN 常數 + 對應 test assertion。
 
 未來擴展（按需）：
 - enrollment secret 落表 + server 驗證（取代 admin 自帶 query）

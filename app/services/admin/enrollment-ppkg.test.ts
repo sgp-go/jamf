@@ -198,8 +198,7 @@ Deno.test("renderCustomizationsXml: localAccount isAdmin=true → Administrators
       ],
     },
   });
-  // ⚠️ Administrators 複數為推測值（基於 Windows local group 標準命名），
-  // 尚未真機驗證；若未來 GUI export 顯示其他字面值需同步更新此 assertion
+  // 2026-05-28 Win10 ICD GUI export 真機驗證：Administrators 複數
   assertStringIncludes(xml, `<UserGroup>Administrators</UserGroup>`);
 });
 

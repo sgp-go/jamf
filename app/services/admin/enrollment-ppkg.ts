@@ -293,11 +293,11 @@ function renderWifiSection(profiles: WifiCustomization[]): string {
 }
 
 /**
- * UserGroup 字面值來自 Win10 ICD GUI export 樣本。
+ * UserGroup 字面值來自 2026-05-28 Win10 ICD GUI export 樣本（兩個 enum 都真機驗證）：
+ * - "Standard Users"（複數 Users）
+ * - "Administrators"（複數 s）
  *
- * - "Standard Users" — 2026-05-28 真機 export 驗證（複數 Users）
- * - "Administrators" — 推測值（Windows local group 標準命名都是複數），尚未真機驗證；
- *   下次 RDP 在 GUI 加一個 Administrator user export 驗證後若有差異再改。
+ * 兩者都是 Windows local group 標準命名（複數）。
  */
 const USER_GROUP_STANDARD = "Standard Users";
 const USER_GROUP_ADMIN = "Administrators";
