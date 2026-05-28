@@ -23,27 +23,61 @@ param()
 $ErrorActionPreference = "Stop"
 $ServiceName = "CoGrowMDMAgent"
 $RegPath     = "HKLM:\SOFTWARE\Policies\CoGrowMDM\Agent"
+$SvcCfgKey   = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
 $ArpKey      = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"
+
+# SC_ACTION_TYPE constants from winsvc.h (SC_ACTION_RESTART = 1)
+$SC_ACTION_RESTART = 1
 
 $failures = @()
 
 # ------------------------------------------------------------------
-# 1. Service Recovery (sc qfailure)
+# 1. Service Recovery — read FailureActions REG_BINARY directly.
+#
+#    Avoids sc.exe whose output is localized (zh-CN renders RESTART as
+#    chongxinqidong) and additionally corrupted when PowerShell decodes
+#    GBK console bytes. The registry blob is binary, locale-free.
+#
+#    REG_BINARY layout of FailureActions (Windows SERVICE_FAILURE_ACTIONS
+#    on-disk serialization):
+#      [ 0..3 ]  DWORD  dwResetPeriod (seconds)
+#      [ 4..7 ]  DWORD  offset of lpRebootMsg (0 if NULL)
+#      [ 8..11]  DWORD  offset of lpCommand   (0 if NULL)
+#      [12..15]  DWORD  cActions
+#      [16..19]  DWORD  offset of SC_ACTION[] (usually 20 = inline)
+#      [20..  ]  SC_ACTION[] { DWORD Type; DWORD Delay; }  -- cActions entries
 # ------------------------------------------------------------------
 Write-Host "[1/3] Checking Service Recovery for $ServiceName ..."
 $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if (-not $svc) {
     $failures += "Service $ServiceName not installed. Run msiexec /i CoGrowMDMAgent.msi first."
 } else {
-    $qfailureRaw = & sc.exe qfailure $ServiceName 2>&1 | Out-String
-    Write-Host $qfailureRaw
-
-    # Expect: RESTART -- Delay = 5000 milliseconds three times
-    $restartCount = ([regex]::Matches($qfailureRaw, "RESTART")).Count
-    if ($restartCount -lt 3) {
-        $failures += "Service Recovery missing: expected 3x RESTART, found $restartCount"
+    $fa = (Get-ItemProperty $SvcCfgKey -ErrorAction SilentlyContinue).FailureActions
+    if (-not $fa -or $fa.Length -lt 20) {
+        $failures += "Service Recovery missing: FailureActions REG_BINARY not configured at $SvcCfgKey (got $($fa.Length) bytes)"
     } else {
-        Write-Host "  PASS: $restartCount RESTART actions configured."
+        $resetPeriod = [BitConverter]::ToUInt32($fa, 0)
+        $cActions    = [BitConverter]::ToUInt32($fa, 12)
+        $actionsOff  = [BitConverter]::ToUInt32($fa, 16)
+        Write-Host ("  ResetPeriod = {0} sec ({1} days)" -f $resetPeriod, [math]::Round($resetPeriod / 86400.0, 2))
+        Write-Host ("  cActions    = $cActions  (offset=$actionsOff)")
+
+        $restartCount = 0
+        for ($i = 0; $i -lt $cActions; $i++) {
+            $off = $actionsOff + $i * 8
+            if ($off + 8 -gt $fa.Length) { break }
+            $type  = [BitConverter]::ToUInt32($fa, $off)
+            $delay = [BitConverter]::ToUInt32($fa, $off + 4)
+            $name  = if ($type -eq $SC_ACTION_RESTART) { "RESTART" } else { "type=$type" }
+            Write-Host ("  action[$i]   $name delay=${delay}ms")
+            if ($type -eq $SC_ACTION_RESTART) { $restartCount++ }
+        }
+
+        if ($restartCount -lt 3) {
+            $failures += "Service Recovery missing: expected 3x SC_ACTION_RESTART (Type=1), found $restartCount"
+        } else {
+            Write-Host "  PASS: $restartCount RESTART actions configured."
+        }
     }
 }
 

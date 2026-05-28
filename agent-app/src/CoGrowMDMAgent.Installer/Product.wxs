@@ -86,7 +86,15 @@
   -->
   <Fragment>
     <Component Id="AgentConfigRegistry" Directory="INSTALLFOLDER">
-      <RegistryKey Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent">
+      <!--
+        ForceCreateOnInstall="yes" + Id 是 WiX 4 對「掛 PermissionEx 的 RegistryKey」
+        的硬要求（WIX5063）。Id 在 RegistryKey 表中作為主鍵，並讓 util ext 找到掛點。
+      -->
+      <RegistryKey
+        Id="AgentPolicyKey"
+        Root="HKLM"
+        Key="SOFTWARE\Policies\CoGrowMDM\Agent"
+        ForceCreateOnInstall="yes">
         <RegistryValue Name="device_id" Type="string" Value="[DEVICE_ID]" KeyPath="yes" />
         <RegistryValue Name="agent_token" Type="string" Value="[AGENT_TOKEN]" />
         <RegistryValue Name="api_endpoint" Type="string" Value="[API_ENDPOINT]" />
@@ -98,9 +106,14 @@
         <util:PermissionEx
           User="Administrators"
           GenericAll="yes" />
+        <!--
+          WIX0067 不允許單獨用 GenericRead；改用細顆粒 Read=yes（= KEY_READ：
+          QueryValue + EnumerateSubKeys + Notify + ReadControl），語意等價且
+          通過 WiX 校驗。
+        -->
         <util:PermissionEx
           User="Users"
-          GenericRead="yes" />
+          Read="yes" />
       </RegistryKey>
     </Component>
   </Fragment>
