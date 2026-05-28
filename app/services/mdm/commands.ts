@@ -20,6 +20,7 @@ import {
   mdmDevices,
 } from "~/db/schema/devices.ts";
 import { publishCommandEvent } from "./command-events.ts";
+import { reconcileProfileFromCommand } from "~/services/profile-ack-reconciler.ts";
 
 type SyncMLVerb = "Add" | "Replace" | "Exec" | "Get" | "Delete";
 
@@ -193,6 +194,7 @@ export async function updateMdmCommand(
       status: mdmCommands.status,
       platform: mdmCommands.platform,
       cspPath: mdmCommands.cspPath,
+      errorChain: mdmCommands.errorChain,
     });
 
   if (updated) {
@@ -204,6 +206,14 @@ export async function updateMdmCommand(
       status: updated.status,
       platform: updated.platform,
       cspPath: updated.cspPath,
+    });
+    // W3 主軸 1 task 19：profile_apply 命令 ack → 回寫 profile_assignment 狀態
+    reconcileProfileFromCommand({
+      tenantId: updated.tenantId,
+      deviceId: updated.deviceId,
+      commandType: updated.commandType,
+      status: updated.status,
+      errorChain: updated.errorChain,
     });
   }
 }

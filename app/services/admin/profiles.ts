@@ -7,6 +7,8 @@ import {
   type ProfileAssignment,
 } from "~/db/schema/profiles.ts";
 import { AppError } from "~/lib/errors.ts";
+import { pushProfileToDevice } from "~/services/profile-push.ts";
+import { publishProfileRemoved } from "~/services/profile-ack-reconciler.ts";
 
 /**
  * Profile 引擎 service 層（admin/）。
@@ -113,7 +115,58 @@ export async function updateProfile(opts: {
     )
     .returning();
   if (!row) throw new AppError(404, "profile_not_found", "Profile not found");
+
+  // payload 變更 → 重推所有 scope=device 的 active assignments
+  // （group fan-out 留 W3 後段；status 重設 pending 表示等待新 ack）
+  if (opts.input.payload !== undefined && row.platform === "windows") {
+    await repushPayloadToAssignments(opts.tenantId, row);
+  }
   return row;
+}
+
+async function repushPayloadToAssignments(
+  tenantId: string,
+  profile: Profile,
+): Promise<void> {
+  const assignments = await db
+    .select()
+    .from(profileAssignments)
+    .where(
+      and(
+        eq(profileAssignments.tenantId, tenantId),
+        eq(profileAssignments.profileId, profile.id),
+        eq(profileAssignments.scope, "device"),
+      ),
+    );
+
+  for (const a of assignments) {
+    if (!a.deviceId) continue;
+    const device = await db.query.mdmDevices.findFirst({
+      where: (t, { and: andOp, eq: eqOp }) =>
+        andOp(eqOp(t.id, a.deviceId!), eqOp(t.tenantId, tenantId)),
+    });
+    if (!device) continue;
+    try {
+      const { commandIds } = await pushProfileToDevice({ profile, device });
+      if (commandIds.length > 0) {
+        await db
+          .update(profileAssignments)
+          .set({
+            lastCommandId: commandIds[0],
+            status: "pending",
+            appliedVersion: null,
+            appliedAt: null,
+            errorMessage: null,
+          })
+          .where(eq(profileAssignments.id, a.id));
+      }
+    } catch (err) {
+      console.error(
+        `[profile-push] repush failed profile=${profile.id} assignment=${a.id}`,
+        err,
+      );
+    }
+  }
 }
 
 export async function deleteProfile(opts: {
@@ -191,8 +244,9 @@ export async function assignProfile(opts: {
     await assertDeviceInTenant(opts.tenantId, opts.input.deviceId);
   }
 
+  let row: ProfileAssignment;
   try {
-    const [row] = await db
+    const inserted = await db
       .insert(profileAssignments)
       .values({
         tenantId: opts.tenantId,
@@ -203,8 +257,8 @@ export async function assignProfile(opts: {
         status: "pending",
       })
       .returning();
-    if (!row) throw new Error("assignProfile: insert returned no row");
-    return row;
+    if (!inserted[0]) throw new Error("assignProfile: insert returned no row");
+    row = inserted[0];
   } catch (err) {
     if (isUniqueViolation(err)) {
       throw new AppError(
@@ -214,6 +268,49 @@ export async function assignProfile(opts: {
       );
     }
     throw err;
+  }
+
+  // scope=device 立即 push（W3 主軸 1 MVP；group fan-out 留後段）
+  await maybePushAndRecord(opts.tenantId, opts.profileId, row);
+  return row;
+}
+
+/**
+ * 若 assignment.scope=device 且 profile 是 windows，立即派 push 命令並回填
+ * lastCommandId。失敗只 log 不拋（push 失敗不阻塞 assign 主流程；W3 後段加重試）。
+ */
+async function maybePushAndRecord(
+  tenantId: string,
+  profileId: string,
+  assignment: ProfileAssignment,
+): Promise<void> {
+  if (assignment.scope !== "device" || !assignment.deviceId) return;
+
+  const profile = await db.query.profiles.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.id, profileId), eqOp(t.tenantId, tenantId)),
+  });
+  if (!profile || profile.platform !== "windows") return;
+
+  const device = await db.query.mdmDevices.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.id, assignment.deviceId!), eqOp(t.tenantId, tenantId)),
+  });
+  if (!device) return;
+
+  try {
+    const { commandIds } = await pushProfileToDevice({ profile, device });
+    if (commandIds.length > 0) {
+      await db
+        .update(profileAssignments)
+        .set({ lastCommandId: commandIds[0] })
+        .where(eq(profileAssignments.id, assignment.id));
+    }
+  } catch (err) {
+    console.error(
+      `[profile-push] assign push failed profile=${profileId} assignment=${assignment.id}`,
+      err,
+    );
   }
 }
 
@@ -253,10 +350,21 @@ export async function unassignProfile(opts: {
         eq(profileAssignments.tenantId, opts.tenantId),
       ),
     )
-    .returning({ id: profileAssignments.id });
+    .returning({
+      id: profileAssignments.id,
+      deviceId: profileAssignments.deviceId,
+      deviceGroupId: profileAssignments.deviceGroupId,
+    });
   if (!row) {
     throw new AppError(404, "assignment_not_found", "Assignment not found");
   }
+  publishProfileRemoved({
+    tenantId: opts.tenantId,
+    profileId: opts.profileId,
+    assignmentId: row.id,
+    deviceId: row.deviceId,
+    deviceGroupId: row.deviceGroupId,
+  });
 }
 
 // ============================================================
