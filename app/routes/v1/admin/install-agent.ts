@@ -36,16 +36,23 @@ const requestBody = z
   })
   .openapi("InstallAgentInput");
 
-const responseSchema = z.object({
-  deviceId: z.string().uuid(),
-  agentToken: z.string().openapi({
-    description:
-      "為此 device 簽發的 raw token（hex 64 chars）。**僅此 API 回傳一次**，DB 只存 sha256 hash。",
-  }),
-  commandIds: z.array(z.string().uuid()).openapi({
-    description: "排入 mdm_commands 隊列的命令 IDs（Registry + .msi Install + Status Query）",
-  }),
-});
+const responseSchema = z
+  .object({
+    deviceId: z.string().uuid().openapi({
+      example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c",
+    }),
+    agentToken: z.string().openapi({
+      example:
+        "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      description:
+        "為此 device 簽發的 raw token（hex 64 chars）。**僅此 API 回傳一次**，DB 只存 sha256 hash。",
+    }),
+    commandIds: z.array(z.string().uuid()).openapi({
+      description:
+        "排入 mdm_commands 隊列的命令 IDs（msi_install Add + Exec + msi_status_query）",
+    }),
+  })
+  .openapi("InstallAgentResult");
 
 const installAgentSpec = createRoute({
   method: "post",

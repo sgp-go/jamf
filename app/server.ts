@@ -52,15 +52,59 @@ app.route("/api/v1", profilesAdminApp);
 // mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。
 app.route("/", windowsMdm);
 
+// 註冊 BearerAuth security scheme（route 用 `security: [{ BearerAuth: [] }]` 引用）
+app.openAPIRegistry.registerComponent("securitySchemes", "BearerAuth", {
+  type: "http",
+  scheme: "bearer",
+  description: "Admin 端點需 `Authorization: Bearer <admin_token>`",
+});
+
 app.doc("/openapi.json", {
   openapi: "3.1.0",
   info: {
     title: "Jamf Explore API",
     version: "0.2.0-alpha",
-    description:
+    description: [
       "多租戶 Jamf 代理 + 自建 MDM 平台 API。所有路徑以 /api/v1/tenants/{tenantId} 起始。",
+      "",
+      "**鑑權**：Admin 端點需 `Authorization: Bearer <token>`；Tenant 與 Agent 端點按",
+      "tenant 設定（見對接指南）。錯誤一律回 `{ok:false, error:{code, message}}`。",
+    ].join("\n"),
+    contact: {
+      name: "CoGrow API Support",
+      email: "support@cogrow.com",
+    },
+    license: {
+      name: "Proprietary — © CoGrow",
+    },
   },
-  servers: [{ url: "http://localhost:3000", description: "local" }],
+  servers: [
+    { url: "http://localhost:3000", description: "local dev" },
+    {
+      url: "https://api-staging.cogrow.com",
+      description: "staging（部署後填入實際 URL）",
+    },
+    {
+      url: "https://api.cogrow.com",
+      description: "production（部署後填入實際 URL）",
+    },
+  ],
+  tags: [
+    { name: "Devices", description: "設備中心端點（list/detail/PATCH/DELETE/commands/telemetry）" },
+    { name: "Agent", description: "Agent App 上報（健康狀態 / 使用統計）" },
+    { name: "Apps", description: "App 套件下載（公開，hash 校驗）" },
+    { name: "Admin: tenants", description: "Tenant 生命週期" },
+    { name: "Admin: device groups", description: "Device group CRUD（操作員可見性邊界）" },
+    { name: "Admin: devices", description: "Admin 設備寫入（transfer 硬轉校）" },
+    { name: "Admin: profiles", description: "配置描述檔 CRUD + assign + status" },
+    { name: "Admin: jamf instances", description: "Jamf 整合設定與同步" },
+    { name: "Admin: apps", description: "App 套件上傳與管理" },
+    { name: "Admin: install-agent", description: "Agent App 一鍵派發" },
+    {
+      name: "Admin: jamf raw view (DEPRECATED)",
+      description: "⚠️ 已棄用：請改用 /api/v1/tenants/{tid}/devices/* 統一設備視角",
+    },
+  ],
 });
 
 app.get(

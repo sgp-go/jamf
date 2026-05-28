@@ -50,10 +50,28 @@ const createBody = z
     displayName: z.string().min(1).max(200),
     description: z.string().nullable().optional(),
     payload: z.record(z.unknown()).openapi({
-      description:
-        "Windows: { csps: [{path, value}, ...] } / Apple: { payloadContent: [...] }",
+      description: [
+        "**Windows**：`{ csps: [{ path, verb?, format?, data? }, ...] }`",
+        "  例：`{ csps: [{ path: \"./Device/Vendor/MSFT/Policy/Config/DeviceLock/MinDevicePasswordLength\", value: 8 }] }`",
+        "",
+        "**Apple**：`{ payloadContent: [...MDM payload dicts...] }`",
+        "  例：`{ payloadContent: [{ PayloadType: \"com.apple.wifi.managed\", SSID_STR: \"School\", ... }] }`",
+      ].join("\n"),
+      example: {
+        csps: [
+          {
+            path: "./Device/Vendor/MSFT/Policy/Config/DeviceLock/MinDevicePasswordLength",
+            value: 8,
+          },
+          {
+            path: "./Device/Vendor/MSFT/Policy/Config/Storage/RemovableDiskDenyWriteAccess",
+            value: 1,
+          },
+        ],
+      },
     }),
     status: profileStatusEnum.optional().openapi({
+      example: "draft",
       description: "預設 draft（不會被派發）；要派發前改 active",
     }),
   })

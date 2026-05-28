@@ -185,7 +185,7 @@ export async function deleteJamfInstance(opts: {
 export async function verifyJamfInstance(opts: {
   tenantId: string;
   instanceId: string;
-}): Promise<{ ok: true; expiresIn: number; scope?: string }> {
+}): Promise<{ expiresIn: number; scope?: string }> {
   const row = await getJamfInstance(opts);
   const clientSecret = decryptSecret(row.clientSecretEnc);
   const url = `${row.baseUrl}/api/oauth/token`;
@@ -211,7 +211,7 @@ export async function verifyJamfInstance(opts: {
     expires_in: number;
     scope?: string;
   };
-  return { ok: true, expiresIn: grant.expires_in, scope: grant.scope };
+  return { expiresIn: grant.expires_in, scope: grant.scope };
 }
 
 async function safeReadBody(resp: Response): Promise<unknown> {

@@ -175,10 +175,15 @@ const verifySpec = createRoute({
         "application/json": {
           schema: successSchema(
             z.object({
-              ok: z.literal(true),
-              expiresIn: z.number().int(),
-              scope: z.string().optional(),
-            }),
+              expiresIn: z.number().int().openapi({
+                example: 3600,
+                description: "Jamf OAuth token 有效秒數",
+              }),
+              scope: z.string().optional().openapi({
+                example: "read write",
+                description: "Jamf OAuth scope",
+              }),
+            }).openapi("JamfVerifyResult"),
           ),
         },
       },

@@ -48,7 +48,10 @@ const reportBody = z
     osVersion: z.string().optional(),
     appVersion: z.string().optional(),
     extraData: z.record(z.unknown()).optional(),
-    reportedAt: z.string().datetime().optional(),
+    reportedAt: z.string().datetime().optional().openapi({
+      example: "2026-05-28T10:30:00Z",
+      description: "ISO 8601 UTC；省略時取 server 當下時間",
+    }),
   })
   .openapi("AgentReportInput");
 
@@ -106,16 +109,60 @@ const usageRow = z
   .openapi("UsageStatRow");
 
 const usageQuery = z.object({
-  date: z.string().optional(),
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
-  limit: z.coerce.number().int().positive().max(500).optional(),
+  date: z.string().optional().openapi({
+    example: "2026-05-28",
+    description: "按單日查詢（YYYY-MM-DD）；與 start/end 互斥",
+  }),
+  startDate: z.string().optional().openapi({
+    example: "2026-05-21",
+    description: "範圍查詢起始日（YYYY-MM-DD）",
+  }),
+  endDate: z.string().optional().openapi({
+    example: "2026-05-28",
+    description: "範圍查詢結束日（YYYY-MM-DD）",
+  }),
+  limit: z.coerce.number().int().positive().max(500).optional().openapi({
+    example: 100,
+    description: "返回條數（最大 500）",
+  }),
 });
 
 const reportsQuery = z.object({
   limit: z.coerce.number().int().positive().max(500).default(50),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
+
+// ── 命名響應 schema（OpenAPI inline 展開消除） ──
+
+const agentReportSavedSchema = z
+  .object({
+    reportId: z.string().uuid(),
+    deviceId: z.string().uuid(),
+  })
+  .openapi("AgentReportSaved");
+
+const agentReportsListSchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    reports: z.array(reportItem),
+  })
+  .openapi("AgentReportsList");
+
+const usageStatsSavedSchema = z
+  .object({
+    savedCount: z.number().int().openapi({
+      example: 1,
+      description: "成功 upsert 的天數（同設備同日合併為 1）",
+    }),
+  })
+  .openapi("UsageStatsSaved");
+
+const usageStatsListSchema = z
+  .object({
+    count: z.number().int(),
+    stats: z.array(usageRow),
+  })
+  .openapi("UsageStatsList");
 
 // ============================================================
 // Routes
@@ -155,9 +202,7 @@ const reportRoute = createRoute({
       description: "Report saved",
       content: {
         "application/json": {
-          schema: successSchema(
-            z.object({ reportId: z.string().uuid(), deviceId: z.string().uuid() }),
-          ),
+          schema: successSchema(agentReportSavedSchema),
         },
       },
     },
@@ -176,12 +221,7 @@ const listReportsRoute = createRoute({
       description: "上報清單",
       content: {
         "application/json": {
-          schema: successSchema(
-            z.object({
-              count: z.number().int().nonnegative(),
-              reports: z.array(reportItem),
-            }),
-          ),
+          schema: successSchema(agentReportsListSchema),
         },
       },
     },
@@ -226,7 +266,7 @@ const usageReportRoute = createRoute({
       description: "Stats upserted",
       content: {
         "application/json": {
-          schema: successSchema(z.object({ savedCount: z.number().int() })),
+          schema: successSchema(usageStatsSavedSchema),
         },
       },
     },
@@ -245,12 +285,7 @@ const listUsageRoute = createRoute({
       description: "Usage rows",
       content: {
         "application/json": {
-          schema: successSchema(
-            z.object({
-              count: z.number().int(),
-              stats: z.array(usageRow),
-            }),
-          ),
+          schema: successSchema(usageStatsListSchema),
         },
       },
     },

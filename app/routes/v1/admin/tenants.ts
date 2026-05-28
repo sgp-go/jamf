@@ -1,6 +1,6 @@
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { adminAuth } from "~/middleware/admin-auth.ts";
-import { commonErrorResponses, successSchema } from "~/lib/api.ts";
+import { commonErrorResponses, errorSchema, successSchema } from "~/lib/api.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import {
   createTenant,
@@ -139,7 +139,7 @@ const createRouteSpec = createRoute({
     },
     409: {
       description: "Slug 已被使用（slug 全域唯一）",
-      content: { "application/json": { schema: successSchema(tenantSchema) } },
+      content: { "application/json": { schema: errorSchema } },
     },
     ...commonErrorResponses,
   },

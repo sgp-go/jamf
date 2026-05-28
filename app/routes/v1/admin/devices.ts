@@ -21,6 +21,7 @@ const tenantDeviceParam = tenantParam.extend({
 const transferBody = z
   .object({
     targetDeviceGroupId: z.string().uuid().openapi({
+      example: "01HXR3K2N9P7Q5MZBV0YQK3J8F",
       description: "目標 device_group_id（必須屬於同一 tenant）",
     }),
   })

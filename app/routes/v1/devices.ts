@@ -39,18 +39,26 @@ const tenantDeviceGroupParam = tenantParam.extend({
 
 const deviceItemSchema = z
   .object({
-    id: z.string().uuid(),
-    tenantId: z.string().uuid(),
-    deviceGroupId: z.string().uuid().nullable(),
+    id: z.string().uuid().openapi({ example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c" }),
+    tenantId: z.string().uuid().openapi({ example: "6f9c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c" }),
+    deviceGroupId: z.string().uuid().nullable().openapi({
+      description: "設備分組 ID；null = 未分組",
+    }),
     jamfInstanceId: z.string().uuid().nullable(),
-    serialNumber: z.string().nullable(),
-    udid: z.string().nullable(),
-    deviceName: z.string().nullable(),
-    model: z.string().nullable(),
-    osVersion: z.string().nullable(),
+    serialNumber: z.string().nullable().openapi({ example: "F2L1234567" }),
+    udid: z.string().nullable().openapi({
+      example: "00008140-00011C2201D3001C",
+      description: "Apple UDID / Windows DeviceID",
+    }),
+    deviceName: z.string().nullable().openapi({ example: "guangfu-es-001" }),
+    model: z.string().nullable().openapi({ example: "iPhone15,3" }),
+    osVersion: z.string().nullable().openapi({ example: "17.5" }),
     jamfDeviceId: z.string().nullable(),
     jamfManagementId: z.string().nullable(),
-    lastSyncedAt: z.string().nullable(),
+    lastSyncedAt: z.string().nullable().openapi({
+      example: "2026-05-28T10:30:00Z",
+      description: "ISO 8601 UTC 時間戳",
+    }),
     lastSeenAt: z.string().nullable(),
   })
   .openapi("Device");
@@ -91,6 +99,39 @@ const commandBodySchema = z
   })
   .openapi("DeviceCommandRequest");
 
+const deviceDetailSchema = z
+  .object({
+    device: deviceItemSchema,
+    jamf: z
+      .object({
+        detail: z.unknown(),
+        lostMode: z.unknown().nullable(),
+      })
+      .nullable()
+      .openapi({
+        description: "即時打 Jamf 補的頂層資料；Jamf 失敗時 null + jamfError 含原因",
+      }),
+    jamfError: z.string().nullable(),
+  })
+  .openapi("DeviceDetail");
+
+const deviceCommandResultSchema = z
+  .object({
+    command: z.string().openapi({ example: "WIPE" }),
+    result: z.unknown().openapi({
+      description: "Apple：Jamf API 原始 response；Windows：{commandUuid}",
+    }),
+  })
+  .openapi("DeviceCommandResult");
+
+const appLockEnabledSchema = z
+  .object({ action: z.literal("enabled") })
+  .openapi("AppLockEnabledResult");
+
+const appLockDisabledSchema = z
+  .object({ action: z.literal("disabled") })
+  .openapi("AppLockDisabledResult");
+
 const updateDeviceBody = z
   .object({
     deviceName: z.string().min(1).max(200).optional().openapi({
@@ -105,8 +146,11 @@ const updateDeviceBody = z
 
 const commandHistoryItemSchema = z
   .object({
-    commandUuid: z.string(),
-    commandType: z.string(),
+    commandUuid: z.string().openapi({ example: "550e8400-e29b-41d4-a716-446655440000" }),
+    commandType: z.string().openapi({
+      example: "LOCK",
+      description: "命令類型標籤（如 LOCK / WIPE / REBOOT / RemoteWipe / msi_install）",
+    }),
     status: z.enum([
       "queued",
       "sent",
@@ -115,12 +159,21 @@ const commandHistoryItemSchema = z
       "not_now",
       "idle",
       "expired",
-    ]),
-    platform: z.enum(["apple", "windows"]),
-    cspPath: z.string().nullable(),
-    syncmlVerb: z.string().nullable(),
+    ]).openapi({
+      example: "acknowledged",
+      description: "命令生命週期狀態。Windows SyncML Status 200 = acknowledged",
+    }),
+    platform: z.enum(["apple", "windows"]).openapi({ example: "windows" }),
+    cspPath: z.string().nullable().openapi({
+      example: "./Device/Vendor/MSFT/RemoteWipe/doWipe",
+      description: "Windows CSP 路徑（Apple 為 null）",
+    }),
+    syncmlVerb: z.string().nullable().openapi({
+      example: "Exec",
+      description: "SyncML 動詞 Add / Replace / Exec / Get / Delete（Windows）",
+    }),
     errorChain: z.array(z.unknown()).nullable(),
-    queuedAt: z.string(),
+    queuedAt: z.string().openapi({ example: "2026-05-28T10:30:00Z" }),
     sentAt: z.string().nullable(),
     respondedAt: z.string().nullable(),
   })
@@ -235,20 +288,7 @@ const detailSpec = createRoute({
     200: {
       description: "Detail",
       content: {
-        "application/json": {
-          schema: successSchema(
-            z.object({
-              device: deviceItemSchema,
-              jamf: z
-                .object({
-                  detail: z.unknown(),
-                  lostMode: z.unknown().nullable(),
-                })
-                .nullable(),
-              jamfError: z.string().nullable(),
-            }),
-          ),
-        },
+        "application/json": { schema: successSchema(deviceDetailSchema) },
       },
     },
     ...commonErrorResponses,
@@ -301,11 +341,7 @@ const commandSpec = createRoute({
     200: {
       description: "Command sent",
       content: {
-        "application/json": {
-          schema: successSchema(
-            z.object({ command: z.string(), result: z.unknown() }),
-          ),
-        },
+        "application/json": { schema: successSchema(deviceCommandResultSchema) },
       },
     },
     ...commonErrorResponses,
@@ -430,9 +466,7 @@ const enableAppLockSpec = createRoute({
     200: {
       description: "Enabled",
       content: {
-        "application/json": {
-          schema: successSchema(z.object({ action: z.literal("enabled") })),
-        },
+        "application/json": { schema: successSchema(appLockEnabledSchema) },
       },
     },
     ...commonErrorResponses,
@@ -449,9 +483,7 @@ const disableAppLockSpec = createRoute({
     200: {
       description: "Disabled",
       content: {
-        "application/json": {
-          schema: successSchema(z.object({ action: z.literal("disabled") })),
-        },
+        "application/json": { schema: successSchema(appLockDisabledSchema) },
       },
     },
     ...commonErrorResponses,
