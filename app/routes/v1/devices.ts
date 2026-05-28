@@ -16,7 +16,6 @@ import {
   unenrollDeviceInTenant,
   updateDeviceInTenant,
 } from "~/services/devices.ts";
-import type { DeviceCommand } from "~/services/jamf/types.ts";
 
 /**
  * /api/v1/tenants/{tenantId}/devices/*
@@ -68,6 +67,11 @@ const deviceGroupListQuery = paginationQuery.extend({
 });
 
 const VALID_COMMANDS = [
+  // 跨平台中性命令（推薦：Apple / Windows 自動路由）
+  "LOCK",
+  "WIPE",
+  "REBOOT",
+  // Jamf 原生命令（Apple-only legacy；Windows 收到 → 400）
   "DEVICE_LOCK",
   "ERASE_DEVICE",
   "CLEAR_PASSCODE",
@@ -76,7 +80,7 @@ const VALID_COMMANDS = [
   "SHUT_DOWN_DEVICE",
   "ENABLE_LOST_MODE",
   "DISABLE_LOST_MODE",
-] as const satisfies readonly DeviceCommand[];
+] as const;
 
 const commandBodySchema = z
   .object({
@@ -536,12 +540,10 @@ devicesApp.openapi(commandSpec, async (c) => {
   const result = await sendCommandToDevice({
     tenantId,
     deviceId,
-    payload: {
-      commandType: body.command,
-      ...(body.lostModeMessage && { lostModeMessage: body.lostModeMessage }),
-      ...(body.lostModePhone && { lostModePhone: body.lostModePhone }),
-      ...(body.lostModeFootnote && { lostModeFootnote: body.lostModeFootnote }),
-    },
+    command: body.command,
+    ...(body.lostModeMessage && { lostModeMessage: body.lostModeMessage }),
+    ...(body.lostModePhone && { lostModePhone: body.lostModePhone }),
+    ...(body.lostModeFootnote && { lostModeFootnote: body.lostModeFootnote }),
   });
   return c.json(
     {

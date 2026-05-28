@@ -7,7 +7,10 @@ import { AppError } from "~/lib/errors.ts";
 import { getLatestAgentReport, listUsageStats } from "~/services/agent.ts";
 import { JamfClient } from "~/services/jamf/client.ts";
 import { DeviceService } from "~/services/jamf/devices.ts";
-import type { CommandPayload } from "~/services/jamf/types.ts";
+import type { DeviceCommand } from "~/services/jamf/types.ts";
+import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
+import { buildReboot, buildRemoteWipe } from "~/services/mdm/windows/csp.ts";
+import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 
 /**
  * 業務層的 device-centric 入口。
@@ -157,14 +160,35 @@ function isoDateNDaysAgo(n: number): string {
 
 /**
  * 派命令：caller 只提供 deviceId + 命令名。
- * 服務端從 device.jamf_instance_id 自動找對應 Jamf 派命令。
+ *
+ * 支援兩類 enum：
+ *   1. 跨平台中性命令（推薦）：LOCK / WIPE / REBOOT
+ *      - Apple：自動映射到對應 Jamf 命令（DEVICE_LOCK / ERASE_DEVICE / RESTART_DEVICE）
+ *      - Windows：走 queueWindowsCommand 派發 SyncML（LOCK 用 Reboot 替代，
+ *        Windows MDM 無原生鎖屏；參考 brain wiki windows-mdm-progress Lock 結論）
+ *   2. Jamf 原生命令（向後相容，Apple-only）：DEVICE_LOCK / ERASE_DEVICE /
+ *      CLEAR_PASSCODE / DEVICE_INFORMATION / RESTART_DEVICE / SHUT_DOWN_DEVICE /
+ *      ENABLE_LOST_MODE / DISABLE_LOST_MODE
+ *      - Windows 設備收到非中性命令 → 400 not_supported
+ *
+ * 返回值依平台不同：Apple 回 Jamf API 原始 response；Windows 回 {commandUuid}
  */
 export async function sendCommandToDevice(opts: {
   tenantId: string;
   deviceId: string;
-  payload: CommandPayload;
+  command: string;
+  lostModeMessage?: string;
+  lostModePhone?: string;
+  lostModeFootnote?: string;
 }): Promise<unknown> {
   const device = await getDeviceInTenant(opts);
+
+  if (device.platform === "windows") {
+    return sendWindowsDeviceCommand(device, opts.command);
+  }
+
+  // Apple 路徑：中性命令 normalize 到 Jamf 命名；既有 Jamf 命名直接透傳
+  const jamfCommand = normalizeToJamfCommand(opts.command);
   if (!device.jamfInstanceId) {
     throw new AppError(
       409,
@@ -184,7 +208,75 @@ export async function sendCommandToDevice(opts: {
     tenantId: opts.tenantId,
     instanceId: device.jamfInstanceId,
   });
-  return new DeviceService(client).sendCommand(device.jamfManagementId, opts.payload);
+  return new DeviceService(client).sendCommand(device.jamfManagementId, {
+    commandType: jamfCommand,
+    ...(opts.lostModeMessage !== undefined && { lostModeMessage: opts.lostModeMessage }),
+    ...(opts.lostModePhone !== undefined && { lostModePhone: opts.lostModePhone }),
+    ...(opts.lostModeFootnote !== undefined && { lostModeFootnote: opts.lostModeFootnote }),
+  });
+}
+
+/** 中性命令 → Jamf 命名映射；已是 Jamf 命名直接透傳 */
+function normalizeToJamfCommand(command: string): DeviceCommand {
+  switch (command) {
+    case "LOCK":
+      return "DEVICE_LOCK";
+    case "WIPE":
+      return "ERASE_DEVICE";
+    case "REBOOT":
+      return "RESTART_DEVICE";
+    default:
+      // 既有 Jamf 命名（route zod 已校驗 enum，不會是任意字串）
+      return command as DeviceCommand;
+  }
+}
+
+/**
+ * Windows 設備命令派發：只接受中性命令（LOCK / WIPE / REBOOT），
+ * 內部映射到 SyncML CSP 並走 enqueueWindowsCommand（觸發 command.queued webhook +
+ * 嘗試 WNS push 秒級喚醒，命令狀態變化自動上報 command.sent/completed/failed）。
+ *
+ * LOCK 在 Windows MDM 無原生 CSP 支援，按 plan §3 line 162 用 Reboot 替代。
+ */
+async function sendWindowsDeviceCommand(
+  device: MdmDevice,
+  command: string,
+): Promise<{ commandUuid: string }> {
+  if (!device.udid) {
+    throw new AppError(
+      409,
+      "device_missing_udid",
+      "Windows device has no udid; enrollment may be incomplete",
+    );
+  }
+
+  let syncmlCmd: SyncMLCommand;
+  let commandType: string;
+  switch (command) {
+    case "WIPE":
+      syncmlCmd = buildRemoteWipe();
+      commandType = "RemoteWipe";
+      break;
+    case "REBOOT":
+    case "LOCK":
+      // Windows 無原生 Lock CSP，按 plan §3 用 Reboot 替代
+      syncmlCmd = buildReboot();
+      commandType = "Reboot";
+      break;
+    default:
+      throw new AppError(
+        400,
+        "command_not_supported_on_windows",
+        `Command "${command}" not supported on Windows. Use LOCK / WIPE / REBOOT.`,
+      );
+  }
+
+  const commandUuid = await enqueueWindowsCommand({
+    deviceUdid: device.udid,
+    commandType,
+    command: syncmlCmd,
+  });
+  return { commandUuid };
 }
 
 export interface UpdateDeviceInput {
@@ -235,6 +327,56 @@ export async function updateDeviceInTenant(opts: {
     throw new AppError(404, "device_not_found", "Device not found");
   }
   return row;
+}
+
+/**
+ * 硬轉校（轉組 + Wipe）：
+ *   1. 校驗目標 device_group 屬同 tenant
+ *   2. 立即標記 mdm_devices.deviceGroupId = target（不等 Wipe 完成）
+ *   3. 派 Wipe（跨平台：Apple→ERASE_DEVICE / Windows→RemoteWipe）
+ *
+ * 設備 Wipe 後重新 enroll 時，按 (tenantId, serialNumber) 找回此 row，
+ * deviceGroupId 已是新的 → 自動歸新組（無須再次手動操作）。
+ *
+ * 失敗策略：deviceGroupId 標記先行（已 commit）；Wipe 派發失敗時錯誤冒泡，
+ * deviceGroupId 不回滾——caller 可重試 transfer（update 冪等、Wipe 命令冪等）。
+ */
+export async function transferDeviceToGroup(opts: {
+  tenantId: string;
+  deviceId: string;
+  targetDeviceGroupId: string;
+}): Promise<{
+  deviceId: string;
+  newDeviceGroupId: string;
+  wipe: unknown;
+}> {
+  // 1. 校驗目標組屬同 tenant（device 存在的 404 由下一步的 returning 兜底）
+  await assertDeviceGroupBelongsToTenant(opts.tenantId, opts.targetDeviceGroupId);
+
+  // 2. 標記新組
+  const [updated] = await db
+    .update(mdmDevices)
+    .set({ deviceGroupId: opts.targetDeviceGroupId })
+    .where(
+      and(eq(mdmDevices.id, opts.deviceId), eq(mdmDevices.tenantId, opts.tenantId)),
+    )
+    .returning({ id: mdmDevices.id, deviceGroupId: mdmDevices.deviceGroupId });
+  if (!updated) {
+    throw new AppError(404, "device_not_found", "Device not found");
+  }
+
+  // 3. 派 Wipe（複用 sendCommandToDevice 的 platform 路由）
+  const wipe = await sendCommandToDevice({
+    tenantId: opts.tenantId,
+    deviceId: opts.deviceId,
+    command: "WIPE",
+  });
+
+  return {
+    deviceId: updated.id,
+    newDeviceGroupId: updated.deviceGroupId!,
+    wipe,
+  };
 }
 
 async function assertDeviceGroupBelongsToTenant(
