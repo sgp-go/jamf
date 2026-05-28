@@ -1127,6 +1127,177 @@ export function buildUsbPolicy(input: UsbPolicyInput): SyncMLCommand[] {
 }
 
 // ============================================================
+// AppLocker（./Vendor/MSFT/AppLocker/ApplicationLaunchRestrictions/...）
+// ============================================================
+//
+// AppLocker 限制設備上能執行的應用。LocURI 結構：
+//   ./Vendor/MSFT/AppLocker/ApplicationLaunchRestrictions
+//     /Grouping/{group}/{EXE|MSI|Script|StoreApps|DLL}/Policy
+//
+// Policy 數據是 <RuleCollection> XML（format=chr）。每個 RuleCollection 含一組
+// 規則（FilePathRule 按路徑 / FilePublisherRule 按簽名者）+ EnforcementMode。
+//
+// **MS 坑：LocURI 段名 ≠ XML Type 屬性**
+//   LocURI 'EXE' → XML Type "Exe"
+//   LocURI 'MSI' → XML Type "Msi"
+//   LocURI 'StoreApps' → XML Type "Appx"
+//   LocURI 'DLL' → XML Type "Dll"
+//   LocURI 'Script' → XML Type "Script"
+// helper 接受 LocURI 段名，內部做映射。
+//
+// 限制（W3 後段擴展）：
+// - 未實作 FileHashRule（按 SHA-256 哈希）
+// - 未實作 FilePublisherRule 的 Exceptions（只 FilePathRule 支 Exceptions）
+
+/** AppLocker RuleCollection 類型（LocURI 段名） */
+export type AppLockerRuleCollection =
+  | "EXE"
+  | "MSI"
+  | "Script"
+  | "StoreApps"
+  | "DLL";
+
+/** AppLocker 強制模式 */
+export type AppLockerEnforcementMode =
+  | "Enabled"
+  | "AuditOnly"
+  | "NotConfigured";
+
+export type AppLockerAction = "Allow" | "Deny";
+
+/** S-1-1-0 = Everyone（最常用）；其它可給特定 user/group SID */
+export const APPLOCKER_SID_EVERYONE = "S-1-1-0";
+
+export interface AppLockerFilePathRule {
+  type: "path";
+  /** UUID 字串，AppLocker 用此識別規則（更新時保持不變） */
+  id: string;
+  name: string;
+  description?: string;
+  action: AppLockerAction;
+  /** 預設 S-1-1-0 Everyone */
+  userOrGroupSid?: string;
+  /** 路徑模式，支援 *（如 "*\\notepad.exe" 或 "C:\\Windows\\System32\\*"）*/
+  path: string;
+  /** 例外路徑（規則命中後在 exception 內再排除） */
+  exceptions?: { path: string }[];
+}
+
+export interface AppLockerFilePublisherRule {
+  type: "publisher";
+  id: string;
+  name: string;
+  description?: string;
+  action: AppLockerAction;
+  userOrGroupSid?: string;
+  /** 簽名者 X.500 DN，如 "O=Microsoft Corporation, L=Redmond, S=Washington, C=US" */
+  publisherName: string;
+  /** 預設 "*"（所有產品） */
+  productName?: string;
+  /** 預設 "*"（所有 binary） */
+  binaryName?: string;
+  /** 版本範圍，預設 "*"-"*"（所有版本） */
+  versionRange?: { low: string; high: string };
+}
+
+export type AppLockerRule = AppLockerFilePathRule | AppLockerFilePublisherRule;
+
+/**
+ * 派發一組 AppLocker 規則。
+ *
+ * @param grouping 任意 group 識別符（如 "default" / "school-policy"），對應
+ *   LocURI 的 Grouping 段；同 group 多次派發會覆蓋
+ * @param ruleCollection 規則集類型（決定哪類檔案被約束）
+ * @param enforcementMode 預設 Enabled；AuditOnly 只記錄不阻止
+ * @param rules 規則列表
+ */
+export function buildAppLockerPolicy(opts: {
+  grouping: string;
+  ruleCollection: AppLockerRuleCollection;
+  enforcementMode?: AppLockerEnforcementMode;
+  rules: AppLockerRule[];
+}): SyncMLCommand {
+  const xmlType = ruleCollectionToXmlType(opts.ruleCollection);
+  const mode = opts.enforcementMode ?? "Enabled";
+  const rulesXml = opts.rules.map(ruleToXml).join("");
+  const policyXml =
+    `<RuleCollection Type="${xmlType}" EnforcementMode="${mode}">` +
+    rulesXml +
+    `</RuleCollection>`;
+
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target:
+      `./Vendor/MSFT/AppLocker/ApplicationLaunchRestrictions/Grouping/${encodeURIComponent(opts.grouping)}/${opts.ruleCollection}/Policy`,
+    format: "chr",
+    data: policyXml,
+  };
+}
+
+function ruleCollectionToXmlType(rc: AppLockerRuleCollection): string {
+  switch (rc) {
+    case "EXE":
+      return "Exe";
+    case "MSI":
+      return "Msi";
+    case "Script":
+      return "Script";
+    case "StoreApps":
+      return "Appx";
+    case "DLL":
+      return "Dll";
+  }
+}
+
+function ruleToXml(rule: AppLockerRule): string {
+  const sid = rule.userOrGroupSid ?? APPLOCKER_SID_EVERYONE;
+  const baseAttrs =
+    `Id="${escapeAttr(rule.id)}" ` +
+    `Name="${escapeAttr(rule.name)}" ` +
+    `Action="${rule.action}" ` +
+    `UserOrGroupSid="${escapeAttr(sid)}"`;
+  const descAttr = rule.description
+    ? ` Description="${escapeAttr(rule.description)}"`
+    : "";
+
+  if (rule.type === "path") {
+    const exceptions = rule.exceptions && rule.exceptions.length > 0
+      ? `<Exceptions>` +
+        rule.exceptions
+          .map((e) => `<FilePathCondition Path="${escapeAttr(e.path)}"/>`)
+          .join("") +
+        `</Exceptions>`
+      : "";
+    return (
+      `<FilePathRule ${baseAttrs}${descAttr}>` +
+      `<Conditions><FilePathCondition Path="${escapeAttr(rule.path)}"/></Conditions>` +
+      exceptions +
+      `</FilePathRule>`
+    );
+  }
+
+  const productName = rule.productName ?? "*";
+  const binaryName = rule.binaryName ?? "*";
+  const versionLow = rule.versionRange?.low ?? "*";
+  const versionHigh = rule.versionRange?.high ?? "*";
+  return (
+    `<FilePublisherRule ${baseAttrs}${descAttr}>` +
+    `<Conditions>` +
+    `<FilePublisherCondition ` +
+    `PublisherName="${escapeAttr(rule.publisherName)}" ` +
+    `ProductName="${escapeAttr(productName)}" ` +
+    `BinaryName="${escapeAttr(binaryName)}">` +
+    `<BinaryVersionRange ` +
+    `LowSection="${escapeAttr(versionLow)}" ` +
+    `HighSection="${escapeAttr(versionHigh)}"/>` +
+    `</FilePublisherCondition>` +
+    `</Conditions>` +
+    `</FilePublisherRule>`
+  );
+}
+
+// ============================================================
 // 內部工具
 // ============================================================
 

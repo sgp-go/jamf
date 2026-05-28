@@ -23,6 +23,8 @@ import {
   buildWiFiRemove,
   buildPasswordPolicy,
   buildUsbPolicy,
+  buildAppLockerPolicy,
+  APPLOCKER_SID_EVERYONE,
 } from "./csp.ts";
 
 Deno.test("buildRemoteWipe: 預設 doWipe", () => {
@@ -776,4 +778,214 @@ Deno.test("buildUsbPolicy: 讀寫都禁 + 空 input 行為", () => {
   );
 
   assertEquals(buildUsbPolicy({}).length, 0);
+});
+
+// ============================================================
+// AppLocker
+// ============================================================
+
+Deno.test("buildAppLockerPolicy: EXE 路徑 Deny notepad 基本結構", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "default",
+    ruleCollection: "EXE",
+    rules: [
+      {
+        type: "path",
+        id: "11111111-1111-1111-1111-111111111111",
+        name: "Block notepad",
+        action: "Deny",
+        path: "*\\notepad.exe",
+      },
+    ],
+  });
+  assertEquals(cmd.verb, "Add");
+  assertEquals(
+    cmd.target,
+    "./Vendor/MSFT/AppLocker/ApplicationLaunchRestrictions/Grouping/default/EXE/Policy",
+  );
+  assertEquals(cmd.format, "chr");
+  // LocURI 段名 EXE → XML Type Exe（MS 坑：兩處不同）
+  assertEquals(
+    cmd.data?.includes('<RuleCollection Type="Exe" EnforcementMode="Enabled">'),
+    true,
+  );
+  assertEquals(cmd.data?.includes('Action="Deny"'), true);
+  assertEquals(cmd.data?.includes('Path="*\\notepad.exe"'), true);
+  // 預設 SID Everyone
+  assertEquals(
+    cmd.data?.includes(`UserOrGroupSid="${APPLOCKER_SID_EVERYONE}"`),
+    true,
+  );
+});
+
+Deno.test("buildAppLockerPolicy: LocURI 段名 → XML Type 映射全集", () => {
+  const cases: Array<[
+    "EXE" | "MSI" | "Script" | "StoreApps" | "DLL",
+    string,
+  ]> = [
+    ["EXE", "Exe"],
+    ["MSI", "Msi"],
+    ["Script", "Script"],
+    ["StoreApps", "Appx"], // 注意 LocURI StoreApps ≠ XML Appx
+    ["DLL", "Dll"],
+  ];
+  for (const [locUri, xmlType] of cases) {
+    const cmd = buildAppLockerPolicy({
+      grouping: "g",
+      ruleCollection: locUri,
+      rules: [
+        { type: "path", id: "id", name: "n", action: "Allow", path: "*" },
+      ],
+    });
+    assertEquals(
+      cmd.target.endsWith(`/${locUri}/Policy`),
+      true,
+      `LocURI 段名應該是 ${locUri}`,
+    );
+    assertEquals(
+      cmd.data?.includes(`<RuleCollection Type="${xmlType}"`),
+      true,
+      `${locUri} 應該映射到 XML Type ${xmlType}`,
+    );
+  }
+});
+
+Deno.test("buildAppLockerPolicy: AuditOnly 模式只記錄不阻止", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "g",
+    ruleCollection: "EXE",
+    enforcementMode: "AuditOnly",
+    rules: [{ type: "path", id: "x", name: "x", action: "Deny", path: "*" }],
+  });
+  assertEquals(
+    cmd.data?.includes('EnforcementMode="AuditOnly"'),
+    true,
+  );
+});
+
+Deno.test("buildAppLockerPolicy: FilePublisherRule 微軟所有 EXE 白名單", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "default",
+    ruleCollection: "EXE",
+    rules: [
+      {
+        type: "publisher",
+        id: "22222222-2222-2222-2222-222222222222",
+        name: "Allow Microsoft",
+        action: "Allow",
+        publisherName:
+          "O=Microsoft Corporation, L=Redmond, S=Washington, C=US",
+      },
+    ],
+  });
+  assertEquals(cmd.data?.includes("<FilePublisherRule "), true);
+  assertEquals(
+    cmd.data?.includes('PublisherName="O=Microsoft Corporation, L=Redmond, S=Washington, C=US"'),
+    true,
+  );
+  // 預設 ProductName/BinaryName/Version 都 "*"
+  assertEquals(cmd.data?.includes('ProductName="*"'), true);
+  assertEquals(cmd.data?.includes('BinaryName="*"'), true);
+  assertEquals(
+    cmd.data?.includes('LowSection="*" HighSection="*"'),
+    true,
+  );
+});
+
+Deno.test("buildAppLockerPolicy: FilePublisherRule 限定 product + version 範圍", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "g",
+    ruleCollection: "EXE",
+    rules: [
+      {
+        type: "publisher",
+        id: "id",
+        name: "Allow MS Office 16.x+",
+        action: "Allow",
+        publisherName: "O=Microsoft",
+        productName: "MICROSOFT OFFICE",
+        binaryName: "WINWORD.EXE",
+        versionRange: { low: "16.0.0.0", high: "*" },
+      },
+    ],
+  });
+  assertEquals(cmd.data?.includes('ProductName="MICROSOFT OFFICE"'), true);
+  assertEquals(cmd.data?.includes('BinaryName="WINWORD.EXE"'), true);
+  assertEquals(
+    cmd.data?.includes('LowSection="16.0.0.0" HighSection="*"'),
+    true,
+  );
+});
+
+Deno.test("buildAppLockerPolicy: FilePathRule 含 Exceptions", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "g",
+    ruleCollection: "EXE",
+    rules: [
+      {
+        type: "path",
+        id: "id",
+        name: "Block all in Downloads except installer",
+        action: "Deny",
+        path: "%USERPROFILE%\\Downloads\\*",
+        exceptions: [{ path: "%USERPROFILE%\\Downloads\\official-installer.exe" }],
+      },
+    ],
+  });
+  assertEquals(cmd.data?.includes("<Exceptions>"), true);
+  assertEquals(
+    cmd.data?.includes(
+      'Path="%USERPROFILE%\\Downloads\\official-installer.exe"',
+    ),
+    true,
+  );
+});
+
+Deno.test("buildAppLockerPolicy: 多規則順序保留", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "g",
+    ruleCollection: "EXE",
+    rules: [
+      { type: "path", id: "a", name: "A", action: "Allow", path: "*" },
+      { type: "path", id: "b", name: "B", action: "Deny", path: "*\\bad.exe" },
+    ],
+  });
+  // 第 A 規則出現在 B 之前
+  const idxA = cmd.data?.indexOf('Id="a"') ?? -1;
+  const idxB = cmd.data?.indexOf('Id="b"') ?? -1;
+  assertEquals(idxA > 0 && idxB > idxA, true);
+});
+
+Deno.test("buildAppLockerPolicy: name/path 含特殊字元正確 escape", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "g",
+    ruleCollection: "EXE",
+    rules: [
+      {
+        type: "path",
+        id: "id",
+        name: "Block <bad> & \"quote\"",
+        action: "Deny",
+        path: "*<bad>&\".exe",
+      },
+    ],
+  });
+  // escapeAttr 處理 & " <（> 在 XML attr 不嚴格要求，既有 csp.ts 慣例保持）
+  assertEquals(
+    cmd.data?.includes('Name="Block &lt;bad> &amp; &quot;quote&quot;"'),
+    true,
+  );
+  assertEquals(cmd.data?.includes('Path="*&lt;bad>&amp;&quot;.exe"'), true);
+});
+
+Deno.test("buildAppLockerPolicy: grouping URL-encode 進 LocURI", () => {
+  const cmd = buildAppLockerPolicy({
+    grouping: "school policy",
+    ruleCollection: "EXE",
+    rules: [{ type: "path", id: "x", name: "x", action: "Allow", path: "*" }],
+  });
+  assertEquals(
+    cmd.target.includes("/Grouping/school%20policy/EXE/"),
+    true,
+  );
 });
