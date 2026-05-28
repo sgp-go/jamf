@@ -3,6 +3,7 @@ import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { AppError } from "~/lib/errors.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   deleteApp,
   getAppById,
@@ -168,6 +169,20 @@ appsAdminApp.openapi(uploadSpec, async (c) => {
     installArgs: body["installArgs"] ? String(body["installArgs"]) : null,
     signedBy: body["signedBy"] ? String(body["signedBy"]) : null,
   });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "app.upload",
+    resourceType: "app",
+    resourceId: row.id,
+    payload: {
+      displayName,
+      version,
+      kind: row.kind,
+      filename: file.name,
+      fileSizeBytes: buf.length,
+    },
+  });
   return c.json({ ok: true as const, data: toAppDto(row) }, 201);
 });
 
@@ -186,5 +201,12 @@ appsAdminApp.openapi(detailSpec, async (c) => {
 appsAdminApp.openapi(deleteSpec, async (c) => {
   const { tenantId, appId } = c.req.valid("param");
   await deleteApp({ appId, tenantId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "app.delete",
+    resourceType: "app",
+    resourceId: appId,
+  });
   return c.body(null, 204);
 });

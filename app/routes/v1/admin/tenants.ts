@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { commonErrorResponses, errorSchema, successSchema } from "~/lib/api.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   createTenant,
   deleteTenant,
@@ -238,6 +239,14 @@ tenantsAdminApp.openapi(createRouteSpec, async (c) => {
   if (!row) {
     throw new Error("createTenant returned no row");
   }
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId: row.id,
+    action: "tenant.create",
+    resourceType: "tenant",
+    resourceId: row.id,
+    payload: { slug: body.slug, displayName: body.displayName },
+  });
   return c.json({ ok: true as const, data: toDto(row) }, 201);
 });
 
@@ -256,11 +265,28 @@ tenantsAdminApp.openapi(updateRouteSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await updateTenant(tenantId, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "tenant.update",
+    resourceType: "tenant",
+    resourceId: tenantId,
+    payload: body as Record<string, unknown>,
+  });
   return c.json({ ok: true as const, data: toDto(row) }, 200);
 });
 
 tenantsAdminApp.openapi(deleteRouteSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
+  // ⚠️ FK cascade 會把本 tenant 的 audit_logs 一起刪。記錄會跟著 tenant 一起消失，
+  // 跨 tenant 「誰刪了 tenant」歷史需要另設 platform-level audit（未來 follow-up）。
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "tenant.delete",
+    resourceType: "tenant",
+    resourceId: tenantId,
+  });
   await deleteTenant(tenantId);
   return c.body(null, 204);
 });

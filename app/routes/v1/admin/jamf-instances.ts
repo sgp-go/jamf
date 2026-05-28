@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   createJamfInstance,
   deleteJamfInstance,
@@ -201,6 +202,14 @@ jamfInstancesAdminApp.openapi(createSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await createJamfInstance({ tenantId, ...body });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "jamf_instance.create",
+    resourceType: "jamf_instance",
+    resourceId: row.id,
+    payload: { displayName: body.displayName, baseUrl: body.baseUrl },
+  });
   return c.json({ ok: true as const, data: toJamfInstanceDto(row) }, 201);
 });
 
@@ -220,18 +229,41 @@ jamfInstancesAdminApp.openapi(updateSpec, async (c) => {
   const { tenantId, instanceId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await updateJamfInstance({ tenantId, instanceId, input: body });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "jamf_instance.update",
+    resourceType: "jamf_instance",
+    resourceId: instanceId,
+    payload: body as Record<string, unknown>,
+  });
   return c.json({ ok: true as const, data: toJamfInstanceDto(row) }, 200);
 });
 
 jamfInstancesAdminApp.openapi(deleteSpec, async (c) => {
   const { tenantId, instanceId } = c.req.valid("param");
   await deleteJamfInstance({ tenantId, instanceId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "jamf_instance.delete",
+    resourceType: "jamf_instance",
+    resourceId: instanceId,
+  });
   return c.body(null, 204);
 });
 
 jamfInstancesAdminApp.openapi(verifySpec, async (c) => {
   const { tenantId, instanceId } = c.req.valid("param");
   const result = await verifyJamfInstance({ tenantId, instanceId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "jamf_instance.verify",
+    resourceType: "jamf_instance",
+    resourceId: instanceId,
+    payload: { expiresIn: result.expiresIn, scope: result.scope ?? null },
+  });
   return c.json({ ok: true as const, data: result }, 200);
 });
 
@@ -268,5 +300,17 @@ const syncSpec = createRoute({
 jamfInstancesAdminApp.openapi(syncSpec, async (c) => {
   const { tenantId, instanceId } = c.req.valid("param");
   const result = await syncDevicesFromJamf({ tenantId, jamfInstanceId: instanceId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "jamf_instance.sync_devices",
+    resourceType: "jamf_instance",
+    resourceId: instanceId,
+    payload: {
+      pagesFetched: result.pagesFetched,
+      totalFromJamf: result.totalFromJamf,
+      upserted: result.upserted,
+    },
+  });
   return c.json({ ok: true as const, data: result }, 200);
 });

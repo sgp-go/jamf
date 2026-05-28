@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   createDeviceGroup,
   deleteDeviceGroup,
@@ -176,6 +177,14 @@ deviceGroupsAdminApp.openapi(createSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await createDeviceGroup({ tenantId, ...body });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device_group.create",
+    resourceType: "device_group",
+    resourceId: row.id,
+    payload: body as Record<string, unknown>,
+  });
   return c.json({ ok: true as const, data: toDto(row) }, 201);
 });
 
@@ -195,11 +204,26 @@ deviceGroupsAdminApp.openapi(updateSpec, async (c) => {
   const { tenantId, deviceGroupId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await updateDeviceGroup({ tenantId, deviceGroupId, input: body });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device_group.update",
+    resourceType: "device_group",
+    resourceId: deviceGroupId,
+    payload: body as Record<string, unknown>,
+  });
   return c.json({ ok: true as const, data: toDto(row) }, 200);
 });
 
 deviceGroupsAdminApp.openapi(deleteSpec, async (c) => {
   const { tenantId, deviceGroupId } = c.req.valid("param");
   await deleteDeviceGroup({ tenantId, deviceGroupId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device_group.delete",
+    resourceType: "device_group",
+    resourceId: deviceGroupId,
+  });
   return c.body(null, 204);
 });

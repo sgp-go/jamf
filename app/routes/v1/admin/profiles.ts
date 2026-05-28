@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   assignProfile,
   createProfile,
@@ -355,6 +356,18 @@ profilesAdminApp.openapi(createSpec, async (c) => {
     payload: body.payload,
     status: body.status,
   });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "profile.create",
+    resourceType: "profile",
+    resourceId: row.id,
+    payload: {
+      platform: body.platform,
+      displayName: body.displayName,
+      status: body.status,
+    },
+  });
   return c.json({ ok: true as const, data: toProfileDto(row) }, 201);
 });
 
@@ -375,12 +388,27 @@ profilesAdminApp.openapi(updateSpec, async (c) => {
   const { tenantId, profileId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await updateProfile({ tenantId, profileId, input: body });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "profile.update",
+    resourceType: "profile",
+    resourceId: profileId,
+    payload: body as Record<string, unknown>,
+  });
   return c.json({ ok: true as const, data: toProfileDto(row) }, 200);
 });
 
 profilesAdminApp.openapi(deleteSpec, async (c) => {
   const { tenantId, profileId } = c.req.valid("param");
   await deleteProfile({ tenantId, profileId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "profile.delete",
+    resourceType: "profile",
+    resourceId: profileId,
+  });
   return c.body(null, 204);
 });
 
@@ -388,6 +416,19 @@ profilesAdminApp.openapi(assignSpec, async (c) => {
   const { tenantId, profileId } = c.req.valid("param");
   const body = c.req.valid("json");
   const row = await assignProfile({ tenantId, profileId, input: body });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "profile.assign",
+    resourceType: "profile",
+    resourceId: profileId,
+    payload: {
+      assignmentId: row.id,
+      scope: body.scope,
+      deviceGroupId: body.deviceGroupId,
+      deviceId: body.deviceId,
+    },
+  });
   return c.json({ ok: true as const, data: toAssignmentDto(row) }, 201);
 });
 
@@ -400,5 +441,13 @@ profilesAdminApp.openapi(statusSpec, async (c) => {
 profilesAdminApp.openapi(unassignSpec, async (c) => {
   const { tenantId, profileId, assignmentId } = c.req.valid("param");
   await unassignProfile({ tenantId, profileId, assignmentId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "profile.unassign",
+    resourceType: "profile",
+    resourceId: profileId,
+    payload: { assignmentId },
+  });
   return c.body(null, 204);
 });

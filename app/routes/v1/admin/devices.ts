@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { transferDeviceToGroup } from "~/services/devices.ts";
 
 /**
@@ -69,6 +70,14 @@ devicesAdminApp.openapi(transferSpec, async (c) => {
     tenantId,
     deviceId,
     targetDeviceGroupId,
+  });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.transfer",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { targetDeviceGroupId },
   });
   return c.json({ ok: true as const, data: result }, 200);
 });

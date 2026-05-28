@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
 
 /**
@@ -87,6 +88,19 @@ installAgentAdminApp.openapi(installAgentSpec, async (c) => {
     appId: body.appId,
     apiEndpoint: body.apiEndpoint,
     registryPath: body.registryPath,
+  });
+  // 不記 agentToken（一次性 raw 值，audit 落表會洩漏）；只記發了哪幾條命令
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.install_agent",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      appId: body.appId,
+      apiEndpoint: body.apiEndpoint,
+      commandIds: result.commandIds,
+    },
   });
   return c.json({ ok: true as const, data: result }, 202);
 });
