@@ -33,23 +33,29 @@ import { AppError } from "~/lib/errors.ts";
 
 export type AuthPolicy = "OnPremise" | "Certificate";
 
+/**
+ * SecurityType 真實字面值來自 2026-05-28 Win10 ICD GUI export 的 customizations.xml
+ * （見 agent-app/scripts/ppkg/GUI-REVERSE-CHECKLIST.md）。注意 dash 連字符 + 大寫。
+ */
+export type WifiSecurityType = "Open" | "WEP" | "WPA2-Personal";
+
 export interface WifiCustomization {
   ssid: string;
-  password?: string;
-  /** WPA2-PSK 預設；open WiFi 設 type="open" */
-  authType?: "WPA2PSK" | "open";
+  /** 預設 WPA2-Personal；Open 不需 securityKey */
+  securityType?: WifiSecurityType;
+  /** WPA2-Personal / WEP 必填；Open 忽略 */
+  securityKey?: string;
   autoConnect?: boolean;
-  nonBroadcast?: boolean;
+  /** SSID 是否隱藏（不廣播）；對應 export XML 的 HiddenNetwork */
+  hidden?: boolean;
 }
 
 export interface LocalAccountCustomization {
   username: string;
-  /** 明文密碼；ICD GUI 出的 XML 是 hash 或明文需 Win10 驗證 */
+  /** ICD export 的 XML 是明文 <Password>。安全責任在 admin 不洩漏 customizations.xml */
   password: string;
-  /** 是否加入 Administrators 群組 */
+  /** 是否加入 Administrators 群組（預設 false=Standard Users） */
   isAdmin?: boolean;
-  /** 開機自動登入此帳號（Kiosk 場景常用） */
-  autoLogon?: boolean;
 }
 
 export interface GeneratePpkgInput {
@@ -217,37 +223,122 @@ function renderEnrollmentSection(
 }
 
 /**
- * WiFi profile 段 — 推測為 ConnectivityProfiles/WLANSetting。
+ * WiFi profile 段 — 2026-05-28 Win10 ICD GUI Advanced provisioning (All Windows
+ * desktop editions) export 出的權威 schema：
  *
- * 真實 schema 待 Win10 ICD GUI 步驟：
- *   New project → Common settings → ConnectivityProfiles → Add WLAN setting
- *   Export → 反向工程 attribute 順序與 nested 結構
+ *   <ConnectivityProfiles>
+ *     <WLAN>
+ *       <WLANSetting>                              <!-- 單數，不是 WLANSettings -->
+ *         <WLANConfig SSID="..." Name="...">       <!-- 兩個 attr 同值 -->
+ *           <WLANXmlSettings>                       <!-- 真實存在的 wrapper -->
+ *             <AutoConnect>True</AutoConnect>       <!-- True/False 首字母大寫 -->
+ *             <HiddenNetwork>False</HiddenNetwork>
+ *             <SecurityKey>...</SecurityKey>
+ *             <SecurityType>WPA2-Personal</SecurityType>
+ *           </WLANXmlSettings>
+ *         </WLANConfig>
+ *         ...（多個 SSID 並列）
+ *       </WLANSetting>
+ *     </WLAN>
+ *   </ConnectivityProfiles>
  *
- * 直到 GUI 樣本拿到前，此 helper throw 501 防止生成壞 XML。
+ * Open SSID 不需要 <SecurityKey>。我們依然渲染但留空 — ICD GUI export 也是這樣做的
+ * （沒填密碼時節點不出現）。
  */
-function renderWifiSection(_profiles: WifiCustomization[]): string {
-  throw new AppError(
-    501,
-    "ppkg_section_not_validated",
-    "WiFi (ConnectivityProfiles/WLANSetting) schema 未經 Win10 ICD GUI 反向工程驗證；參考 agent-app/scripts/ppkg/README.md 的 TODO 流程",
+function renderWifiSection(profiles: WifiCustomization[]): string {
+  const lines: string[] = [
+    `        <ConnectivityProfiles>`,
+    `          <WLAN>`,
+    `            <WLANSetting>`,
+  ];
+
+  for (const p of profiles) {
+    const securityType: WifiSecurityType = p.securityType ?? "WPA2-Personal";
+    const autoConnect = p.autoConnect ?? true;
+    const hidden = p.hidden ?? false;
+
+    if (securityType !== "Open" && !p.securityKey) {
+      throw new AppError(
+        400,
+        "invalid_wifi_profile",
+        `WiFi SSID="${p.ssid}" securityType=${securityType} 需要 securityKey`,
+      );
+    }
+
+    lines.push(
+      `              <WLANConfig SSID="${escapeXmlAttr(p.ssid)}" Name="${escapeXmlAttr(p.ssid)}">`,
+      `                <WLANXmlSettings>`,
+      `                  <AutoConnect>${autoConnect ? "True" : "False"}</AutoConnect>`,
+      `                  <HiddenNetwork>${hidden ? "True" : "False"}</HiddenNetwork>`,
+    );
+    if (securityType !== "Open") {
+      lines.push(
+        `                  <SecurityKey>${escapeXmlText(p.securityKey!)}</SecurityKey>`,
+      );
+    }
+    lines.push(
+      `                  <SecurityType>${securityType}</SecurityType>`,
+      `                </WLANXmlSettings>`,
+      `              </WLANConfig>`,
+    );
+  }
+
+  lines.push(
+    `            </WLANSetting>`,
+    `          </WLAN>`,
+    `        </ConnectivityProfiles>`,
   );
+
+  return lines.join("\n");
 }
 
 /**
- * 本機帳號段 — 推測為 Accounts/Users。
+ * UserGroup 字面值來自 Win10 ICD GUI export 樣本。
  *
- * 真實 schema 待 Win10 ICD GUI 步驟：
- *   New project → Common settings → Accounts → ComputerAccount / Users
- *   驗證密碼欄位是明文 / hash / SecureString
- *
- * 直到 GUI 樣本拿到前，此 helper throw 501。
+ * - "Standard Users" — 2026-05-28 真機 export 驗證（複數 Users）
+ * - "Administrators" — 推測值（Windows local group 標準命名都是複數），尚未真機驗證；
+ *   下次 RDP 在 GUI 加一個 Administrator user export 驗證後若有差異再改。
  */
-function renderAccountsSection(_accounts: LocalAccountCustomization[]): string {
-  throw new AppError(
-    501,
-    "ppkg_section_not_validated",
-    "LocalAccounts (Accounts/Users) schema 未經 Win10 ICD GUI 反向工程驗證；參考 agent-app/scripts/ppkg/README.md 的 TODO 流程",
+const USER_GROUP_STANDARD = "Standard Users";
+const USER_GROUP_ADMIN = "Administrators";
+
+/**
+ * 本機帳號段 — 2026-05-28 Win10 ICD GUI export schema：
+ *
+ *   <Accounts>
+ *     <Users>
+ *       <User UserName="..." Name="...">           <!-- 兩個 attr 同值 -->
+ *         <Password>明文</Password>
+ *         <UserGroup>Standard Users</UserGroup>   <!-- 注意 "Users" 複數 -->
+ *       </User>
+ *       ...（多個 user 並列）
+ *     </Users>
+ *   </Accounts>
+ *
+ * Password 是明文。安全責任在 admin 保護生成的 .ppkg / customizations.xml 不外洩。
+ */
+function renderAccountsSection(accounts: LocalAccountCustomization[]): string {
+  const lines: string[] = [
+    `        <Accounts>`,
+    `          <Users>`,
+  ];
+
+  for (const a of accounts) {
+    const group = a.isAdmin ? USER_GROUP_ADMIN : USER_GROUP_STANDARD;
+    lines.push(
+      `            <User UserName="${escapeXmlAttr(a.username)}" Name="${escapeXmlAttr(a.username)}">`,
+      `              <Password>${escapeXmlText(a.password)}</Password>`,
+      `              <UserGroup>${group}</UserGroup>`,
+      `            </User>`,
+    );
+  }
+
+  lines.push(
+    `          </Users>`,
+    `        </Accounts>`,
   );
+
+  return lines.join("\n");
 }
 
 // ──────────────────────────────────────────────────────────────
