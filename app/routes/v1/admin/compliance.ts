@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { getDeviceInTenant } from "~/services/devices.ts";
 import {
   evaluateCompliance,
@@ -106,6 +107,19 @@ complianceAdminApp.openapi(evaluateSpec, async (c) => {
     },
     policy as CompliancePolicy,
   );
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "compliance.evaluate",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      policy,
+      compliant: result.compliant,
+      violationCount: result.violations.length,
+    },
+  });
 
   return c.json(
     {

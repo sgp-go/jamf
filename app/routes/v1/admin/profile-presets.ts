@@ -3,6 +3,7 @@ import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { AppError } from "~/lib/errors.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { createProfile } from "~/services/admin/profiles.ts";
 import {
   buildBlockedSites,
@@ -301,6 +302,19 @@ profilePresetsApp.openapi(blockedSitesSpec, async (c) => {
     payload: cmdsToPayload([cmd]),
     status: body.status,
   });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "preset.create_blocked_sites",
+    resourceType: "profile",
+    resourceId: row.id,
+    payload: {
+      hosts: body.hosts,
+      sites: body.sites,
+      scope: body.scope,
+      status: body.status,
+    },
+  });
   return c.json({ ok: true as const, data: toProfileDto(row) }, 201);
 });
 
@@ -328,6 +342,14 @@ profilePresetsApp.openapi(defenderSpec, async (c) => {
     payload: cmdsToPayload(merged),
     status: body.status,
   });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "preset.create_defender",
+    resourceType: "profile",
+    resourceId: row.id,
+    payload: { all: body.all, custom: body.custom, status: body.status },
+  });
   return c.json({ ok: true as const, data: toProfileDto(row) }, 201);
 });
 
@@ -347,6 +369,14 @@ profilePresetsApp.openapi(updateSpec, async (c) => {
     description: body.description ?? null,
     payload: cmdsToPayload(cmds),
     status: body.status,
+  });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "preset.create_update_policy",
+    resourceType: "profile",
+    resourceId: row.id,
+    payload: { policy: body.policy, status: body.status },
   });
   return c.json({ ok: true as const, data: toProfileDto(row) }, 201);
 });

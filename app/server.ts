@@ -5,6 +5,7 @@ import { logger } from "hono/logger";
 import { AppError } from "~/lib/errors.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { appsAdminApp } from "~/routes/v1/admin/apps.ts";
+import { auditAdminApp } from "~/routes/v1/admin/audit.ts";
 import { complianceAdminApp } from "~/routes/v1/admin/compliance.ts";
 import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
 import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
@@ -53,6 +54,7 @@ app.route("/api/v1", enrollmentPpkgAdminApp);
 app.route("/api/v1", profilesAdminApp);
 app.route("/api/v1", profilePresetsApp);
 app.route("/api/v1", complianceAdminApp);
+app.route("/api/v1", auditAdminApp);
 
 // Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
 // mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。
@@ -108,6 +110,7 @@ app.doc("/openapi.json", {
       description: "高層 preset 端點：網站黑名單 / Defender 強制 / Update Policy（自動轉 csps payload）",
     },
     { name: "Admin: compliance", description: "合規政策即時評估（OS 版本 + 離線天數）" },
+    { name: "Admin: audit", description: "審計日誌查詢（read-only；寫入由各 admin route 自行 logAudit）" },
     { name: "Admin: jamf instances", description: "Jamf 整合設定與同步" },
     { name: "Admin: apps", description: "App 套件上傳與管理" },
     { name: "Admin: install-agent", description: "Agent App 一鍵派發" },

@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
+import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { generatePpkgCustomizations } from "~/services/admin/enrollment-ppkg.ts";
 
 /**
@@ -62,6 +63,15 @@ enrollmentPpkgAdminApp.openapi(ppkgConfigSpec, async (c) => {
     tenantId,
     upn,
     secret,
+  });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "enrollment.ppkg_generate",
+    resourceType: "tenant",
+    resourceId: tenantId,
+    // 不記 secret；只記 upn + xml size 供追蹤
+    payload: { upn, filename, xmlBytes: xml.length },
   });
   c.header("Content-Type", "application/xml; charset=utf-8");
   c.header("Content-Disposition", `attachment; filename="${filename}"`);
