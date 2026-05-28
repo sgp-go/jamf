@@ -5,11 +5,13 @@ import { logger } from "hono/logger";
 import { AppError } from "~/lib/errors.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { appsAdminApp } from "~/routes/v1/admin/apps.ts";
+import { complianceAdminApp } from "~/routes/v1/admin/compliance.ts";
 import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
 import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
 import { enrollmentPpkgAdminApp } from "~/routes/v1/admin/enrollment-ppkg.ts";
 import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
+import { profilePresetsApp } from "~/routes/v1/admin/profile-presets.ts";
 import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
@@ -49,6 +51,8 @@ app.route("/api/v1", appsAdminApp);
 app.route("/api/v1", installAgentAdminApp);
 app.route("/api/v1", enrollmentPpkgAdminApp);
 app.route("/api/v1", profilesAdminApp);
+app.route("/api/v1", profilePresetsApp);
+app.route("/api/v1", complianceAdminApp);
 
 // Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
 // mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。
@@ -99,6 +103,11 @@ app.doc("/openapi.json", {
     { name: "Admin: device groups", description: "Device group CRUD（操作員可見性邊界）" },
     { name: "Admin: devices", description: "Admin 設備寫入（transfer 硬轉校）" },
     { name: "Admin: profiles", description: "配置描述檔 CRUD + assign + status" },
+    {
+      name: "Admin: profile presets",
+      description: "高層 preset 端點：網站黑名單 / Defender 強制 / Update Policy（自動轉 csps payload）",
+    },
+    { name: "Admin: compliance", description: "合規政策即時評估（OS 版本 + 離線天數）" },
     { name: "Admin: jamf instances", description: "Jamf 整合設定與同步" },
     { name: "Admin: apps", description: "App 套件上傳與管理" },
     { name: "Admin: install-agent", description: "Agent App 一鍵派發" },
