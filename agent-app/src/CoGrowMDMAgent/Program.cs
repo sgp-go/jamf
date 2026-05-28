@@ -12,8 +12,15 @@ builder.Services.AddWindowsService(options =>
 });
 
 builder.Services.AddSingleton<RegistryConfig>();
-builder.Services.AddSingleton<AgentConfig>(sp =>
-    sp.GetRequiredService<RegistryConfig>().Load());
+// AgentConfigProvider 持有 mutable snapshot，支援 Worker 每 cycle 前 TryReload
+// 讓 MDM 旋轉 token / 切換 endpoint 不需重啟 service。
+// loader 是 lambda 包 RegistryConfig.Load，便於測試傳任意來源 mock。
+builder.Services.AddSingleton<AgentConfigProvider>(sp =>
+{
+    var registry = sp.GetRequiredService<RegistryConfig>();
+    var logger = sp.GetRequiredService<ILogger<AgentConfigProvider>>();
+    return new AgentConfigProvider(() => registry.Load(), logger);
+});
 builder.Services.AddSingleton<JitterScheduler>();
 builder.Services.AddSingleton<DeviceFactsCollector>();
 

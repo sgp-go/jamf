@@ -24,31 +24,32 @@ namespace CoGrowMDMAgent.Reporting;
 public sealed class DeviceReporter
 {
     private readonly HttpClient _http;
-    private readonly AgentConfig _config;
+    private readonly AgentConfigProvider _configProvider;
     private readonly DeviceFactsCollector _facts;
     private readonly IReportQueue _queue;
     private readonly ILogger<DeviceReporter> _logger;
 
     public DeviceReporter(
         HttpClient http,
-        AgentConfig config,
+        AgentConfigProvider configProvider,
         DeviceFactsCollector facts,
         IReportQueue queue,
         ILogger<DeviceReporter> logger)
     {
         _http = http;
-        _config = config;
+        _configProvider = configProvider;
         _facts = facts;
         _queue = queue;
         _logger = logger;
 
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config.AgentToken);
+        // Bearer header 不在構造時設 — 每次 request 從 provider.Current 取，
+        // 確保 MDM 旋轉 token 後本 cycle 立即生效（不必重啟 service）
         _http.Timeout = TimeSpan.FromSeconds(30);
     }
 
     public async Task<AgentReportResponseData?> ReportAsync(CancellationToken ct)
     {
+        var config = _configProvider.Current;
         var facts = _facts.Collect();
         var payload = new AgentReportPayload
         {
@@ -66,11 +67,11 @@ public sealed class DeviceReporter
 
         _logger.LogInformation(
             "Reporting to {Url} (serial={Serial})",
-            _config.ReportsUrl, facts.SerialNumber);
+            config.ReportsUrl, facts.SerialNumber);
 
         try
         {
-            return await PostAsync(payload, ct);
+            return await PostAsync(config, payload, ct);
         }
         catch (Exception ex) when (IsTransient(ex, ct))
         {
@@ -90,18 +91,28 @@ public sealed class DeviceReporter
     /// </summary>
     internal async Task<bool> RetryAsync(string serialisedPayload, CancellationToken ct)
     {
+        var config = _configProvider.Current;
+        SetBearer(config);
         using var content = new StringContent(
             serialisedPayload, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync(_config.ReportsUrl, content, ct);
+        using var response = await _http.PostAsync(config.ReportsUrl, content, ct);
         return response.IsSuccessStatusCode;
     }
 
+    private void SetBearer(AgentConfig config)
+    {
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", config.AgentToken);
+    }
+
     private async Task<AgentReportResponseData?> PostAsync(
+        AgentConfig config,
         AgentReportPayload payload,
         CancellationToken ct)
     {
+        SetBearer(config);
         using var response = await _http.PostAsJsonAsync(
-            _config.ReportsUrl, payload, JsonOptions, ct);
+            config.ReportsUrl, payload, JsonOptions, ct);
 
         if (!response.IsSuccessStatusCode)
         {

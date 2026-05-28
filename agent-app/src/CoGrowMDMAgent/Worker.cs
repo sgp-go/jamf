@@ -1,3 +1,4 @@
+using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
 using CoGrowMDMAgent.Scheduling;
@@ -25,19 +26,22 @@ public class Worker : BackgroundService
     private readonly DeviceReporter _deviceReporter;
     private readonly UsageReporter _usageReporter;
     private readonly IReportQueue _queue;
+    private readonly AgentConfigProvider _configProvider;
 
     public Worker(
         ILogger<Worker> logger,
         JitterScheduler scheduler,
         DeviceReporter deviceReporter,
         UsageReporter usageReporter,
-        IReportQueue queue)
+        IReportQueue queue,
+        AgentConfigProvider configProvider)
     {
         _logger = logger;
         _scheduler = scheduler;
         _deviceReporter = deviceReporter;
         _usageReporter = usageReporter;
         _queue = queue;
+        _configProvider = configProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,6 +55,10 @@ public class Worker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            // 每 cycle 起點 reload Registry → AgentConfig，使 MDM 推送 Registry CSP
+            // 更新 token / endpoint 後本 cycle 立即生效，不必重啟 service
+            _configProvider.TryReload();
+
             var nowUtc = DateTime.UtcNow;
             var nextRun = _scheduler.GetNextRunTime(nowUtc);
             var wait = nextRun - nowUtc;

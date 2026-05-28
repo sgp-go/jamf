@@ -23,23 +23,22 @@ namespace CoGrowMDMAgent.Reporting;
 public sealed class UsageReporter
 {
     private readonly HttpClient _http;
-    private readonly AgentConfig _config;
+    private readonly AgentConfigProvider _configProvider;
     private readonly IReportQueue _queue;
     private readonly ILogger<UsageReporter> _logger;
 
     public UsageReporter(
         HttpClient http,
-        AgentConfig config,
+        AgentConfigProvider configProvider,
         IReportQueue queue,
         ILogger<UsageReporter> logger)
     {
         _http = http;
-        _config = config;
+        _configProvider = configProvider;
         _queue = queue;
         _logger = logger;
 
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _config.AgentToken);
+        // Bearer header 每次 request 從 provider.Current 取（hot-reload 友好）
         _http.Timeout = TimeSpan.FromSeconds(30);
     }
 
@@ -55,6 +54,7 @@ public sealed class UsageReporter
             return;
         }
 
+        var config = _configProvider.Current;
         var payload = new UsageStatsPayload
         {
             SerialNumber = serialNumber,
@@ -65,11 +65,11 @@ public sealed class UsageReporter
 
         _logger.LogInformation(
             "Reporting {Count} usage rows to {Url}",
-            stats.Count, _config.UsageUrl);
+            stats.Count, config.UsageUrl);
 
         try
         {
-            await PostAsync(payload, ct);
+            await PostAsync(config, payload, ct);
         }
         catch (Exception ex) when (IsTransient(ex, ct))
         {
@@ -87,16 +87,28 @@ public sealed class UsageReporter
     /// </summary>
     internal async Task<bool> RetryAsync(string serialisedPayload, CancellationToken ct)
     {
+        var config = _configProvider.Current;
+        SetBearer(config);
         using var content = new StringContent(
             serialisedPayload, Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync(_config.UsageUrl, content, ct);
+        using var response = await _http.PostAsync(config.UsageUrl, content, ct);
         return response.IsSuccessStatusCode;
     }
 
-    private async Task PostAsync(UsageStatsPayload payload, CancellationToken ct)
+    private void SetBearer(AgentConfig config)
     {
+        _http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", config.AgentToken);
+    }
+
+    private async Task PostAsync(
+        AgentConfig config,
+        UsageStatsPayload payload,
+        CancellationToken ct)
+    {
+        SetBearer(config);
         using var response = await _http.PostAsJsonAsync(
-            _config.UsageUrl, payload, JsonOptions, ct);
+            config.UsageUrl, payload, JsonOptions, ct);
 
         if (!response.IsSuccessStatusCode)
         {
