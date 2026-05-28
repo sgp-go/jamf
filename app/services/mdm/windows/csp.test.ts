@@ -19,6 +19,10 @@ import {
   buildMsiStatusQuery,
   buildMsiLastErrorQuery,
   buildMsiLastErrorDescQuery,
+  buildWiFiProfile,
+  buildWiFiRemove,
+  buildPasswordPolicy,
+  buildUsbPolicy,
 } from "./csp.ts";
 
 Deno.test("buildRemoteWipe: 預設 doWipe", () => {
@@ -630,4 +634,146 @@ Deno.test("buildMsiUninstall / Status / LastError: User context 切換到 ./User
     buildMsiLastErrorQuery(SAMPLE_PRODUCT_ID, "User").target.startsWith("./User/"),
     true
   );
+});
+
+// ============================================================
+// WiFi Profile
+// ============================================================
+
+Deno.test("buildWiFiProfile: open auth 基本結構", () => {
+  const cmd = buildWiFiProfile({ ssid: "GuestNet", auth: { type: "open" } });
+  assertEquals(cmd.verb, "Add");
+  assertEquals(cmd.target, "./Vendor/MSFT/WiFi/Profile/GuestNet/WlanXml");
+  assertEquals(cmd.format, "chr");
+  // 預設 autoConnect=true（connectionMode=auto），nonBroadcast=false
+  assertEquals(cmd.data?.includes("<authentication>open</authentication>"), true);
+  assertEquals(cmd.data?.includes("<encryption>none</encryption>"), true);
+  assertEquals(cmd.data?.includes("<connectionMode>auto</connectionMode>"), true);
+  assertEquals(cmd.data?.includes("<nonBroadcast>false</nonBroadcast>"), true);
+  // open 模式無 sharedKey
+  assertEquals(cmd.data?.includes("<sharedKey>"), false);
+});
+
+Deno.test("buildWiFiProfile: WPA2PSK 含 sharedKey + AES", () => {
+  const cmd = buildWiFiProfile({
+    ssid: "SchoolWiFi",
+    auth: { type: "WPA2PSK", password: "p@ss-w0rd" },
+  });
+  assertEquals(cmd.data?.includes("<authentication>WPA2PSK</authentication>"), true);
+  assertEquals(cmd.data?.includes("<encryption>AES</encryption>"), true);
+  assertEquals(cmd.data?.includes("<keyMaterial>p@ss-w0rd</keyMaterial>"), true);
+  assertEquals(cmd.data?.includes("<keyType>passPhrase</keyType>"), true);
+});
+
+Deno.test("buildWiFiProfile: SSID/密碼含 XML 特殊字元正確 escape", () => {
+  const cmd = buildWiFiProfile({
+    ssid: "Net <A&B>",
+    auth: { type: "WPA2PSK", password: "p&w<x>" },
+  });
+  // XML 內 escape 防破壞 profile 結構（< > & 轉為實體）
+  assertEquals(cmd.data?.includes("Net &lt;A&amp;B&gt;"), true);
+  assertEquals(cmd.data?.includes("<keyMaterial>p&amp;w&lt;x&gt;</keyMaterial>"), true);
+  // LocURI 路徑 URL-encode（空格變 %20，< 變 %3C）
+  assertEquals(cmd.target.includes("Net%20%3CA%26B%3E"), true);
+});
+
+Deno.test("buildWiFiProfile: nonBroadcast + autoConnect=false", () => {
+  const cmd = buildWiFiProfile({
+    ssid: "Hidden",
+    auth: { type: "open" },
+    autoConnect: false,
+    nonBroadcast: true,
+  });
+  assertEquals(cmd.data?.includes("<connectionMode>manual</connectionMode>"), true);
+  assertEquals(cmd.data?.includes("<nonBroadcast>true</nonBroadcast>"), true);
+});
+
+Deno.test("buildWiFiRemove: Delete + URL-encoded SSID 路徑", () => {
+  const cmd = buildWiFiRemove("Net With Space");
+  assertEquals(cmd.verb, "Delete");
+  assertEquals(cmd.target, "./Vendor/MSFT/WiFi/Profile/Net%20With%20Space");
+  assertEquals(cmd.data, undefined);
+});
+
+// ============================================================
+// 密碼政策（Policy CSP DeviceLock）
+// ============================================================
+
+Deno.test("buildPasswordPolicy: enabled=true → 反邏輯 data=0", () => {
+  const cmds = buildPasswordPolicy({ enabled: true });
+  assertEquals(cmds.length, 1);
+  assertEquals(cmds[0].verb, "Replace");
+  assertEquals(
+    cmds[0].target,
+    "./Device/Vendor/MSFT/Policy/Config/DeviceLock/DevicePasswordEnabled",
+  );
+  assertEquals(cmds[0].format, "int");
+  assertEquals(cmds[0].data, "0"); // MS 反邏輯：0=enabled
+});
+
+Deno.test("buildPasswordPolicy: enabled=false → data=1（停用密碼）", () => {
+  const cmds = buildPasswordPolicy({ enabled: false });
+  assertEquals(cmds[0].data, "1");
+});
+
+Deno.test("buildPasswordPolicy: 多字段一次設置產出多條 Replace", () => {
+  const cmds = buildPasswordPolicy({
+    minLength: 8,
+    complexity: 3,
+    allowSimple: false,
+    maxFailedAttempts: 5,
+    maxInactivityMinutes: 10,
+    history: 5,
+    expirationDays: 90,
+  });
+  assertEquals(cmds.length, 7);
+  // 每條都是 Policy CSP DeviceLock Replace int
+  for (const c of cmds) {
+    assertEquals(c.verb, "Replace");
+    assertEquals(c.format, "int");
+    assertEquals(
+      c.target.startsWith("./Device/Vendor/MSFT/Policy/Config/DeviceLock/"),
+      true,
+    );
+  }
+  // 抽查欄位映射
+  const findByTarget = (suffix: string) =>
+    cmds.find((c) => c.target.endsWith(suffix));
+  assertEquals(findByTarget("/MinDevicePasswordLength")?.data, "8");
+  assertEquals(findByTarget("/MinDevicePasswordComplexCharacters")?.data, "3");
+  assertEquals(findByTarget("/AllowSimpleDevicePassword")?.data, "0");
+  assertEquals(findByTarget("/MaxInactivityTimeDeviceLock")?.data, "10");
+});
+
+Deno.test("buildPasswordPolicy: 空 input 回空陣列", () => {
+  assertEquals(buildPasswordPolicy({}).length, 0);
+});
+
+// ============================================================
+// USB 存儲管控（Policy CSP Storage）
+// ============================================================
+
+Deno.test("buildUsbPolicy: denyWriteAccess=true → data=1", () => {
+  const cmds = buildUsbPolicy({ denyWriteAccess: true });
+  assertEquals(cmds.length, 1);
+  assertEquals(cmds[0].verb, "Replace");
+  assertEquals(
+    cmds[0].target,
+    "./Device/Vendor/MSFT/Policy/Config/Storage/RemovableDiskDenyWriteAccess",
+  );
+  assertEquals(cmds[0].format, "int");
+  assertEquals(cmds[0].data, "1");
+});
+
+Deno.test("buildUsbPolicy: 讀寫都禁 + 空 input 行為", () => {
+  const both = buildUsbPolicy({ denyWriteAccess: true, denyReadAccess: true });
+  assertEquals(both.length, 2);
+  assertEquals(both[0].data, "1");
+  assertEquals(both[1].data, "1");
+  assertEquals(
+    both[1].target,
+    "./Device/Vendor/MSFT/Policy/Config/Storage/RemovableDiskDenyReadAccess",
+  );
+
+  assertEquals(buildUsbPolicy({}).length, 0);
 });

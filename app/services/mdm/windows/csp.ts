@@ -926,6 +926,207 @@ export function buildRegistryDelete(opts: {
 }
 
 // ============================================================
+// WiFi Profile（./Vendor/MSFT/WiFi/Profile/<SSID>/WlanXml）
+// ============================================================
+//
+// 派發 WLAN profile：Add ./Vendor/MSFT/WiFi/Profile/<SSID>/WlanXml，
+// data 是符合 MS WLANProfile schema v1 的 XML 字串（format=chr，由
+// syncml.ts 二次 escape 嵌入 SyncML <Data>）。
+//
+// SSID 含特殊字元時 URL-encode 進 LocURI 路徑；XML 內部 escape SSID/密碼
+// 防破壞 profile XML 結構。
+//
+// 限制：MVP 只支援 open / WPA2-PSK（AES）。WPA3 / 802.1X 企業認證留待後續
+// 按需擴展（authEncryption 區塊與 EAP profile 結構差異較大）。
+
+export type WiFiAuth =
+  | { type: "open" }
+  | { type: "WPA2PSK"; password: string };
+
+export interface WiFiProfileInput {
+  ssid: string;
+  auth: WiFiAuth;
+  /** 自動連線（預設 true） */
+  autoConnect?: boolean;
+  /** 隱藏 SSID（非廣播，預設 false） */
+  nonBroadcast?: boolean;
+}
+
+export function buildWiFiProfile(input: WiFiProfileInput): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target: `./Vendor/MSFT/WiFi/Profile/${encodeURIComponent(input.ssid)}/WlanXml`,
+    format: "chr",
+    data: buildWlanProfileXml(input),
+  };
+}
+
+export function buildWiFiRemove(ssid: string): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Delete",
+    target: `./Vendor/MSFT/WiFi/Profile/${encodeURIComponent(ssid)}`,
+  };
+}
+
+function buildWlanProfileXml(input: WiFiProfileInput): string {
+  const ssidName = escapeText(input.ssid);
+  const ssidHex = stringToHex(input.ssid);
+  const connectionMode = input.autoConnect === false ? "manual" : "auto";
+  const nonBroadcast = input.nonBroadcast ? "true" : "false";
+
+  let auth = "open";
+  let encryption = "none";
+  let sharedKeyXml = "";
+  if (input.auth.type === "WPA2PSK") {
+    auth = "WPA2PSK";
+    encryption = "AES";
+    sharedKeyXml =
+      `<sharedKey>` +
+      `<keyType>passPhrase</keyType>` +
+      `<protected>false</protected>` +
+      `<keyMaterial>${escapeText(input.auth.password)}</keyMaterial>` +
+      `</sharedKey>`;
+  }
+
+  return (
+    `<?xml version="1.0"?>` +
+    `<WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">` +
+    `<name>${ssidName}</name>` +
+    `<SSIDConfig>` +
+    `<SSID><hex>${ssidHex}</hex><name>${ssidName}</name></SSID>` +
+    `<nonBroadcast>${nonBroadcast}</nonBroadcast>` +
+    `</SSIDConfig>` +
+    `<connectionType>ESS</connectionType>` +
+    `<connectionMode>${connectionMode}</connectionMode>` +
+    `<MSM><security>` +
+    `<authEncryption>` +
+    `<authentication>${auth}</authentication>` +
+    `<encryption>${encryption}</encryption>` +
+    `<useOneX>false</useOneX>` +
+    `</authEncryption>` +
+    sharedKeyXml +
+    `</security></MSM>` +
+    `</WLANProfile>`
+  );
+}
+
+function stringToHex(s: string): string {
+  return Array.from(new TextEncoder().encode(s))
+    .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+    .join("");
+}
+
+// ============================================================
+// 密碼政策（Policy CSP DeviceLock/*）
+// ============================================================
+//
+// 每個 policy 一條 Replace 命令；輸入只填想設置的欄位，其餘留空不動。
+// 所有 policy 路徑都在 ./Device/Vendor/MSFT/Policy/Config/DeviceLock/。
+//
+// 注意：DevicePasswordEnabled 是 MS 反邏輯欄位（0=啟用，1=停用）；其餘
+// 欄位都是直觀正向值。helper 對外暴露 boolean，內部翻譯成正確的 0/1。
+
+export interface PasswordPolicyInput {
+  /** 啟用密碼要求 */
+  enabled?: boolean;
+  /** 最小長度（4-16） */
+  minLength?: number;
+  /**
+   * 複雜度（MinDevicePasswordComplexCharacters）：
+   *   1=僅數字 / 2=數字+小寫 / 3=字母數字 / 4=字母數字+特殊字元
+   */
+  complexity?: 1 | 2 | 3 | 4;
+  /** 允許簡單密碼（123456 / aaaa 等） */
+  allowSimple?: boolean;
+  /** 連續失敗多少次後鎖定 / Wipe */
+  maxFailedAttempts?: number;
+  /** 閒置自動鎖屏（分鐘，0=禁用此策略） */
+  maxInactivityMinutes?: number;
+  /** 密碼歷史長度（防重複使用近 N 次密碼） */
+  history?: number;
+  /** 密碼過期天數（0=永不過期） */
+  expirationDays?: number;
+}
+
+export function buildPasswordPolicy(input: PasswordPolicyInput): SyncMLCommand[] {
+  const cmds: SyncMLCommand[] = [];
+  const policy = (name: string, value: number): SyncMLCommand => ({
+    cmdId: "0",
+    verb: "Replace",
+    target: `./Device/Vendor/MSFT/Policy/Config/DeviceLock/${name}`,
+    format: "int",
+    data: String(value),
+  });
+
+  // MS 反邏輯：0=enabled, 1=disabled
+  if (input.enabled !== undefined) {
+    cmds.push(policy("DevicePasswordEnabled", input.enabled ? 0 : 1));
+  }
+  if (input.minLength !== undefined) {
+    cmds.push(policy("MinDevicePasswordLength", input.minLength));
+  }
+  if (input.complexity !== undefined) {
+    cmds.push(policy("MinDevicePasswordComplexCharacters", input.complexity));
+  }
+  if (input.allowSimple !== undefined) {
+    cmds.push(policy("AllowSimpleDevicePassword", input.allowSimple ? 1 : 0));
+  }
+  if (input.maxFailedAttempts !== undefined) {
+    cmds.push(policy("MaxDevicePasswordFailedAttempts", input.maxFailedAttempts));
+  }
+  if (input.maxInactivityMinutes !== undefined) {
+    cmds.push(policy("MaxInactivityTimeDeviceLock", input.maxInactivityMinutes));
+  }
+  if (input.history !== undefined) {
+    cmds.push(policy("DevicePasswordHistory", input.history));
+  }
+  if (input.expirationDays !== undefined) {
+    cmds.push(policy("DevicePasswordExpiration", input.expirationDays));
+  }
+  return cmds;
+}
+
+// ============================================================
+// USB 存儲管控（Policy CSP Storage/Removable*）
+// ============================================================
+//
+// MVP 用 Storage CSP（簡單且廣泛支援）：
+//   - RemovableDiskDenyWriteAccess  禁止 USB 存儲寫入
+//   - RemovableDiskDenyReadAccess   禁止 USB 存儲讀取
+//
+// 更徹底的「按設備類別 / 設備 ID 全黑名單」需走 DeviceInstallation CSP
+// （PreventInstallationOfMatchingDeviceClasses / DeviceIDs），需要 caller
+// 知道具體 USB Setup Class GUID 或 HardwareID，複雜度高，留 W3/W4 擴展。
+
+export interface UsbPolicyInput {
+  /** 禁止 USB 存儲寫入（true=禁寫） */
+  denyWriteAccess?: boolean;
+  /** 禁止 USB 存儲讀取（true=禁讀；通常與 denyWriteAccess 一起設） */
+  denyReadAccess?: boolean;
+}
+
+export function buildUsbPolicy(input: UsbPolicyInput): SyncMLCommand[] {
+  const cmds: SyncMLCommand[] = [];
+  const policy = (name: string, value: boolean): SyncMLCommand => ({
+    cmdId: "0",
+    verb: "Replace",
+    target: `./Device/Vendor/MSFT/Policy/Config/Storage/${name}`,
+    format: "int",
+    data: value ? "1" : "0",
+  });
+
+  if (input.denyWriteAccess !== undefined) {
+    cmds.push(policy("RemovableDiskDenyWriteAccess", input.denyWriteAccess));
+  }
+  if (input.denyReadAccess !== undefined) {
+    cmds.push(policy("RemovableDiskDenyReadAccess", input.denyReadAccess));
+  }
+  return cmds;
+}
+
+// ============================================================
 // 內部工具
 // ============================================================
 
