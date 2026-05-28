@@ -92,7 +92,15 @@ const VALID_COMMANDS = [
 
 const commandBodySchema = z
   .object({
-    command: z.enum(VALID_COMMANDS),
+    command: z.enum(VALID_COMMANDS).openapi({
+      example: "LOCK",
+      description:
+        "Cross-platform: LOCK / WIPE / REBOOT. " +
+        "⚠️ LOCK on Windows degrades to Reboot — Windows 10/11 Pro has no immediate-lock CSP " +
+        "(real lock requires the Agent App push channel calling user32!LockWorkStation). " +
+        "Jamf-native enums (DEVICE_LOCK, ERASE_DEVICE, RESTART_DEVICE, etc.) only work for Apple devices; " +
+        "Windows requests with these return 400.",
+    }),
     lostModeMessage: z.string().optional(),
     lostModePhone: z.string().optional(),
     lostModeFootnote: z.string().optional(),
