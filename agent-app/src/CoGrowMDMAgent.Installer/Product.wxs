@@ -6,8 +6,15 @@
   ProductCode is auto-generated each build (asterisk in Package/@ProductCode is
   the WiX default when omitted); the ProductCode is what the platform stores in
   apps.bundle_id and what EDA-CSP queries for install status.
+
+  Self-protection (W3 主軸 5b):
+    - ARPNOREMOVE=1  從「新增/移除程式」隱藏移除按鈕（學生 GUI 卸載不可達）
+    - ARPSYSTEMCOMPONENT=1  進一步從清單隱藏（Win10 22H2 Settings 也不顯示）
+    - Registry ACL 由 util:PermissionEx 鎖（見下 AgentConfigRegistry Fragment）
+  Admin 仍可走 `msiexec /x {ProductCode}` 或 MDM 解纳管流程 uninstall。
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Package
     Name="CoGrow MDM Agent"
@@ -43,6 +50,15 @@
     <Property Id="API_ENDPOINT" Secure="yes" />
     <Property Id="TENANT_ID" Secure="yes" />
 
+    <!--
+      Self-protection：從「新增/移除程式」隱藏條目，讓學生無法用 GUI 卸載。
+      - ARPNOREMOVE=1 灰掉移除按鈕（舊版 Control Panel 行為）
+      - ARPSYSTEMCOMPONENT=1 整個條目不出現在清單（Win10 Settings → Apps 也不顯示）
+      管理員透過 msiexec /x 或 MDM 解纳管流程仍可卸載。
+    -->
+    <Property Id="ARPNOREMOVE" Value="1" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+
     <Feature Id="MainFeature" Title="CoGrow MDM Agent" Level="1" Display="expand">
       <ComponentGroupRef Id="ServiceComponents" />
       <ComponentRef Id="AgentConfigRegistry" />
@@ -63,6 +79,10 @@
     Agent config written to HKLM at install time from the msiexec properties.
     Key MUST match CoGrowMDMAgent RegistryConfig.cs KeyPath
     (SOFTWARE\Policies\CoGrowMDM\Agent) and the four value names it reads.
+
+    Self-protection：util:PermissionEx 重置 ACL，Users 僅讀、Admin/SYSTEM 全控，
+    防學生直接改 token / api_endpoint 接管 Agent。注意 PermissionEx 會替換 ACL，
+    所以 SYSTEM / Administrators 必須顯式列出，否則 service 自己也讀不到。
   -->
   <Fragment>
     <Component Id="AgentConfigRegistry" Directory="INSTALLFOLDER">
@@ -71,6 +91,16 @@
         <RegistryValue Name="agent_token" Type="string" Value="[AGENT_TOKEN]" />
         <RegistryValue Name="api_endpoint" Type="string" Value="[API_ENDPOINT]" />
         <RegistryValue Name="tenant_id" Type="string" Value="[TENANT_ID]" />
+
+        <util:PermissionEx
+          User="SYSTEM"
+          GenericAll="yes" />
+        <util:PermissionEx
+          User="Administrators"
+          GenericAll="yes" />
+        <util:PermissionEx
+          User="Users"
+          GenericRead="yes" />
       </RegistryKey>
     </Component>
   </Fragment>

@@ -10,8 +10,13 @@
     - PayloadFiles         catches everything else `dotnet publish` produced
                            (appsettings.json, native interop dlls, etc) via the
                            v5+ <Files> harvest element.
+
+  Self-protection (W3 主軸 5b):
+    1. util:ServiceConfig  Service Recovery — 失敗自動重啟（5s / 30s / 60s 三段）
+    2. util:PermissionEx   Registry ACL — Users 只讀，SYSTEM/Admin 全控（防學生改 token）
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <Fragment>
     <ComponentGroup Id="ServiceComponents" Directory="INSTALLFOLDER">
@@ -42,6 +47,22 @@
           Stop="both"
           Remove="uninstall"
           Wait="yes" />
+
+        <!--
+          Service Recovery：服務 crash 後自動重啟（防學生強制 stop / kill）。
+          - FirstFailureActionType="restart" 5 秒後第一次重啟嘗試
+          - SecondFailureActionType="restart" 30 秒後第二次
+          - ThirdFailureActionType="restart" 60 秒後第三次
+          - ResetPeriodInDays="1" 一天無 crash 則重置 failure 計數
+          這對應 services.msc → CoGrowMDMAgent 屬性 → 「復原」分頁三段選 restart。
+        -->
+        <util:ServiceConfig
+          ServiceName="CoGrowMDMAgent"
+          FirstFailureActionType="restart"
+          SecondFailureActionType="restart"
+          ThirdFailureActionType="restart"
+          RestartServiceDelayInSeconds="5"
+          ResetPeriodInDays="1" />
       </Component>
 
       <!--

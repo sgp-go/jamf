@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <PackageReference Include="WixToolset.UI.wixext" Version="4.0.6" />
+    <!-- Util ext: util:ServiceConfig (failure recovery) 與 util:PermissionEx (Registry ACL 鎖定) -->
+    <PackageReference Include="WixToolset.Util.wixext" Version="4.0.6" />
   </ItemGroup>
 
 </Project>
