@@ -105,3 +105,39 @@ export const webhookDeliveries = pgTable(
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect;
 export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert;
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
+
+/**
+ * Event log — 記錄每次 publishEvent 調用（無論是否有 endpoint 匹配）。
+ *
+ * 為什麼存在：webhook_deliveries 只在 endpoint 匹配時才有行；endpoint 為空或
+ * 過濾後 matched=0 時 publishEvent 完全靜默。dev/test 無法區分「事件根本沒
+ * 發出」vs「發了但沒訂閱者」。event_log 提供權威記錄：發了的事件都在這裡，
+ * 不論最終投遞到幾個 endpoint。
+ *
+ * 與 webhook_deliveries 透過 event_id 對齊；同 event_id 可有 N 行 deliveries
+ *（每個 endpoint 一行）+ 1 行 event_log。
+ *
+ * 保留週期：跟 webhook_deliveries 同（後續 W4/W5 加 retention job 時統一處理）。
+ */
+export const eventLog = pgTable(
+  "event_log",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    tenantId: uuid().notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    eventType: varchar({ length: 64 }).notNull(),
+    eventId: uuid().notNull(),
+    payload: jsonb().$type<Record<string, unknown>>().notNull(),
+    /** publishEvent 計算出有幾個 endpoint 匹配；0 = 完全沒訂閱者 */
+    matchedEndpointCount: integer().notNull().default(0),
+    occurredAt: timestamp({ withTimezone: true }).notNull(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("event_log_tenant_idx").on(t.tenantId),
+    index("event_log_event_id_idx").on(t.eventId),
+    index("event_log_type_created_idx").on(t.eventType, t.createdAt),
+  ],
+);
+
+export type EventLog = typeof eventLog.$inferSelect;
+export type NewEventLog = typeof eventLog.$inferInsert;
