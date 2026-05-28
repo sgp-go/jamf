@@ -1298,6 +1298,72 @@ function ruleToXml(rule: AppLockerRule): string {
 }
 
 // ============================================================
+// PersonalizationCSP（桌布 / 鎖屏圖）
+// ============================================================
+//
+// LocURI：
+//   ./Vendor/MSFT/Personalization/DesktopImageUrl       Replace（覆蓋式）
+//   ./Vendor/MSFT/Personalization/LockScreenImageUrl    Replace
+//   ./Vendor/MSFT/Personalization/DesktopImageStatus    Get（唯讀；1=已套用）
+//   ./Vendor/MSFT/Personalization/LockScreenImageStatus Get
+//
+// 圖片來源支援：HTTPS URL（設備拉取）/ 本地路徑（C:\\...）/ file:// URL
+// 格式：JPG/JPEG/PNG/BMP/GIF/TIFF/WMP/JXR
+//
+// **版本限制（plan §3 line 244-245 已記）**：
+//   - 支援版本：Win10/11 Education / Enterprise / Pro 1703+
+//   - **Pro 22H2 以下可能回失敗**，發現後平台應顯示「該設備不支援」
+//   - Home 版完全不支援
+// helper 不做版本判斷；caller 透過 GET *ImageStatus 觀察套用結果。
+
+export interface PersonalizationInput {
+  /** 桌布圖 URL（HTTPS / file:// / 本地路徑） */
+  desktopImageUrl?: string;
+  /** 鎖屏圖 URL（同 desktopImageUrl 格式） */
+  lockScreenImageUrl?: string;
+}
+
+export function buildPersonalization(
+  input: PersonalizationInput,
+): SyncMLCommand[] {
+  const cmds: SyncMLCommand[] = [];
+  if (input.desktopImageUrl !== undefined) {
+    cmds.push({
+      cmdId: "0",
+      verb: "Replace",
+      target: "./Vendor/MSFT/Personalization/DesktopImageUrl",
+      format: "chr",
+      data: input.desktopImageUrl,
+    });
+  }
+  if (input.lockScreenImageUrl !== undefined) {
+    cmds.push({
+      cmdId: "0",
+      verb: "Replace",
+      target: "./Vendor/MSFT/Personalization/LockScreenImageUrl",
+      format: "chr",
+      data: input.lockScreenImageUrl,
+    });
+  }
+  return cmds;
+}
+
+/**
+ * 查詢桌布或鎖屏圖的套用狀態。
+ * 回應 data：1 = 套用成功；其他值代表各種失敗（含「該設備不支援」）。
+ */
+export function buildPersonalizationStatusQuery(
+  target: "desktop" | "lockScreen",
+): SyncMLCommand {
+  const node = target === "desktop" ? "DesktopImageStatus" : "LockScreenImageStatus";
+  return {
+    cmdId: "0",
+    verb: "Get",
+    target: `./Vendor/MSFT/Personalization/${node}`,
+  };
+}
+
+// ============================================================
 // 內部工具
 // ============================================================
 

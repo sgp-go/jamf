@@ -25,6 +25,8 @@ import {
   buildUsbPolicy,
   buildAppLockerPolicy,
   APPLOCKER_SID_EVERYONE,
+  buildPersonalization,
+  buildPersonalizationStatusQuery,
 } from "./csp.ts";
 
 Deno.test("buildRemoteWipe: 預設 doWipe", () => {
@@ -987,5 +989,73 @@ Deno.test("buildAppLockerPolicy: grouping URL-encode 進 LocURI", () => {
   assertEquals(
     cmd.target.includes("/Grouping/school%20policy/EXE/"),
     true,
+  );
+});
+
+// ============================================================
+// PersonalizationCSP（桌布 / 鎖屏圖）
+// ============================================================
+
+Deno.test("buildPersonalization: 只設桌布 → 單條 Replace", () => {
+  const cmds = buildPersonalization({
+    desktopImageUrl: "https://cdn.cogrow.com/wallpapers/school.jpg",
+  });
+  assertEquals(cmds.length, 1);
+  assertEquals(cmds[0].verb, "Replace");
+  assertEquals(
+    cmds[0].target,
+    "./Vendor/MSFT/Personalization/DesktopImageUrl",
+  );
+  assertEquals(cmds[0].format, "chr");
+  assertEquals(cmds[0].data, "https://cdn.cogrow.com/wallpapers/school.jpg");
+});
+
+Deno.test("buildPersonalization: 只設鎖屏 → 單條 Replace", () => {
+  const cmds = buildPersonalization({
+    lockScreenImageUrl: "C:\\Windows\\Web\\Wallpaper\\lock.jpg",
+  });
+  assertEquals(cmds.length, 1);
+  assertEquals(
+    cmds[0].target,
+    "./Vendor/MSFT/Personalization/LockScreenImageUrl",
+  );
+  assertEquals(cmds[0].data, "C:\\Windows\\Web\\Wallpaper\\lock.jpg");
+});
+
+Deno.test("buildPersonalization: 桌布 + 鎖屏 → 兩條命令", () => {
+  const cmds = buildPersonalization({
+    desktopImageUrl: "https://x/d.jpg",
+    lockScreenImageUrl: "https://x/l.jpg",
+  });
+  assertEquals(cmds.length, 2);
+  assertEquals(cmds[0].target.endsWith("DesktopImageUrl"), true);
+  assertEquals(cmds[1].target.endsWith("LockScreenImageUrl"), true);
+});
+
+Deno.test("buildPersonalization: 空 input → 空陣列（無副作用）", () => {
+  assertEquals(buildPersonalization({}).length, 0);
+});
+
+Deno.test("buildPersonalization: data 透傳不 escape（URL 含 & 等也直接傳）", () => {
+  // format=chr 由 syncml.ts 統一 escape 嵌入 SyncML <Data>；
+  // helper 本身不對 data 做二次 escape
+  const cmds = buildPersonalization({
+    desktopImageUrl: "https://x/img.jpg?ver=1&size=hd",
+  });
+  assertEquals(cmds[0].data, "https://x/img.jpg?ver=1&size=hd");
+});
+
+Deno.test("buildPersonalizationStatusQuery: 桌布 / 鎖屏 對應正確路徑", () => {
+  const desktop = buildPersonalizationStatusQuery("desktop");
+  assertEquals(desktop.verb, "Get");
+  assertEquals(
+    desktop.target,
+    "./Vendor/MSFT/Personalization/DesktopImageStatus",
+  );
+
+  const lock = buildPersonalizationStatusQuery("lockScreen");
+  assertEquals(
+    lock.target,
+    "./Vendor/MSFT/Personalization/LockScreenImageStatus",
   );
 });
