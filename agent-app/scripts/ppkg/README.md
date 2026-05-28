@@ -70,13 +70,32 @@ GUI 步驟：
 4. .ppkg 插 USB 進新設備觸發 zero-touch enrollment
 
 實作位置：
-- `app/services/admin/enrollment-ppkg.ts` — `generatePpkgCustomizations({tenantId, upn, secret})`
+- `app/services/admin/enrollment-ppkg.ts` — `generatePpkgCustomizations(input)` + 純函式 `renderCustomizationsXml(ctx)`
 - `app/routes/v1/admin/enrollment-ppkg.ts` — GET endpoint zod-openapi
 
+簽名：
+```ts
+interface GeneratePpkgInput {
+  tenantId: string;
+  upn: string;
+  secret: string;
+  authPolicy?: "OnPremise" | "Certificate";  // 預設 OnPremise（已真機驗證）
+  wifi?: WifiCustomization[];                // schema 待 GUI 反向工程
+  localAccounts?: LocalAccountCustomization[]; // schema 待 GUI 反向工程
+}
+```
+
+擴展骨架狀態：
+- ✅ OnPremise — 2026-05-28 真機驗證通過
+- ⏳ `authPolicy="Certificate"` — helper throw 501 `ppkg_section_not_validated`
+- ⏳ `wifi[]` — helper throw 501（ConnectivityProfiles/WLANSetting）
+- ⏳ `localAccounts[]` — helper throw 501（Accounts/Users）
+
+每個未驗證段都 throw 501 防止生成壞 PPKG。下次 Win10 desktop session 走「TODO」流程 export 真實樣本後填實 `renderEnrollmentSection` / `renderWifiSection` / `renderAccountsSection`。
+
+10 個 unit test 覆蓋 OnPremise XML 格式 + 三段 501 守門（`app/services/admin/enrollment-ppkg.test.ts`）。
+
 未來擴展（按需）：
-- AuthPolicy 支援 `Certificate` / `Federated`（目前固定 OnPremise）
-- 加 WiFi profile 段（`ConnectivityProfiles/WLANSetting`）
-- 加本機 Account 段（學生 standard + admin）
 - enrollment secret 落表 + server 驗證（取代 admin 自帶 query）
 
 ## 用法（手動跑）
