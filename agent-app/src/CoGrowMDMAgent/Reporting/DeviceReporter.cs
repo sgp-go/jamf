@@ -1,7 +1,9 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using CoGrowMDMAgent.Config;
+using CoGrowMDMAgent.Queue;
 using Microsoft.Extensions.Logging;
 
 namespace CoGrowMDMAgent.Reporting;
@@ -12,23 +14,32 @@ namespace CoGrowMDMAgent.Reporting;
 ///
 /// Bearer auth is mandatory: the server requires the token once install-agent
 /// has provisioned the device (agent_token_hash is non-null on the row).
+///
+/// On send failure the serialised payload is enqueued via
+/// <see cref="IReportQueue"/> so the original-moment snapshot is preserved
+/// (do **not** re-collect facts on retry — that would diverge from when the
+/// report was actually taken). After enqueueing the exception is re-thrown so
+/// <c>Worker</c> still logs the failed cycle.
 /// </summary>
 public sealed class DeviceReporter
 {
     private readonly HttpClient _http;
     private readonly AgentConfig _config;
     private readonly DeviceFactsCollector _facts;
+    private readonly IReportQueue _queue;
     private readonly ILogger<DeviceReporter> _logger;
 
     public DeviceReporter(
         HttpClient http,
         AgentConfig config,
         DeviceFactsCollector facts,
+        IReportQueue queue,
         ILogger<DeviceReporter> logger)
     {
         _http = http;
         _config = config;
         _facts = facts;
+        _queue = queue;
         _logger = logger;
 
         _http.DefaultRequestHeaders.Authorization =
@@ -39,7 +50,6 @@ public sealed class DeviceReporter
     public async Task<AgentReportResponseData?> ReportAsync(CancellationToken ct)
     {
         var facts = _facts.Collect();
-
         var payload = new AgentReportPayload
         {
             SerialNumber = facts.SerialNumber,
@@ -52,11 +62,44 @@ public sealed class DeviceReporter
                 : new WindowsExtraData { Windows = facts.Windows },
             ReportedAt = DateTime.UtcNow.ToString("o"),
         };
+        var serialised = JsonSerializer.Serialize(payload, JsonOptions);
 
         _logger.LogInformation(
             "Reporting to {Url} (serial={Serial})",
             _config.ReportsUrl, facts.SerialNumber);
 
+        try
+        {
+            return await PostAsync(payload, ct);
+        }
+        catch (Exception ex) when (IsTransient(ex, ct))
+        {
+            _logger.LogError(
+                ex, "Report send failed — enqueuing for retry (serial={Serial})",
+                facts.SerialNumber);
+            await _queue.EnqueueAsync(ReportType.DeviceReport, serialised, ct);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Retry a queued payload — POST the exact bytes drawn from the queue.
+    /// Returns true on 2xx, false on non-success status (caller increments
+    /// attempt). Network/timeout exceptions propagate so the drainer can also
+    /// increment with a meaningful error message.
+    /// </summary>
+    internal async Task<bool> RetryAsync(string serialisedPayload, CancellationToken ct)
+    {
+        using var content = new StringContent(
+            serialisedPayload, Encoding.UTF8, "application/json");
+        using var response = await _http.PostAsync(_config.ReportsUrl, content, ct);
+        return response.IsSuccessStatusCode;
+    }
+
+    private async Task<AgentReportResponseData?> PostAsync(
+        AgentReportPayload payload,
+        CancellationToken ct)
+    {
         using var response = await _http.PostAsJsonAsync(
             _config.ReportsUrl, payload, JsonOptions, ct);
 
@@ -76,6 +119,14 @@ public sealed class DeviceReporter
             parsed?.Data?.ReportId, parsed?.Data?.DeviceId);
 
         return parsed?.Data;
+    }
+
+    private static bool IsTransient(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested) return false;
+        // HttpRequestException covers network/DNS/non-success; TaskCanceledException
+        // is raised on HttpClient.Timeout (distinct from ct cancellation).
+        return ex is HttpRequestException or TaskCanceledException;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
