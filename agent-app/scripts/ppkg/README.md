@@ -20,8 +20,23 @@ USB PPKG (Provisioning Package) zero-touch 部署用 build 資產。
 
 1. **BITS 在 SSH 失敗**：`Start-BitsTransfer` 需 interactive user session，over SSH 撞 `0x800704DD`。用 `Invoke-WebRequest -UseBasicParsing` 配 `$ProgressPreference = "SilentlyContinue"`（後者必須，否則 PS 5.1 進度條讓 IWR 慢 10x）
 2. **ICD boolean 參數**：`/Encrypted:True` 不被識別（"Boolean argument must be prepend with + or -"），但 `/Encrypted+` `/Encrypted-` 也不識別。**最穩做法：省略，用預設值**
-3. **customization XML namespace 嚴格**：`Common/Personalization` 報 "not a valid child node for /"；`Accounts/ComputerAccount` 也錯。每個元素必須在正確的 CSP namespace 路徑下
+3. **customization XML namespace 嚴格**：`Common/Personalization` 不存在（猜的，錯）；`Accounts/ComputerAccount/ComputerName` 對但僅 Win10 < 2004 適用。Win10 22H2+ 用新路徑。**規則：別 CLI 猜 schema，先查文檔**（見下節）
 4. **PPKG 容器格式**：新 ADK 用 **WIM**（magic `4D 53 57 49 4D = MSWIM`），不是早期的 CAB（`MSCF`）
+
+## Schema 查證工作流（取代 CLI 猜）
+
+WCD customization XML schema 嚴格，CLI 試錯成本極高（每次 ICD build 要 scp + ssh）。順序：
+
+1. **Context7 查**：MS Learn 鏡像 `/websites/learn_microsoft_en-us_windows`（123k snippets）
+   ```
+   mcp__plugin_context7_context7__query-docs
+     context7CompatibleLibraryID = /websites/learn_microsoft_en-us_windows
+     topic + query = 具體欄位/CSP 路徑
+   ```
+2. **WebSearch + WebFetch 兜底**：`learn.microsoft.com/en-us/windows/configuration/wcd/...`
+3. **最後才 ICD GUI**（`ICDStarter.exe`，需 desktop interactive）：「Available customizations」樹瀏覽完整 schema + 自動產 XML
+
+**反模式**：直接寫 customization XML → scp → ICD build → 看報錯改 → 再 scp → 再 build。猜對概率低、來回 ssh 慢。
 
 ## TODO（下次 Win10 desktop 會話）
 
