@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Mock device-side SyncML ack（W4 task 17 #13 dummy 驗證用）。
+
+  必須與 mdm_devices.management_session_state 中的 inFlight 對齊：
+    - SessionID 與 lastSessionId 相同（避免 server 清 inFlight）
+    - SyncBody/Status/CmdRef 命中 inFlight 中存在的 cmdId
+
+  Data=200 → mapStatusCode → "acknowledged" → publishCommandEvent
+  → "command.completed" event → webhook_deliveries 插入新行
+
+  使用：
+    curl -X PUT $API_BASE/api/mdm/win/manage/<windowsDeviceId> \
+      -H 'Content-Type: application/vnd.syncml.dm+xml' \
+      --data-binary @scripts/syncml-ack-sample.xml
+-->
+<SyncML xmlns="SYNCML:SYNCML1.2">
+  <SyncHdr>
+    <VerDTD>1.2</VerDTD>
+    <VerProto>DM/1.2</VerProto>
+    <SessionID>42</SessionID>
+    <MsgID>1</MsgID>
+    <Target><LocURI>http://localhost:3000/api/mdm/win/manage/dummy-win-deviceid-ack13-001</LocURI></Target>
+    <Source><LocURI>dummy-win-deviceid-ack13-001</LocURI></Source>
+  </SyncHdr>
+  <SyncBody>
+    <Status>
+      <CmdID>1</CmdID>
+      <MsgRef>1</MsgRef>
+      <CmdRef>0</CmdRef>
+      <Cmd>SyncHdr</Cmd>
+      <Data>200</Data>
+    </Status>
+    <Status>
+      <CmdID>2</CmdID>
+      <MsgRef>1</MsgRef>
+      <CmdRef>99</CmdRef>
+      <Cmd>Exec</Cmd>
+      <Data>200</Data>
+    </Status>
+    <Final/>
+  </SyncBody>
+</SyncML>
