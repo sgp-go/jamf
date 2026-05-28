@@ -8,9 +8,13 @@ import {
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import {
   getDeviceFullDetail,
+  getDeviceTelemetry,
+  listDeviceCommands,
   listDevicesInTenant,
   sendCommandToDevice,
   toggleAppLock,
+  unenrollDeviceInTenant,
+  updateDeviceInTenant,
 } from "~/services/devices.ts";
 import type { DeviceCommand } from "~/services/jamf/types.ts";
 
@@ -82,6 +86,74 @@ const commandBodySchema = z
     lostModeFootnote: z.string().optional(),
   })
   .openapi("DeviceCommandRequest");
+
+const updateDeviceBody = z
+  .object({
+    deviceName: z.string().min(1).max(200).optional().openapi({
+      description: "重命名設備（Jamf/MDM 本地顯示名）",
+      example: "guangfu-es-001",
+    }),
+    deviceGroupId: z.string().uuid().nullable().optional().openapi({
+      description: "轉組；傳 null 移出當前分組",
+    }),
+  })
+  .openapi("UpdateDeviceInput");
+
+const commandHistoryItemSchema = z
+  .object({
+    commandUuid: z.string(),
+    commandType: z.string(),
+    status: z.enum([
+      "queued",
+      "sent",
+      "acknowledged",
+      "error",
+      "not_now",
+      "idle",
+      "expired",
+    ]),
+    platform: z.enum(["apple", "windows"]),
+    cspPath: z.string().nullable(),
+    syncmlVerb: z.string().nullable(),
+    errorChain: z.array(z.unknown()).nullable(),
+    queuedAt: z.string(),
+    sentAt: z.string().nullable(),
+    respondedAt: z.string().nullable(),
+  })
+  .openapi("DeviceCommandHistoryItem");
+
+function toCommandHistoryItem(row: {
+  commandUuid: string;
+  commandType: string;
+  status:
+    | "queued"
+    | "sent"
+    | "acknowledged"
+    | "error"
+    | "not_now"
+    | "idle"
+    | "expired";
+  platform: "apple" | "windows";
+  cspPath: string | null;
+  syncmlVerb: string | null;
+  errorChain: unknown;
+  queuedAt: Date;
+  sentAt: Date | null;
+  respondedAt: Date | null;
+}) {
+  return {
+    commandUuid: row.commandUuid,
+    commandType: row.commandType,
+    status: row.status,
+    platform: row.platform,
+    cspPath: row.cspPath,
+    syncmlVerb: row.syncmlVerb,
+    errorChain: Array.isArray(row.errorChain) ? row.errorChain : null,
+    queuedAt: row.queuedAt.toISOString(),
+    sentAt: row.sentAt?.toISOString() ?? null,
+    respondedAt: row.respondedAt?.toISOString() ?? null,
+  };
+}
 
 function toItem(row: {
   id: string;
@@ -179,6 +251,39 @@ const detailSpec = createRoute({
   },
 });
 
+const updateSpec = createRoute({
+  method: "patch",
+  path: "/tenants/{tenantId}/devices/{deviceId}",
+  tags: ["Devices"],
+  summary: "更新設備（重命名 / 轉組）",
+  request: {
+    params: tenantDeviceParam,
+    body: { content: { "application/json": { schema: updateDeviceBody } } },
+  },
+  responses: {
+    200: {
+      description: "Updated",
+      content: { "application/json": { schema: successSchema(deviceItemSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const deleteSpec = createRoute({
+  method: "delete",
+  path: "/tenants/{tenantId}/devices/{deviceId}",
+  tags: ["Devices"],
+  summary: "解除設備納管（軟刪：標記 enrollment_status=unenrolled，保留紀錄）",
+  request: { params: tenantDeviceParam },
+  responses: {
+    200: {
+      description: "Unenrolled",
+      content: { "application/json": { schema: successSchema(deviceItemSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 const commandSpec = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/devices/{deviceId}/commands",
@@ -198,6 +303,114 @@ const commandSpec = createRoute({
           ),
         },
       },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const commandHistorySpec = createRoute({
+  method: "get",
+  path: "/tenants/{tenantId}/devices/{deviceId}/commands",
+  tags: ["Devices"],
+  summary: "命令歷史（按 queued_at desc 分頁）",
+  request: { params: tenantDeviceParam, query: paginationQuery },
+  responses: {
+    200: {
+      description: "Command history",
+      content: {
+        "application/json": {
+          schema: paginatedSchema(commandHistoryItemSchema),
+        },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const agentReportItemSchema = z
+  .object({
+    id: z.string().uuid(),
+    batteryLevel: z.number().int().nullable(),
+    storageAvailableMb: z.number().int().nullable(),
+    storageTotalMb: z.number().int().nullable(),
+    networkType: z.string().nullable(),
+    networkSsid: z.string().nullable(),
+    screenBrightness: z.number().nullable(),
+    osVersion: z.string().nullable(),
+    appVersion: z.string().nullable(),
+    reportedAt: z.string(),
+  })
+  .openapi("AgentReportItem");
+
+const usageStatItemSchema = z
+  .object({
+    date: z.string().openapi({ example: "2026-05-28" }),
+    totalMinutes: z.number().int(),
+    pickup: z.number().int(),
+    maxContinuous: z.number().int(),
+    timeStats: z.record(z.number()).nullable(),
+  })
+  .openapi("DeviceUsageStatItem");
+
+const telemetrySchema = z
+  .object({
+    latestReport: agentReportItemSchema.nullable(),
+    usageLastWeek: z.array(usageStatItemSchema),
+  })
+  .openapi("DeviceTelemetry");
+
+function toAgentReportItem(row: {
+  id: string;
+  batteryLevel: number | null;
+  storageAvailableMb: number | null;
+  storageTotalMb: number | null;
+  networkType: string | null;
+  networkSsid: string | null;
+  screenBrightness: number | null;
+  osVersion: string | null;
+  appVersion: string | null;
+  reportedAt: Date;
+}) {
+  return {
+    id: row.id,
+    batteryLevel: row.batteryLevel,
+    storageAvailableMb: row.storageAvailableMb,
+    storageTotalMb: row.storageTotalMb,
+    networkType: row.networkType,
+    networkSsid: row.networkSsid,
+    screenBrightness: row.screenBrightness,
+    osVersion: row.osVersion,
+    appVersion: row.appVersion,
+    reportedAt: row.reportedAt.toISOString(),
+  };
+}
+
+function toUsageStatItem(row: {
+  date: string;
+  totalMinutes: number;
+  pickup: number;
+  maxContinuous: number;
+  timeStats: Record<string, number> | null;
+}) {
+  return {
+    date: row.date,
+    totalMinutes: row.totalMinutes,
+    pickup: row.pickup,
+    maxContinuous: row.maxContinuous,
+    timeStats: row.timeStats,
+  };
+}
+
+const telemetrySpec = createRoute({
+  method: "get",
+  path: "/tenants/{tenantId}/devices/{deviceId}/telemetry",
+  tags: ["Devices"],
+  summary: "Agent 端 telemetry（最新一筆狀態 + 最近 7 天使用統計）",
+  request: { params: tenantDeviceParam },
+  responses: {
+    200: {
+      description: "Telemetry",
+      content: { "application/json": { schema: successSchema(telemetrySchema) } },
     },
     ...commonErrorResponses,
   },
@@ -304,6 +517,19 @@ devicesApp.openapi(detailSpec, async (c) => {
   );
 });
 
+devicesApp.openapi(updateSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const row = await updateDeviceInTenant({ tenantId, deviceId, input: body });
+  return c.json({ ok: true as const, data: toItem(row) }, 200);
+});
+
+devicesApp.openapi(deleteSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const row = await unenrollDeviceInTenant({ tenantId, deviceId });
+  return c.json({ ok: true as const, data: toItem(row) }, 200);
+});
+
 devicesApp.openapi(commandSpec, async (c) => {
   const { tenantId, deviceId } = c.req.valid("param");
   const body = c.req.valid("json");
@@ -321,6 +547,43 @@ devicesApp.openapi(commandSpec, async (c) => {
     {
       ok: true as const,
       data: { command: body.command, result },
+    },
+    200,
+  );
+});
+
+devicesApp.openapi(commandHistorySpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const { page, limit } = c.req.valid("query");
+  const { rows, total } = await listDeviceCommands({
+    tenantId,
+    deviceId,
+    page,
+    limit,
+  });
+  return c.json(
+    {
+      ok: true as const,
+      data: rows.map(toCommandHistoryItem),
+      meta: { total, page, limit },
+    },
+    200,
+  );
+});
+
+devicesApp.openapi(telemetrySpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const { latestReport, usageLastWeek } = await getDeviceTelemetry({
+    tenantId,
+    deviceId,
+  });
+  return c.json(
+    {
+      ok: true as const,
+      data: {
+        latestReport: latestReport ? toAgentReportItem(latestReport) : null,
+        usageLastWeek: usageLastWeek.map(toUsageStatItem),
+      },
     },
     200,
   );
