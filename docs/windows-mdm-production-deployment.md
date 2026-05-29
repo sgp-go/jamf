@@ -157,7 +157,28 @@ WNS_STORE_PRODUCT_ID=<your-store-product-id>
 # 其他（保留欄位，當前 stub）
 JAMF_CLIENT_ID=...
 JAMF_CLIENT_SECRET=...
+
+# 機密加密金鑰（base64 32 bytes）— 生產必填
+DATA_ENCRYPTION_KEY=<openssl rand -base64 32>
 ```
+
+### DATA_ENCRYPTION_KEY（機密 at-rest 加密）
+
+DB 中的機密欄位（`*_enc`：Jamf client secret、DEP token consumer/access secret、
+APNS / CA / Vendor 私鑰）透過 `app/lib/secrets.ts` 以 **AES-256-GCM** 加密落庫。
+
+- **生產必填**：未設則機密以明文存儲（啟動 / 首次寫機密時 log warn）。僅 dev/test 可接受。
+- 生成：`openssl rand -base64 32`（32 bytes = 256-bit）。
+- 密文格式：`v1:` + base64(iv‖tag‖ciphertext)，帶 GCM 認證標籤（防篡改）。
+- **向後相容**：`decryptSecret` 見 `v1:` 前綴才解密，無前綴當 legacy 明文原樣返回；
+  既有明文行在下次寫入時自動升級為密文，**無需資料遷移**。
+- 啟用步驟（既有部署從明文切到加密）：
+  1. 生成金鑰寫入 `.env`：`DATA_ENCRYPTION_KEY=<key>`
+  2. `sudo systemctl restart jamf-mdm`
+  3. 對既有機密觸發一次寫入（如 admin 重存 Jamf instance / 重傳 DEP token）讓其升級為密文
+  4. 驗證：DB 中對應 `*_enc` 欄位以 `v1:` 開頭即為已加密
+- ⚠️ **金鑰即一切**：金鑰遺失 → 所有 `v1:` 密文不可復原。納入與 DB 同等級的備份 / 保管。
+  金鑰輪替需先用舊金鑰解密、再用新金鑰重新加密所有機密（當前未自動化，留 SOP backlog）。
 
 ### 輪替 SOP
 
