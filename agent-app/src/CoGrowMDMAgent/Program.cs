@@ -1,5 +1,6 @@
 using CoGrowMDMAgent;
 using CoGrowMDMAgent.Config;
+using CoGrowMDMAgent.Locking;
 using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
 using CoGrowMDMAgent.Scheduling;
@@ -41,6 +42,9 @@ builder.Services.AddSingleton<IReportQueue>(sp =>
 builder.Services.AddHttpClient<DeviceReporter>();
 builder.Services.AddHttpClient<UsageReporter>();
 builder.Services.AddHostedService<Worker>();
+// 遠端鎖定：監控 Registry 鎖定旗標，在使用者 session 拉起全螢幕鎖定窗（[[windows-lock-design]]）。
+// 與上報 Worker 並行的獨立 hosted service；非 Windows 平台 no-op。
+builder.Services.AddHostedService<LockWatcher>();
 
 var host = builder.Build();
 
