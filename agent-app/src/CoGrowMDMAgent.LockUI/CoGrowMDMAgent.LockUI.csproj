@@ -13,8 +13,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>CoGrowMDMAgent.LockUI</RootNamespace>
     <AssemblyName>CoGrowMDMAgent.LockUI</AssemblyName>
-    <!-- 單檔發佈方便隨服務一起裝到同目錄 -->
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 高 DPI / 多螢幕：WinForms 8 走專案屬性（ApplicationConfiguration.Initialize 讀此值），
+         不再在 app.manifest 配 dpiAware（WFAC010）。 -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
 
   <ItemGroup>
