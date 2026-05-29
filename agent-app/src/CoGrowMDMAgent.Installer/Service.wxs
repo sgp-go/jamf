@@ -79,6 +79,20 @@
           KeyPath="yes" />
       </Component>
 
+      <!--
+        LockUI helper（全螢幕鎖定窗）。裝進服務同目錄（INSTALLFOLDER），LockWatcher
+        以 AppContext.BaseDirectory 定位 CoGrowMDMAgent.LockUI.exe，再用
+        CreateProcessAsUser 在 active console session 拉起。build.ps1 step 1a 把它
+        self-contained single-file publish 後複製進 $(var.PublishDir)。
+        見 [[windows-lock-design]] / [[windows-agent-update-delivery]]。
+      -->
+      <Component Id="LockUiComponent" Bitness="always64">
+        <File
+          Id="CoGrowMDMAgentLockUIExe"
+          Source="$(var.PublishDir)\CoGrowMDMAgent.LockUI.exe"
+          KeyPath="yes" />
+      </Component>
+
     </ComponentGroup>
   </Fragment>
 

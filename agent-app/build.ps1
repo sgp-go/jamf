@@ -35,8 +35,9 @@ param(
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
-$publishDir = Join-Path $root "build\publish"
-$msiDir     = Join-Path $root "build\msi"
+$publishDir       = Join-Path $root "build\publish"
+$lockUiPublishDir = Join-Path $root "build\publish-lockui"
+$msiDir           = Join-Path $root "build\msi"
 
 Write-Host ""
 Write-Host "==== 1. dotnet publish CoGrowMDMAgent ($Configuration, self-contained=$SelfContained) ===="
@@ -62,11 +63,45 @@ Write-Host ""
 Write-Host "--- publish output ---"
 Get-ChildItem $publishDir | Select-Object Name, @{N="MB";E={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize
 
+# ----------------------------------------------------------------------------
+# LockUI helper（鎖定窗，跑在使用者 session；服務用 CreateProcessAsUser 拉起）。
+# 跟主 agent 一樣 self-contained single-file（學校設備不可控，不能依賴裝 .NET 8
+# Desktop Runtime）。publish 到獨立目錄避免兩次 SDK publish 互踩，再把單一
+# CoGrowMDMAgent.LockUI.exe 複製進 $publishDir，讓 wix 從 INSTALLFOLDER 同目錄打包
+# （LockWatcher 用 AppContext.BaseDirectory 找此 exe）。
+# ----------------------------------------------------------------------------
+Write-Host ""
+Write-Host "==== 1a. dotnet publish CoGrowMDMAgent.LockUI (self-contained single-file) ===="
+if (Test-Path $lockUiPublishDir) { Remove-Item $lockUiPublishDir -Recurse -Force }
+
+$lockUiPublishArgs = @(
+    "publish",
+    "$root\src\CoGrowMDMAgent.LockUI\CoGrowMDMAgent.LockUI.csproj",
+    "-c", $Configuration,
+    "-r", "win-x64",
+    "--self-contained", $SelfContained.ToString().ToLower(),
+    "-p:PublishSingleFile=true",
+    "-p:IncludeNativeLibrariesForSelfExtract=true",
+    "-p:PublishTrimmed=false",
+    "-p:DebugType=embedded",
+    "-o", $lockUiPublishDir,
+    "--nologo"
+)
+& dotnet @lockUiPublishArgs
+if ($LASTEXITCODE -ne 0) { throw "dotnet publish LockUI failed ($LASTEXITCODE)" }
+
+$lockUiExe = Join-Path $lockUiPublishDir "CoGrowMDMAgent.LockUI.exe"
+if (-not (Test-Path $lockUiExe)) { throw "LockUI publish produced no CoGrowMDMAgent.LockUI.exe" }
+Copy-Item $lockUiExe -Destination $publishDir -Force
+Write-Host "LockUI.exe → $publishDir ($([math]::Round((Get-Item $lockUiExe).Length/1MB,2)) MB)"
+
 if ($CertThumbprint) {
     Write-Host ""
-    Write-Host "==== 1b. sign CoGrowMDMAgent.exe (before wix build) ===="
+    Write-Host "==== 1b. sign CoGrowMDMAgent.exe + LockUI.exe (before wix build) ===="
     & "$root\sign.ps1" -FilePath "$publishDir\CoGrowMDMAgent.exe" -CertThumbprint $CertThumbprint -SkipVerify
     if ($LASTEXITCODE -ne 0) { throw "sign exe failed ($LASTEXITCODE)" }
+    & "$root\sign.ps1" -FilePath "$publishDir\CoGrowMDMAgent.LockUI.exe" -CertThumbprint $CertThumbprint -SkipVerify
+    if ($LASTEXITCODE -ne 0) { throw "sign LockUI exe failed ($LASTEXITCODE)" }
 }
 
 Write-Host ""
