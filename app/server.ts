@@ -15,6 +15,7 @@ import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
 import { profilePresetsApp } from "~/routes/v1/admin/profile-presets.ts";
 import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
+import { webhooksAdminApp } from "~/routes/v1/admin/webhooks.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
 import { appsApp } from "~/routes/v1/apps.ts";
 import { devicesApp } from "~/routes/v1/devices.ts";
@@ -55,6 +56,7 @@ app.route("/api/v1", profilesAdminApp);
 app.route("/api/v1", profilePresetsApp);
 app.route("/api/v1", complianceAdminApp);
 app.route("/api/v1", auditAdminApp);
+app.route("/api/v1", webhooksAdminApp);
 
 // Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
 // mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。
@@ -111,6 +113,10 @@ app.doc("/openapi.json", {
     },
     { name: "Admin: compliance", description: "合規政策即時評估（OS 版本 + 離線天數）" },
     { name: "Admin: audit", description: "審計日誌查詢（read-only；寫入由各 admin route 自行 logAudit）" },
+    {
+      name: "Admin: webhooks",
+      description: "Webhook 可觀測性（read-only）：event_log（publishEvent 記錄）+ deliveries（投遞 / 重試 / 死信）",
+    },
     { name: "Admin: jamf instances", description: "Jamf 整合設定與同步" },
     { name: "Admin: apps", description: "App 套件上傳與管理" },
     { name: "Admin: install-agent", description: "Agent App 一鍵派發" },
