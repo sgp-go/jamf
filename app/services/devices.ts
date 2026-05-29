@@ -9,7 +9,12 @@ import { JamfClient } from "~/services/jamf/client.ts";
 import { DeviceService } from "~/services/jamf/devices.ts";
 import type { DeviceCommand } from "~/services/jamf/types.ts";
 import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
-import { buildReboot, buildRemoteWipe } from "~/services/mdm/windows/csp.ts";
+import {
+  buildLockState,
+  buildReboot,
+  buildRemoteWipe,
+} from "~/services/mdm/windows/csp.ts";
+import { upsertMdmDevice } from "~/services/mdm/devices.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 
 /**
@@ -184,7 +189,10 @@ export async function sendCommandToDevice(opts: {
   const device = await getDeviceInTenant(opts);
 
   if (device.platform === "windows") {
-    return sendWindowsDeviceCommand(device, opts.command);
+    return sendWindowsDeviceCommand(device, opts.command, {
+      lostModeMessage: opts.lostModeMessage,
+      lostModePhone: opts.lostModePhone,
+    });
   }
 
   // Apple 路徑：中性命令 normalize 到 Jamf 命名；既有 Jamf 命名直接透傳
@@ -232,15 +240,18 @@ function normalizeToJamfCommand(command: string): DeviceCommand {
 }
 
 /**
- * Windows 設備命令派發：只接受中性命令（LOCK / WIPE / REBOOT），
- * 內部映射到 SyncML CSP 並走 enqueueWindowsCommand（觸發 command.queued webhook +
- * 嘗試 WNS push 秒級喚醒，命令狀態變化自動上報 command.sent/completed/failed）。
+ * Windows 設備命令派發：接受中性命令（LOCK / WIPE / REBOOT）+ Lost Mode
+ * （ENABLE_LOST_MODE / DISABLE_LOST_MODE），內部映射到 SyncML CSP 並走
+ * enqueueWindowsCommand（觸發 command.queued webhook + WNS push 秒級喚醒）。
  *
- * LOCK 在 Windows MDM 無原生 CSP 支援，按 plan §3 line 162 用 Reboot 替代。
+ * **LOCK 真鎖屏**（[[windows-lock-design]]）：桌面無即時鎖屏 CSP，改寫 Registry 鎖定旗標
+ * （buildLockState），Agent App 監聽後彈全螢幕鎖定窗。LOCK 與 ENABLE_LOST_MODE 等價
+ * （都進鎖定態 + 顯示聯絡訊息）；DISABLE_LOST_MODE 解鎖。Reboot 保留為獨立 REBOOT 命令。
  */
 async function sendWindowsDeviceCommand(
   device: MdmDevice,
   command: string,
+  opts?: { lostModeMessage?: string; lostModePhone?: string },
 ): Promise<{ commandUuid: string }> {
   if (!device.udid) {
     throw new AppError(
@@ -248,6 +259,30 @@ async function sendWindowsDeviceCommand(
       "device_missing_udid",
       "Windows device has no udid; enrollment may be incomplete",
     );
+  }
+  const udid = device.udid;
+
+  // 鎖定系列：寫 Registry 鎖定旗標（多條 Registry Set）+ 落 lostMode 欄位
+  if (command === "LOCK" || command === "ENABLE_LOST_MODE") {
+    const cmds = buildLockState({
+      enabled: true,
+      message: opts?.lostModeMessage,
+      phone: opts?.lostModePhone,
+    });
+    const uuid = await enqueueWindowsBatch(udid, "Lock", cmds);
+    await upsertMdmDevice(udid, {
+      lostModeEnabled: true,
+      lostModeEnabledAt: new Date().toISOString(),
+      ...(opts?.lostModeMessage !== undefined && { lostModeMessage: opts.lostModeMessage }),
+      ...(opts?.lostModePhone !== undefined && { lostModePhone: opts.lostModePhone }),
+    });
+    return { commandUuid: uuid };
+  }
+  if (command === "DISABLE_LOST_MODE") {
+    const cmds = buildLockState({ enabled: false });
+    const uuid = await enqueueWindowsBatch(udid, "Unlock", cmds);
+    await upsertMdmDevice(udid, { lostModeEnabled: false });
+    return { commandUuid: uuid };
   }
 
   let syncmlCmd: SyncMLCommand;
@@ -258,8 +293,6 @@ async function sendWindowsDeviceCommand(
       commandType = "RemoteWipe";
       break;
     case "REBOOT":
-    case "LOCK":
-      // Windows 無原生 Lock CSP，按 plan §3 用 Reboot 替代
       syncmlCmd = buildReboot();
       commandType = "Reboot";
       break;
@@ -267,16 +300,38 @@ async function sendWindowsDeviceCommand(
       throw new AppError(
         400,
         "command_not_supported_on_windows",
-        `Command "${command}" not supported on Windows. Use LOCK / WIPE / REBOOT.`,
+        `Command "${command}" not supported on Windows. Use LOCK / WIPE / REBOOT / ENABLE_LOST_MODE / DISABLE_LOST_MODE.`,
       );
   }
 
   const commandUuid = await enqueueWindowsCommand({
-    deviceUdid: device.udid,
+    deviceUdid: udid,
     commandType,
     command: syncmlCmd,
   });
   return { commandUuid };
+}
+
+/**
+ * 批次 enqueue 一組 SyncML 命令（如 Lock 的多條 Registry Set）。
+ * 按序 enqueue 保持套用順序（buildLockState 已把 Enabled 排最後）；回傳首條 commandUuid 供追蹤。
+ */
+async function enqueueWindowsBatch(
+  udid: string,
+  typePrefix: string,
+  cmds: SyncMLCommand[],
+): Promise<string> {
+  const uuids: string[] = [];
+  for (let i = 0; i < cmds.length; i++) {
+    uuids.push(
+      await enqueueWindowsCommand({
+        deviceUdid: udid,
+        commandType: `${typePrefix}-${i}`,
+        command: cmds[i],
+      }),
+    );
+  }
+  return uuids[0];
 }
 
 export interface UpdateDeviceInput {

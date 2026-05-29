@@ -27,6 +27,8 @@ import {
   APPLOCKER_SID_EVERYONE,
   buildPersonalization,
   buildPersonalizationStatusQuery,
+  buildLockState,
+  AGENT_LOCK_REG_PATH,
 } from "./csp.ts";
 
 Deno.test("buildRemoteWipe: 預設 doWipe", () => {
@@ -1058,4 +1060,57 @@ Deno.test("buildPersonalizationStatusQuery: 桌布 / 鎖屏 對應正確路徑",
     lock.target,
     "./Vendor/MSFT/Personalization/LockScreenImageStatus",
   );
+});
+
+// ===== buildLockState（遠端鎖定，Agent 監聽的 Registry 信箱）=====
+
+Deno.test("buildLockState: enable 寫 Message/Phone/DisableTaskMgr，Enabled 排最後", () => {
+  const cmds = buildLockState({
+    enabled: true,
+    message: "請聯絡 XX 學校",
+    phone: "02-1234-5678",
+  });
+  // 順序：Message, Phone, DisableTaskMgr, Enabled
+  assertEquals(cmds.length, 4);
+  assertEquals(
+    cmds[0].target,
+    `./Device/Vendor/MSFT/Registry/HKLM/${AGENT_LOCK_REG_PATH}/Message`,
+  );
+  assertEquals(cmds[0].data, "請聯絡 XX 學校");
+  assertEquals(cmds[0].format, "chr");
+  assertEquals(cmds[1].target.endsWith("/Phone"), true);
+  assertEquals(cmds[1].data, "02-1234-5678");
+  // DisableTaskMgr 加固
+  assertEquals(
+    cmds[2].target,
+    "./Device/Vendor/MSFT/Registry/HKLM/SOFTWARE/Microsoft/Windows/CurrentVersion/Policies/System/DisableTaskMgr",
+  );
+  assertEquals(cmds[2].data, "1");
+  assertEquals(cmds[2].format, "int");
+  // Enabled 最後，=1
+  assertEquals(
+    cmds[3].target,
+    `./Device/Vendor/MSFT/Registry/HKLM/${AGENT_LOCK_REG_PATH}/Enabled`,
+  );
+  assertEquals(cmds[3].data, "1");
+  assertEquals(cmds[3].format, "int");
+});
+
+Deno.test("buildLockState: disable 只寫 DisableTaskMgr=0 + Enabled=0（不寫 Message/Phone）", () => {
+  const cmds = buildLockState({ enabled: false });
+  assertEquals(cmds.length, 2);
+  assertEquals(cmds[0].target.endsWith("/DisableTaskMgr"), true);
+  assertEquals(cmds[0].data, "0");
+  assertEquals(cmds[1].target.endsWith(`/${"Enabled"}`), true);
+  assertEquals(cmds[1].data, "0");
+  // 解鎖不應殘留 Message/Phone 寫入
+  assertEquals(cmds.some((c) => c.target.endsWith("/Message")), false);
+});
+
+Deno.test("buildLockState: enable 省略 message/phone 時寫空字串", () => {
+  const cmds = buildLockState({ enabled: true });
+  assertEquals(cmds[0].target.endsWith("/Message"), true);
+  assertEquals(cmds[0].data, "");
+  assertEquals(cmds[1].target.endsWith("/Phone"), true);
+  assertEquals(cmds[1].data, "");
 });

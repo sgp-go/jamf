@@ -33,24 +33,20 @@ export function buildRemoteWipe(action: WipeAction = "doWipe"): SyncMLCommand {
 }
 
 // ============================================================
-// RemoteLock 說明（無對應 CSP，方案另見 Agent App）
+// RemoteLock 說明（桌面無即時鎖屏 CSP → 走 Agent + Registry 信箱）
 // ============================================================
 //
-// **Windows 10/11 Pro 沒有「立即鎖屏」標準 CSP**。
+// **Windows 10/11 Pro 沒有「立即鎖屏」標準 CSP**（RemoteLock CSP 僅 Mobile/Phone）。
+// MS-docs 列出的相關 CSP 都是策略型（Policy DeviceLock/idle 策略、SurfaceHub、RemoteFind）。
 //
-// MS-docs 列出的相關 CSP 都是策略型，非「臨時鎖一下」：
-//   - Policy CSP DeviceLock/*  → idle 多久鎖屏、密碼強度等策略
-//   - SurfaceHub/Properties/ScreenTimeoutSeconds  → 僅 Surface Hub 適用
-//   - RemoteFind/Phone        → Windows Mobile 用，桌面版不適用
+// **方案（見 [[windows-lock-design]]）**：真鎖屏由 Agent App 實現。服務端用 Registry CSP
+// 把鎖定狀態寫進設備 Registry 當「信箱」，Agent 監聽（RegNotifyChangeKeyValue）後彈全螢幕
+// 鎖定窗 + 顯示聯絡訊息。`buildLockState`（見本檔 Registry CSP 段）負責投遞鎖定狀態，
+// 復用 WNS push + SyncML + Registry CSP 鏈路（已真機驗證）。
 //
-// **業界生產做法**：透過 Agent App（我們 W1-9 規劃中的 Service）接收
-// push 後本地呼叫 user32.dll!LockWorkStation()，這是 W1 之後的解。
-//
-// **臨時 workaround**：派 Reboot 命令（buildReboot），重啟後必然要重新
-// 登入，達到「強制中斷使用 + 鎖屏」的效果。對 Lost Mode 簡化版（W1-8 範圍）
-// 已足夠。
-//
-// 真正純鎖屏的 CSP 由 W1-9 Agent App + push 通道實現。
+// LOCK / ENABLE_LOST_MODE → buildLockState(enabled:true)；DISABLE_LOST_MODE → enabled:false。
+// 加固：鎖定期間同時設 DisableTaskMgr=1 禁用任務管理器，堵死殺進程逃逸。
+// 不再用 Reboot 替代 LOCK（Reboot 保留為獨立 REBOOT 命令）。
 
 // ============================================================
 // Reboot（遠端重啟）
@@ -923,6 +919,81 @@ export function buildRegistryDelete(opts: {
     verb: "Delete",
     target: buildRegistryTarget(opts),
   };
+}
+
+// ============================================================
+// 遠端鎖定（Lock state，Agent 監聽的 Registry 信箱）
+// ============================================================
+//
+// 桌面 Windows 無即時鎖屏 CSP（見本檔上方 RemoteLock 說明）。真鎖屏由 Agent App
+// 監聽以下 Registry 旗標後彈全螢幕鎖定窗實現。本函式只負責投遞鎖定狀態到設備 Registry，
+// 復用 Registry CSP（已真機驗證）。詳見 [[windows-lock-design]]。
+
+/** Agent 監聽的鎖定狀態 Registry key（path 段，HKLM 下）*/
+export const AGENT_LOCK_REG_PATH = "SOFTWARE/CoGrow/Agent/Lock";
+/** 任務管理器禁用策略所在 key（加固用）*/
+const DISABLE_TASKMGR_REG_PATH =
+  "SOFTWARE/Microsoft/Windows/CurrentVersion/Policies/System";
+
+export interface LockStateInput {
+  /** true=鎖定；false=解鎖 */
+  enabled: boolean;
+  /** 鎖定窗顯示訊息（聯絡學校等）；僅 enabled 時寫入 */
+  message?: string;
+  /** 鎖定窗顯示電話；僅 enabled 時寫入 */
+  phone?: string;
+}
+
+/**
+ * 建構「遠端鎖定/解鎖」狀態的一組 Registry 寫入命令。
+ *
+ * 寫入（HKLM）：
+ *   SOFTWARE\CoGrow\Agent\Lock\Message   = <訊息>   （僅 enable；Agent 鎖定窗顯示）
+ *   SOFTWARE\CoGrow\Agent\Lock\Phone     = <電話>   （僅 enable）
+ *   ...\Policies\System\DisableTaskMgr   = 1/0      （加固：鎖定期間禁用任務管理器）
+ *   SOFTWARE\CoGrow\Agent\Lock\Enabled   = 1/0      （**最後寫**，Agent watch 此鍵）
+ *
+ * Enabled 故意排最後：同一 SyncML session 內按序套用，確保 Agent 偵測到 Enabled=1 時
+ * Message/Phone 已就緒，避免閃現空白鎖定窗。
+ */
+export function buildLockState(input: LockStateInput): SyncMLCommand[] {
+  const flag = input.enabled ? 1 : 0;
+  const cmds: SyncMLCommand[] = [];
+
+  if (input.enabled) {
+    cmds.push(
+      buildRegistrySet({
+        hive: "HKLM",
+        path: AGENT_LOCK_REG_PATH,
+        entry: { name: "Message", type: "string", value: input.message ?? "" },
+      }),
+      buildRegistrySet({
+        hive: "HKLM",
+        path: AGENT_LOCK_REG_PATH,
+        entry: { name: "Phone", type: "string", value: input.phone ?? "" },
+      }),
+    );
+  }
+
+  // 加固：DisableTaskMgr 隨鎖定狀態切換（鎖定 1 / 解鎖 0）
+  cmds.push(
+    buildRegistrySet({
+      hive: "HKLM",
+      path: DISABLE_TASKMGR_REG_PATH,
+      entry: { name: "DisableTaskMgr", type: "int", value: flag },
+    }),
+  );
+
+  // Enabled 最後寫（Agent 監聽此鍵）
+  cmds.push(
+    buildRegistrySet({
+      hive: "HKLM",
+      path: AGENT_LOCK_REG_PATH,
+      entry: { name: "Enabled", type: "int", value: flag },
+    }),
+  );
+
+  return cmds;
 }
 
 // ============================================================

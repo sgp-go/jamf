@@ -95,9 +95,11 @@ const commandBodySchema = z
     command: z.enum(VALID_COMMANDS).openapi({
       example: "LOCK",
       description:
-        "Cross-platform: LOCK / WIPE / REBOOT. " +
-        "⚠️ LOCK on Windows degrades to Reboot — Windows 10/11 Pro has no immediate-lock CSP " +
-        "(real lock requires the Agent App push channel calling user32!LockWorkStation). " +
+        "Cross-platform: LOCK / WIPE / REBOOT (+ ENABLE_LOST_MODE / DISABLE_LOST_MODE). " +
+        "On Windows, LOCK == ENABLE_LOST_MODE: writes a lock-state Registry flag (no immediate-lock CSP " +
+        "on desktop) that the Agent App watches to show a full-screen lock window with contact info; " +
+        "DISABLE_LOST_MODE unlocks. REBOOT is a separate command (no longer used as a LOCK fallback). " +
+        "lostModeMessage / lostModePhone are shown on the Windows lock window and passed to Jamf Lost Mode on Apple. " +
         "Jamf-native enums (DEVICE_LOCK, ERASE_DEVICE, RESTART_DEVICE, etc.) only work for Apple devices; " +
         "Windows requests with these return 400.",
     }),
