@@ -22,6 +22,11 @@ builder.Services.AddSingleton<AgentConfigProvider>(sp =>
     var logger = sp.GetRequiredService<ILogger<AgentConfigProvider>>();
     return new AgentConfigProvider(() => registry.Load(), logger);
 });
+// AgentConfig 啟動快照：JitterScheduler 只用 DeviceId 算一次錯峰 offset（不變），
+// 注入快照即可。缺這條 → JitterScheduler(AgentConfig) 無法解析 → host 啟動崩潰
+// （pre-existing bug：單測走 internal ctor 繞過 DI，故未暴露）。
+builder.Services.AddSingleton<AgentConfig>(sp =>
+    sp.GetRequiredService<AgentConfigProvider>().Current);
 builder.Services.AddSingleton<JitterScheduler>();
 builder.Services.AddSingleton<DeviceFactsCollector>();
 
