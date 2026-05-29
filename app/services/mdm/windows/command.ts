@@ -310,6 +310,11 @@ async function triggerWnsPush(deviceUdid: string): Promise<void> {
       `[Win MDM] WNS channel expired (410)，清空 device ${deviceUdid} 的 channel uri`,
     );
     await upsertMdmDevice(deviceUdid, { wnsChannelUri: null });
+  } else if (result.throttled) {
+    console.warn(
+      `[Win MDM] WNS push 被限速放弃 (status=${result.status} retries=${result.retries ?? 0})：` +
+        `device ${deviceUdid} 将靠 polling 兜底；批量场景建议设 WNS_PUSH_RATE_PER_SEC 从源头限流`,
+    );
   } else if (!result.ok) {
     console.warn(
       `[Win MDM] WNS push 非 200: status=${result.status} wnsStatus=${result.wnsStatus ?? "?"}`,
