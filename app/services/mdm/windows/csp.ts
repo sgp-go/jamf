@@ -922,18 +922,62 @@ export function buildRegistryDelete(opts: {
 }
 
 // ============================================================
-// 遠端鎖定（Lock state，Agent 監聽的 Registry 信箱）
+// 遠端鎖定（Lock state，ADMX-backed Policy CSP）
 // ============================================================
 //
-// 桌面 Windows 無即時鎖屏 CSP（見本檔上方 RemoteLock 說明）。真鎖屏由 Agent App
-// 監聽以下 Registry 旗標後彈全螢幕鎖定窗實現。本函式只負責投遞鎖定狀態到設備 Registry，
-// 復用 Registry CSP（已真機驗證）。詳見 [[windows-lock-design]]。
+// 桌面 Windows 無即時鎖屏 CSP；真鎖屏由 Agent App 監聽 HKLM\SOFTWARE\CoGrow\Agent\Lock
+// 旗標後彈全螢幕鎖定窗實現。本段只負責把鎖定狀態投遞到該 Registry。
+//
+// ⚠️ 投遞通道 = ADMX-backed Policy CSP，**不是** Registry CSP。
+// Registry CSP（./Vendor/MSFT/Registry）是 Win10 Mobile 遺留，桌面版整體 404 不可用
+// （真機 task 57 三重證據：任意 verb/path 全 404 / 同設備 EDA CSP 200 / 官方文檔頁
+// 301 重定向到 Win10 Mobile EOL）。現代桌面 MDM 寫自定義註冊表的正解 = 注入自定義 ADMX
+// （ADMXInstall，一次性）→ Set Policy 切換。真機驗證：ADMX key 原始路徑直接落地、未被
+// 重定向到 Policies 子樹 → Agent 端 LockWatcher/LockState 讀取路徑零改動。
+// 詳見 brain/wiki/admx-backed-policy-registry-write.md。
+//
+// 限制：① 重複 ADMXInstall（Add）回 418 Already exists → ingest 只能一次（放
+// install-agent 流程，見 buildLockAdmxInstall），lock 命令只發 Set Policy。
+// ② DisableTaskMgr 加固走自定義 ADMX 被拒（425，Software\...\Policies\System 為系統
+// 保留策略區）→ 改由 Agent 端在拉起/關閉 LockUI 時自行寫 HKLM（LocalSystem 有權限），P2。
 
-/** Agent 監聽的鎖定狀態 Registry key（path 段，HKLM 下）*/
+/** Agent 監聽的鎖定狀態 Registry key（HKLM 下；ADMX policy key 原始落點）*/
 export const AGENT_LOCK_REG_PATH = "SOFTWARE/CoGrow/Agent/Lock";
-/** 任務管理器禁用策略所在 key（加固用）*/
-const DISABLE_TASKMGR_REG_PATH =
-  "SOFTWARE/Microsoft/Windows/CurrentVersion/Policies/System";
+
+/** ADMX ingest 的應用識別（決定 ADMXInstall LocURI 與 area 命名）*/
+const LOCK_ADMX_APP = "CoGrowMDM";
+const LOCK_ADMX_ID = "AgentPolicy";
+/** Policy CSP area = {App}~Policy~{Category}；Category 來自 ADMX <category name> */
+const LOCK_POLICY_AREA = `${LOCK_ADMX_APP}~Policy~CoGrowLock`;
+const LOCK_POLICY_NAME = "LockState";
+const LOCK_POLICY_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${LOCK_POLICY_AREA}/${LOCK_POLICY_NAME}`;
+
+/**
+ * 自定義 ADMX：定義 LockState 策略，落 HKLM\Software\CoGrow\Agent\Lock\{Enabled,Message,Phone}。
+ * 省略 ADML / presentation（MDM 不顯示 UI，已真機驗證可 ingest）。displayName 用字面值。
+ */
+const LOCK_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="cogrowmdm" namespace="CoGrow.MDM.Policies" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="CoGrowLock" displayName="CoGrow Lock" />
+  </categories>
+  <policies>
+    <policy name="LockState" class="Machine" displayName="Lock State" explainText="CoGrow remote lock" key="Software\\CoGrow\\Agent\\Lock" valueName="Enabled">
+      <parentCategory ref="CoGrowLock" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+      <elements>
+        <text id="EnterMessage" valueName="Message" />
+        <text id="EnterPhone" valueName="Phone" />
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>`;
 
 export interface LockStateInput {
   /** true=鎖定；false=解鎖 */
@@ -945,55 +989,53 @@ export interface LockStateInput {
 }
 
 /**
- * 建構「遠端鎖定/解鎖」狀態的一組 Registry 寫入命令。
+ * ADMX ingest 命令（Add ./.../Policy/ConfigOperations/ADMXInstall/{App}/Policy/{Id}）。
  *
- * 寫入（HKLM）：
- *   SOFTWARE\CoGrow\Agent\Lock\Message   = <訊息>   （僅 enable；Agent 鎖定窗顯示）
- *   SOFTWARE\CoGrow\Agent\Lock\Phone     = <電話>   （僅 enable）
- *   ...\Policies\System\DisableTaskMgr   = 1/0      （加固：鎖定期間禁用任務管理器）
- *   SOFTWARE\CoGrow\Agent\Lock\Enabled   = 1/0      （**最後寫**，Agent watch 此鍵）
+ * **一次性**：在 install-agent 流程注入（設備生命週期早期 ingest 一次）。重複 Add 同 App
+ * 回 418 Already exists（真機驗證），呼叫端可視為「已就緒」忽略。ingest 後 lock 只發
+ * buildLockState 的 Set Policy 命令。
+ */
+export function buildLockAdmxInstall(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target:
+      `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${LOCK_ADMX_ID}`,
+    format: "chr",
+    data: LOCK_ADMX_XML,
+  };
+}
+
+/**
+ * 建構「遠端鎖定/解鎖」命令（單條 Set Policy，ADMX-backed）。
  *
- * Enabled 故意排最後：同一 SyncML session 內按序套用，確保 Agent 偵測到 Enabled=1 時
- * Message/Phone 已就緒，避免閃現空白鎖定窗。
+ * enable  → Replace LockState = `<enabled/>` + Message/Phone（OS 寫 Enabled=1 + 字串值）
+ * disable → Replace LockState = `<disabled/>`（OS 寫 Enabled=0）
+ *
+ * data 是內嵌 XML 片段（format=chr），會被 syncml.ts escapeXml 二次轉義嵌入 SyncML <Data>，
+ * 設備端 Policy CSP 解析。message/phone 先 escapeAttr（內層 XML 屬性），避免破壞片段結構。
+ *
+ * 前置：設備須已 ingest LOCK_ADMX_XML（見 buildLockAdmxInstall）；否則回 404/500。
+ * 回傳陣列（保留與舊簽名一致，呼叫端按序 enqueue）；ADMX 單策略一次切換到位，無順序顧慮。
  */
 export function buildLockState(input: LockStateInput): SyncMLCommand[] {
-  const flag = input.enabled ? 1 : 0;
-  const cmds: SyncMLCommand[] = [];
-
+  let data: string;
   if (input.enabled) {
-    cmds.push(
-      buildRegistrySet({
-        hive: "HKLM",
-        path: AGENT_LOCK_REG_PATH,
-        entry: { name: "Message", type: "string", value: input.message ?? "" },
-      }),
-      buildRegistrySet({
-        hive: "HKLM",
-        path: AGENT_LOCK_REG_PATH,
-        entry: { name: "Phone", type: "string", value: input.phone ?? "" },
-      }),
-    );
+    const msg = escapeAttr(input.message ?? "");
+    const phone = escapeAttr(input.phone ?? "");
+    data = `<enabled/>` +
+      `<data id="EnterMessage" value="${msg}"/>` +
+      `<data id="EnterPhone" value="${phone}"/>`;
+  } else {
+    data = `<disabled/>`;
   }
-
-  // 加固：DisableTaskMgr 隨鎖定狀態切換（鎖定 1 / 解鎖 0）
-  cmds.push(
-    buildRegistrySet({
-      hive: "HKLM",
-      path: DISABLE_TASKMGR_REG_PATH,
-      entry: { name: "DisableTaskMgr", type: "int", value: flag },
-    }),
-  );
-
-  // Enabled 最後寫（Agent 監聽此鍵）
-  cmds.push(
-    buildRegistrySet({
-      hive: "HKLM",
-      path: AGENT_LOCK_REG_PATH,
-      entry: { name: "Enabled", type: "int", value: flag },
-    }),
-  );
-
-  return cmds;
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: LOCK_POLICY_TARGET,
+    format: "chr",
+    data,
+  }];
 }
 
 // ============================================================

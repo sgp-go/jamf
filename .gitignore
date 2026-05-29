@@ -13,6 +13,8 @@ data/test/*.pfx
 data/test/.tmp/
 data/test/tmp-*
 data/test/*.log
+# agent .msi 不入 git：~76MB 自包含 build 產物，每次 build ProductCode 不同，由 build.ps1 產出
+data/test/*.msi
 # push MSIX 不入 git：PFN 綁 cogrow Microsoft Store 註冊不可跨團隊共享
 # 接手須依 docs/scripts/README.md §接手 自行 build（見 data/test/README.md）
 data/test/CogrowMDMPush*.msix

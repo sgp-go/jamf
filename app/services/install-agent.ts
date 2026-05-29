@@ -4,7 +4,11 @@ import { db } from "~/db/client.ts";
 import { apps } from "~/db/schema/apps.ts";
 import { mdmCommands, mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
-import { buildMsiInstall, buildMsiStatusQuery } from "~/services/mdm/windows/csp.ts";
+import {
+  buildLockAdmxInstall,
+  buildMsiInstall,
+  buildMsiStatusQuery,
+} from "~/services/mdm/windows/csp.ts";
 import { getActiveSelfMdmConfig } from "~/services/mdm/self-mdm-config.ts";
 import { publishCommandEvent } from "~/services/mdm/command-events.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
@@ -154,13 +158,18 @@ export async function installAgentOnDevice(
     );
   }
 
-  // 組裝成 mdm_commands 行：MSI 派發 = Add（建 job）+ Exec（觸發下載安裝）+
-  // Status（查進度）三條；cspPath/verb/data/format 皆終態
+  // 組裝成 mdm_commands 行：
+  //   - policy_admx_install：一次性 ingest 遠端鎖定的自定義 ADMX（lock 投遞前置；
+  //     桌面 Registry CSP 死路，改走 ADMX-backed Policy CSP，見 csp.ts buildLockAdmxInstall）。
+  //     重裝 agent 時重複 Add 回 418 Already exists，無害（策略已就緒）。
+  //   - MSI 派發 = Add（建 job）+ Exec（觸發下載安裝）+ Status（查進度）三條。
+  // cspPath/verb/data/format 皆終態。
   const commandRows: {
-    commandType: "msi_install" | "msi_status_query";
+    commandType: "msi_install" | "msi_status_query" | "policy_admx_install";
     cmd: SyncMLCommand;
     commandUuid: string;
   }[] = [
+    { commandType: "policy_admx_install" as const, cmd: buildLockAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "msi_install" as const, cmd: msiInstall, commandUuid: crypto.randomUUID() }, // Add：創建 job
     { commandType: "msi_install" as const, cmd: msiInstallExec, commandUuid: crypto.randomUUID() }, // Exec：觸發下載安裝
     { commandType: "msi_status_query" as const, cmd: msiStatus, commandUuid: crypto.randomUUID() },
