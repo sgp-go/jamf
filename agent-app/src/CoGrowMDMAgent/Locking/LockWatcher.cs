@@ -13,6 +13,7 @@ namespace CoGrowMDMAgent.Locking;
 /// 比起額外開 RegNotify 線程更簡單穩健。本地 registry 讀取成本可忽略。
 ///
 /// 行為矩陣（每 tick）：
+///   先同步 DisableTaskMgr 跟隨鎖定狀態（鎖定=1 禁用任務管理器 / 解鎖=0 恢復），再：
 ///   Enabled=1 且 helper 未運行 → 拉起（涵蓋：剛鎖定 / 開機恢復 / helper 被殺後重啟）
 ///   Enabled=0                  → 不動（helper 自輪詢 Enabled=0 後 Application.Exit 自關）
 ///
@@ -23,6 +24,11 @@ public sealed class LockWatcher : BackgroundService
     private const string LockKeyPath = @"SOFTWARE\CoGrow\Agent\Lock";
     private const string LockUiProcessName = "CoGrowMDMAgent.LockUI";
     private const string LockUiExeName = "CoGrowMDMAgent.LockUI.exe";
+    // DisableTaskMgr 加固：系統保留策略區，MDM 自定義 ADMX 寫此區被拒（425），
+    // 故由 Agent（LocalSystem）承擔，隨鎖定狀態切換。
+    private const string TaskMgrPolicyKeyPath =
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+    private const string DisableTaskMgrValue = "DisableTaskMgr";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
 
     private readonly ILogger<LockWatcher> _logger;
@@ -64,7 +70,13 @@ public sealed class LockWatcher : BackgroundService
     [SupportedOSPlatform("windows")]
     private void TickWindows()
     {
-        if (!IsLockEnabled())
+        var locked = IsLockEnabled();
+
+        // 加固：DisableTaskMgr 跟隨鎖定狀態（堵死用任務管理器殺 LockUI 逃逸；解鎖恢復）。
+        // MDM 自定義 ADMX 寫此系統保留策略區被拒（425），故由本服務（LocalSystem）承擔。
+        SyncTaskMgrPolicy(locked);
+
+        if (!locked)
         {
             return; // 未鎖：helper 自輪詢自關，watcher 不需動作
         }
@@ -90,6 +102,30 @@ public sealed class LockWatcher : BackgroundService
         else
         {
             _logger.LogInformation("LockWatcher: 已在使用者 session 拉起鎖定窗 pid={Pid}", pid);
+        }
+    }
+
+    /// <summary>
+    /// 同步 DisableTaskMgr 到鎖定狀態（鎖定=1 禁用 / 解鎖=0 恢復）。冪等：值未變不寫，
+    /// 避免每 2s 無謂 IO。失敗只記警告不中斷（加固項，非鎖定核心）。
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private void SyncTaskMgrPolicy(bool locked)
+    {
+        var target = locked ? 1 : 0;
+        try
+        {
+            using var key = Registry.LocalMachine.CreateSubKey(TaskMgrPolicyKeyPath);
+            var current = key.GetValue(DisableTaskMgrValue) as int?;
+            if (current != target)
+            {
+                key.SetValue(DisableTaskMgrValue, target, RegistryValueKind.DWord);
+                _logger.LogInformation("DisableTaskMgr {From} → {To}", current, target);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "同步 DisableTaskMgr 失敗（非致命，繼續）");
         }
     }
 
