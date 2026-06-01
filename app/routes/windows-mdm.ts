@@ -32,6 +32,7 @@ import {
   buildAppInventoryConfig,
   buildAppInventoryFetch,
   buildGetPushChannelUri,
+  buildLockAdmxInstall,
   buildMsixInstall,
   buildMsixInstallAddNode,
   buildMsixUninstall,
@@ -640,6 +641,33 @@ w.post("/api/mdm/win/devices/:udid/push", async (c) => {
     }
     throw e;
   }
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/provision-lock-policy — 補發遠端鎖定的 ADMX ingest
+ *
+ * 遠端鎖定走 ADMX-backed Policy CSP（Registry CSP 桌面死路，見 csp.ts buildLockAdmxInstall）。
+ * 新設備由 install-agent 流程自動注入此 ADMX；本端點供對「存量設備」（install-agent 之前
+ * 無 ADMXInstall）一次性補 ingest，使其具備 lock 投遞能力。
+ *
+ * 重複對已 ingest 的設備調用：設備回 418 Already exists（命令標 error），無害——策略已就緒。
+ */
+w.post("/api/mdm/win/devices/:udid/provision-lock-policy", async (c) => {
+  const udid = c.req.param("udid");
+  const device = await getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  const commandUuid = await enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "policy_admx_install",
+    command: buildLockAdmxInstall(),
+  });
+  return c.json({
+    commandUuid,
+    note:
+      "Lock ADMX ingest queued. 已 ingest 的設備會回 418（已就緒，無害）。",
+  });
 });
 
 /** POST /api/mdm/win/devices/:udid/reboot — 排入 Reboot 命令 */
