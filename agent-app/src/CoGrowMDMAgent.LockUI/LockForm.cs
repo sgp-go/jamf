@@ -104,9 +104,51 @@ public sealed class LockForm : Form
         ForceForeground(); // 維持置頂
     }
 
+    /// <summary>
+    /// 強制搶前台。LockUI 由 session 0 服務拉起，Windows 不授予前台激活權，
+    /// 純 WinForms TopMost/Activate/BringToFront 無法蓋過使用者正在操作的窗口。
+    /// 組合拳：① 模擬 Alt 鍵騙取激活權 → ② AttachThreadInput 掛到前台線程 →
+    /// ③ SetWindowPos HWND_TOPMOST → ④ SetForegroundWindow → ⑤ WinForms 兜底。
+    /// </summary>
     private void ForceForeground()
     {
         if (IsDisposed) return;
+        var handle = Handle;
+
+        // ① 模擬 Alt 鍵按放：Windows 認為有使用者輸入 → 解鎖前台激活限制
+        NativeMethods.keybd_event(NativeMethods.VK_MENU, 0, 0, UIntPtr.Zero);
+        NativeMethods.keybd_event(NativeMethods.VK_MENU, 0, NativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+
+        // ② AttachThreadInput：掛到當前前台窗口的線程，暫時共享輸入隊列
+        var foregroundWnd = NativeMethods.GetForegroundWindow();
+        var foregroundThread = NativeMethods.GetWindowThreadProcessId(foregroundWnd, out _);
+        var currentThread = NativeMethods.GetCurrentThreadId();
+
+        bool attached = false;
+        if (foregroundThread != currentThread && foregroundThread != 0)
+        {
+            attached = NativeMethods.AttachThreadInput(currentThread, foregroundThread, true);
+        }
+
+        try
+        {
+            // ③ Win32 SetWindowPos HWND_TOPMOST（比 WinForms TopMost 屬性更可靠）
+            NativeMethods.SetWindowPos(handle, NativeMethods.HWND_TOPMOST, 0, 0, 0, 0,
+                NativeMethods.SWP_NOMOVE | NativeMethods.SWP_NOSIZE | NativeMethods.SWP_SHOWWINDOW);
+
+            // ④ 搶前台焦點
+            NativeMethods.ShowWindow(handle, NativeMethods.SW_SHOW);
+            NativeMethods.SetForegroundWindow(handle);
+        }
+        finally
+        {
+            if (attached)
+            {
+                NativeMethods.AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+
+        // ⑤ WinForms 層兜底
         TopMost = true;
         Activate();
         BringToFront();
