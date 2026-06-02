@@ -21,17 +21,52 @@
 .PARAMETER CertThumbprint
   可選；傳入則對 .exe / .msi 簽名（透傳給 worktree 的 build.ps1）。
 
+.PARAMETER EmitManifest
+  可選；產出 JSON manifest（version/sha256/productCode/fileUrl/file）並在末行打印
+  MANIFEST=<path>，供自動回滾編排（app/services/agent-rollback.ts buildRollforwardViaPwsh）消費。
+
+.PARAMETER FileUrl
+  可選；MSI 上傳到下載託管後的路徑（相對 publicBaseUrl 或絕對 URL），寫入 manifest.fileUrl。
+  自動化據此把 roll-forward 註冊為可派發 app。留空則 manifest.fileUrl 為空、由上層補。
+
 .EXAMPLE
   # 當前壞版本 1.3.1.0，回滾到 1.2.0.0 的代碼，用更高版本號 1.3.1.1 重打：
   pwsh -File build-rollforward.ps1 -SourceRef agent-v1.2.0.0 -Version 1.3.1.1 -CertThumbprint ABC123...
+
+.EXAMPLE
+  # 自動回滾鏈用：產出 manifest 供編排消費
+  pwsh -File build-rollforward.ps1 -SourceRef agent-v1.2.0.0 -Version 1.3.1.1 -EmitManifest `
+       -FileUrl /api/v1/apps/rf/download/CoGrowMDMAgent-rollforward-1.3.1.1.msi
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$SourceRef,
     [Parameter(Mandatory = $true)][string]$Version,
     [ValidateSet("Release", "Debug")][string]$Configuration = "Release",
-    [string]$CertThumbprint
+    [string]$CertThumbprint,
+    [switch]$EmitManifest,
+    [string]$FileUrl
 )
+
+# MSI ProductCode 提取（WindowsInstaller COM）。EDA-CSP install 需 ProductCode 作 app.bundleId。
+function Get-MsiProductCode {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    try {
+        $db = $installer.GetType().InvokeMember(
+            "OpenDatabase", "InvokeMethod", $null, $installer, @($Path, 0))
+        $view = $db.GetType().InvokeMember(
+            "OpenView", "InvokeMethod", $null, $db,
+            @("SELECT Value FROM Property WHERE Property='ProductCode'"))
+        $view.GetType().InvokeMember("Execute", "InvokeMethod", $null, $view, $null) | Out-Null
+        $record = $view.GetType().InvokeMember("Fetch", "InvokeMethod", $null, $view, $null)
+        if (-not $record) { throw "MSI 無 ProductCode 屬性：$Path" }
+        return $record.GetType().InvokeMember("StringData", "GetProperty", $null, $record, 1)
+    }
+    finally {
+        [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($installer) | Out-Null
+    }
+}
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
@@ -90,6 +125,31 @@ try {
     Write-Host "Signed  : $(if ($CertThumbprint) { 'yes' } else { 'NO（傳 -CertThumbprint 簽名）' })"
     Write-Host ""
     Write-Host "→ 用 2b 灰度端點派此包：候選 = 當前版本 != $Version（涵蓋壞版本設備）"
+
+    if ($EmitManifest) {
+        # 自動回滾編排消費：version/sha256/productCode/fileUrl/file → 註冊為可派發 app
+        $productCode = Get-MsiProductCode -Path $dest
+        $manifest = [ordered]@{
+            version       = $Version
+            sourceRef     = $SourceRef
+            sha256        = $hash
+            productCode   = $productCode
+            fileUrl       = $FileUrl
+            file          = $dest
+            fileSizeBytes = (Get-Item $dest).Length
+            signed        = [bool]$CertThumbprint
+        }
+        $manifestPath = Join-Path $outDir "CoGrowMDMAgent-rollforward-$Version.manifest.json"
+        $manifest | ConvertTo-Json | Set-Content -Path $manifestPath -Encoding UTF8
+        Write-Host ""
+        Write-Host "ProductCode : $productCode"
+        Write-Host "Manifest    : $manifestPath"
+        if (-not $FileUrl) {
+            Write-Host "⚠️ FileUrl 為空：上傳 MSI 後須補 manifest.fileUrl，自動化才能註冊派發"
+        }
+        # 末行約定格式，buildRollforwardViaPwsh 以正則解析
+        Write-Host "MANIFEST=$manifestPath"
+    }
 }
 finally {
     & git -C $repoRoot worktree remove $worktree --force 2>$null
