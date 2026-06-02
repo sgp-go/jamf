@@ -38,17 +38,28 @@
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <!--
-      Agent config injected at install time via msiexec public properties.
-      The backend (install-agent) passes these on the EDA-CSP MsiInstallJob
-      CommandLine: DEVICE_ID / AGENT_TOKEN / API_ENDPOINT / TENANT_ID.
-      Secure="yes" lets public properties survive the managed (system-context,
-      UI-less) install that MDM performs. Registry CSP is unavailable on
-      Win10 22H2 (every LocURI returns 404), so config lands via the MSI itself.
+      Agent config 由 msiexec 公開屬性寫入 HKLM（Registry CSP 在 Win10 22H2 全 404
+      不可用，config 只能隨 MSI property 注入）。backend install-agent 經 EDA-CSP
+      MsiInstallJob CommandLine 傳 DEVICE_ID / AGENT_TOKEN / API_ENDPOINT / TENANT_ID。
+
+      升級保留（方案 C，修 NeverOverwrite 清空 bug）：每個屬性掛 RegistrySearch 從現有
+      註冊表值回填。升級不帶命令行屬性時，AppSearch（在 RemoveExistingProducts 之前跑）
+      讀到現值入屬性 → component 寫回原值 = 保留；首裝/恢復帶命令行屬性時 AppSearch 讀不到
+      → 寫入命令行值。backend 無 token 明文無法升級重傳，故靠設備自身註冊表回填。
+      Secure="yes" 讓公開屬性挺過 system-context 靜默安裝且不進 MSI log 明文。
     -->
-    <Property Id="DEVICE_ID" Secure="yes" />
-    <Property Id="AGENT_TOKEN" Secure="yes" />
-    <Property Id="API_ENDPOINT" Secure="yes" />
-    <Property Id="TENANT_ID" Secure="yes" />
+    <Property Id="DEVICE_ID" Secure="yes">
+      <RegistrySearch Id="SearchDeviceId" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="device_id" Type="raw" />
+    </Property>
+    <Property Id="AGENT_TOKEN" Secure="yes">
+      <RegistrySearch Id="SearchAgentToken" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="agent_token" Type="raw" />
+    </Property>
+    <Property Id="API_ENDPOINT" Secure="yes">
+      <RegistrySearch Id="SearchApiEndpoint" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="api_endpoint" Type="raw" />
+    </Property>
+    <Property Id="TENANT_ID" Secure="yes">
+      <RegistrySearch Id="SearchTenantId" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="tenant_id" Type="raw" />
+    </Property>
 
     <!--
       Self-protection：從「新增/移除程式」隱藏條目，讓學生無法用 GUI 卸載。
@@ -87,29 +98,22 @@
   -->
   <Fragment>
     <!--
-      升級保留配置（修 MajorUpgrade 清空 AgentConfig bug）：
-      MajorUpgrade Schedule="afterInstallInitialize" 會在新版安裝前先移除舊產品。
-      若此 component 隨舊產品一起卸載，device_id/agent_token/api_endpoint/tenant_id
-      四個值會被刪；新版安裝時 msiexec 公開屬性多半未帶（升級走 EDA-CSP MajorUpgrade，
-      backend 不重傳 enrollment property），於是 RegistryValue 寫入空字串 → 配置被清空，
-      service 啟動即因 RegistryConfig.ReadRequired 拋「value missing」而崩。
+      升級保留配置（方案 C：RegistrySearch 回填，取代失敗的 NeverOverwrite）。
 
-      Permanent="yes"   → 任何卸載（含升級的 RemoveExistingProducts）都不移除本 component，
-                          四個注冊表值在升級過程中存活。
-      NeverOverwrite="yes" → 安裝時若 KeyPath（device_id）已存在則整個 component 跳過，
-                          不會用空屬性覆蓋既有值。首裝（值不存在）仍正常寫入。
+      為何不用 NeverOverwrite（2026-06-02 真機驗證踩坑）：NeverOverwrite 在 AppSearch
+      階段（舊 config 還在）就判定 KeyPath 存在 → 標記 component 不安裝；之後
+      afterInstallInitialize 移除舊產品刪掉 config → 新值永不寫入 → 升級清空 config
+      （task 57 真機實證，連 token 一併清掉）。
 
-      取捨：Permanent 使「管理員顯式卸載 agent」時這四個值殘留 HKLM（含 agent_token 明文）。
-      設備級 token 卸載後可在服務端吊銷，殘留風險可控；配置「更新」走 MDM Policy CSP 運行時
-      TryReload，不靠重裝 MSI（重 enroll 換 token 同理）。
-      ⚠️ 此改動無法在 Mac 驗證，須 Windows wix build + 真機帶空屬性升級驗證 device_id 保留。
+      方案 C：四個屬性掛 RegistrySearch（見上方 Property）回填現值，component 正常寫入，
+      無 NeverOverwrite / 無 Permanent。升級不帶命令行屬性 → 回填現值寫回 = 保留；
+      首裝/恢復帶命令行屬性 → 寫入。無 Permanent → 真卸載乾淨刪除（無 token 殘留）。
+      ⚠️ AppSearch vs 命令行屬性優先級 + 回填時序須真機兩跳驗證（Mac 不可校驗）。
     -->
     <Component
       Id="AgentConfigRegistry"
       Directory="INSTALLFOLDER"
-      Guid="7B123AC5-EDE0-4EB9-90C1-6578E014C81A"
-      Permanent="yes"
-      NeverOverwrite="yes">
+      Guid="7B123AC5-EDE0-4EB9-90C1-6578E014C81A">
       <!--
         ForceCreateOnInstall="yes" + Id 是 WiX 4 對「掛 PermissionEx 的 RegistryKey」
         的硬要求（WIX5063）。Id 在 RegistryKey 表中作為主鍵，並讓 util ext 找到掛點。

@@ -40,13 +40,21 @@
           ErrorControl="normal"
           Interactive="no" />
 
+        <!--
+          Wait="no"：MSI 安裝時不阻塞等 service 進入 running。
+          self-contained single-file exe 在 LocalSystem 帳戶首次冷啟動需解壓 .NET runtime
+          到 systemprofile TEMP，> MSI 預設 ~30s 等待 → ServiceControl 報 1920（service
+          failed to start）→ 整個升級回滾（真機 2026-06-02 EDA/手動升級皆會撞）。
+          改 Wait="no" 後 MSI 觸發啟動即返回，service（StartType=auto）後台完成冷啟動；
+          「裝成功 ≠ service 健康」由啟動自檢 Event Log + 健康驗證（2c silent 告警）兜底。
+        -->
         <ServiceControl
           Id="CoGrowMDMAgentServiceControl"
           Name="CoGrowMDMAgent"
           Start="install"
           Stop="both"
           Remove="uninstall"
-          Wait="yes" />
+          Wait="no" />
 
         <!--
           Service Recovery：兼顧「防學生強制 stop / kill」與「壞 build 崩潰循環安全網」。
