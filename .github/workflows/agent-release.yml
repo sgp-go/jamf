@@ -1,0 +1,76 @@
+name: Agent Release
+
+# tag agent-v* 觸發：構建 agent MSI + 歸檔。
+# 源碼 tag 是回滾 roll-forward 的依據（build-rollforward.ps1 -SourceRef <tag>）；
+# MSI artifact + SHA256 供審計與應急取用。
+# 設計見 brain/projects/jamf-explore/wiki/agent-rollback-strategy.md。
+on:
+  push:
+    tags:
+      - 'agent-v*'
+
+permissions:
+  contents: write  # 建 GitHub Release 需要
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX
+        run: dotnet tool install --global wix
+
+      - name: Derive version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          # agent-v1.2.0.0 → 1.2.0.0
+          $v = "${{ github.ref_name }}" -replace '^agent-v', ''
+          if ($v -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "tag 版本格式須 agent-va.b.c.d：$v" }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # 可選簽名：repo secret SIGNING_CERT_THUMBPRINT 設了才簽（github-hosted runner
+      # 通常無 OV 證書；正式簽名走自託管 runner 或下游簽名流程，產出未簽名包亦可歸檔）。
+      - name: Build MSI
+        shell: pwsh
+        working-directory: agent-app
+        env:
+          SIGNING_CERT_THUMBPRINT: ${{ secrets.SIGNING_CERT_THUMBPRINT }}
+        run: |
+          $p = @{ Version = "${{ steps.ver.outputs.version }}" }
+          if ($env:SIGNING_CERT_THUMBPRINT) { $p.CertThumbprint = $env:SIGNING_CERT_THUMBPRINT }
+          pwsh -File build.ps1 @p
+
+      - name: Compute hash
+        id: hash
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem agent-app/build/msi/*.msi | Select-Object -First 1
+          if (-not $msi) { throw "no .msi produced" }
+          $h = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash.ToLower()
+          "sha256=$h" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoGrowMDMAgent-${{ steps.ver.outputs.version }}-msi
+          path: agent-app/build/msi/*.msi
+          retention-days: 90
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: agent-app/build/msi/*.msi
+          body: |
+            Agent ${{ steps.ver.outputs.version }}
+            SHA256: ${{ steps.hash.outputs.sha256 }}
+
+            回滾：MSI 擋 downgrade，回滾用 roll-forward —
+            `pwsh -File agent-app/build-rollforward.ps1 -SourceRef <已知好版本 tag> -Version <更高版本號>`
+            然後用灰度端點 POST /agent-rollout 派發。
