@@ -42,24 +42,47 @@
       不可用，config 只能隨 MSI property 注入）。backend install-agent 經 EDA-CSP
       MsiInstallJob CommandLine 傳 DEVICE_ID / AGENT_TOKEN / API_ENDPOINT / TENANT_ID。
 
-      升級保留（方案 C，修 NeverOverwrite 清空 bug）：每個屬性掛 RegistrySearch 從現有
-      註冊表值回填。升級不帶命令行屬性時，AppSearch（在 RemoveExistingProducts 之前跑）
-      讀到現值入屬性 → component 寫回原值 = 保留；首裝/恢復帶命令行屬性時 AppSearch 讀不到
-      → 寫入命令行值。backend 無 token 明文無法升級重傳，故靠設備自身註冊表回填。
+      升級保留（方案 C+，修 RegistrySearch 蓋掉命令行 token 的 bug，2026-06-02 真機抓到）：
+      **命令行屬性優先，缺失才回填**。原方案把 RegistrySearch 直接掛主屬性 → 升級時舊註冊表
+      值仍在 → AppSearch 用舊值蓋掉了命令行傳入的新值（token 旋轉/重綁永遠到不了設備 → 上報
+      401）。正解：RegistrySearch 讀現值入「影子屬性」EXISTING_*，再用 SetProperty 在 AppSearch
+      之後、**僅當主屬性未由命令行提供時**才用影子值回填。
+      - rollout/install-agent 總是帶命令行屬性 → 命令行新值勝出（token 能更新到設備）。
+      - 不帶（純升級）→ 回填現值 = 保留，升級不丟 config。
+      AppSearch 在 RemoveExistingProducts 之前跑，影子屬性在舊值被刪前已讀到。
       Secure="yes" 讓公開屬性挺過 system-context 靜默安裝且不進 MSI log 明文。
     -->
-    <Property Id="DEVICE_ID" Secure="yes">
+    <Property Id="DEVICE_ID" Secure="yes" />
+    <Property Id="AGENT_TOKEN" Secure="yes" />
+    <Property Id="API_ENDPOINT" Secure="yes" />
+    <Property Id="TENANT_ID" Secure="yes" />
+
+    <!-- 影子屬性：RegistrySearch 從現有註冊表回填現值（AppSearch 階段，RemoveExistingProducts 之前）。 -->
+    <Property Id="EXISTING_DEVICE_ID">
       <RegistrySearch Id="SearchDeviceId" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="device_id" Type="raw" />
     </Property>
-    <Property Id="AGENT_TOKEN" Secure="yes">
+    <Property Id="EXISTING_AGENT_TOKEN">
       <RegistrySearch Id="SearchAgentToken" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="agent_token" Type="raw" />
     </Property>
-    <Property Id="API_ENDPOINT" Secure="yes">
+    <Property Id="EXISTING_API_ENDPOINT">
       <RegistrySearch Id="SearchApiEndpoint" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="api_endpoint" Type="raw" />
     </Property>
-    <Property Id="TENANT_ID" Secure="yes">
+    <Property Id="EXISTING_TENANT_ID">
       <RegistrySearch Id="SearchTenantId" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="tenant_id" Type="raw" />
     </Property>
+
+    <!--
+      命令行未提供主屬性時，才用影子現值回填（保留升級配置）；提供則命令行值勝出（不被覆蓋）。
+      鏈式 After 確保順序且不撞 sequence 號；Sequence=both 覆蓋互動/靜默兩種安裝。
+    -->
+    <SetProperty Action="BackfillDeviceId" Id="DEVICE_ID" Value="[EXISTING_DEVICE_ID]"
+      After="AppSearch" Sequence="both" Condition="NOT DEVICE_ID AND EXISTING_DEVICE_ID" />
+    <SetProperty Action="BackfillAgentToken" Id="AGENT_TOKEN" Value="[EXISTING_AGENT_TOKEN]"
+      After="BackfillDeviceId" Sequence="both" Condition="NOT AGENT_TOKEN AND EXISTING_AGENT_TOKEN" />
+    <SetProperty Action="BackfillApiEndpoint" Id="API_ENDPOINT" Value="[EXISTING_API_ENDPOINT]"
+      After="BackfillAgentToken" Sequence="both" Condition="NOT API_ENDPOINT AND EXISTING_API_ENDPOINT" />
+    <SetProperty Action="BackfillTenantId" Id="TENANT_ID" Value="[EXISTING_TENANT_ID]"
+      After="BackfillApiEndpoint" Sequence="both" Condition="NOT TENANT_ID AND EXISTING_TENANT_ID" />
 
     <!--
       Self-protection：從「新增/移除程式」隱藏條目，讓學生無法用 GUI 卸載。
@@ -105,10 +128,12 @@
       afterInstallInitialize 移除舊產品刪掉 config → 新值永不寫入 → 升級清空 config
       （task 57 真機實證，連 token 一併清掉）。
 
-      方案 C：四個屬性掛 RegistrySearch（見上方 Property）回填現值，component 正常寫入，
-      無 NeverOverwrite / 無 Permanent。升級不帶命令行屬性 → 回填現值寫回 = 保留；
-      首裝/恢復帶命令行屬性 → 寫入。無 Permanent → 真卸載乾淨刪除（無 token 殘留）。
-      ⚠️ AppSearch vs 命令行屬性優先級 + 回填時序須真機兩跳驗證（Mac 不可校驗）。
+      方案 C+：影子屬性 EXISTING_* 掛 RegistrySearch 讀現值，SetProperty 在命令行未提供主屬性
+      時才回填（見上方 Property/SetProperty）。component 正常寫入 [DEVICE_ID] 等主屬性，
+      無 NeverOverwrite / 無 Permanent。命令行帶屬性 → 命令行值勝出（token 能更新）；
+      不帶 → 回填現值 = 保留。無 Permanent → 真卸載乾淨刪除（無 token 殘留）。
+      ⚠️ 命令行屬性優先級 + 回填時序須真機驗證（Mac 不可校驗）：①帶 property 升級覆蓋新值
+      ②不帶 property 升級保留現值。
     -->
     <Component
       Id="AgentConfigRegistry"
