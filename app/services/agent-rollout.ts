@@ -1,8 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "~/db/client.ts";
+import { agentReports } from "~/db/schema/agent.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
-import { getLatestAgentReport } from "~/services/agent.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
 import {
   applySelection,
@@ -78,8 +78,11 @@ async function resolveTargetVersion(tenantId: string, appId: string): Promise<st
 
 /**
  * 租戶 windows 設備 + 各自最新上報的版本/時間。
- * core query 避免 findMany list 慢（見 devices.ts 註記）；逐台 findFirst 取最新上報
- * （灰度子集規模有限，可接受）。
+ *
+ * 兩個查詢、與設備數無關（8000 台不再是 8000 次 findFirst）：
+ *   1. 租戶 windows 設備列表（含從未上報的，core query 避免 findMany list 慢）
+ *   2. DISTINCT ON (deviceId) … ORDER BY deviceId, reportedAt DESC：一次取每設備最新上報
+ * 再於記憶體 map 合併（無上報的設備 → version/time 為 null）。
  */
 async function loadDeviceVersions(tenantId: string): Promise<DeviceHealthInput[]> {
   const devices = await db
@@ -87,16 +90,28 @@ async function loadDeviceVersions(tenantId: string): Promise<DeviceHealthInput[]
     .from(mdmDevices)
     .where(and(eq(mdmDevices.tenantId, tenantId), eq(mdmDevices.platform, "windows")));
 
-  const out: DeviceHealthInput[] = [];
-  for (const d of devices) {
-    const latest = await getLatestAgentReport({ tenantId, deviceId: d.id });
-    out.push({
+  // 每設備最新上報：DISTINCT ON (deviceId) 取 reportedAt 最大的那筆。命中
+  // agent_reports_device_time_idx(deviceId, reportedAt)。
+  const latest = await db
+    .selectDistinctOn([agentReports.deviceId], {
+      deviceId: agentReports.deviceId,
+      appVersion: agentReports.appVersion,
+      reportedAt: agentReports.reportedAt,
+    })
+    .from(agentReports)
+    .where(eq(agentReports.tenantId, tenantId))
+    .orderBy(agentReports.deviceId, desc(agentReports.reportedAt));
+
+  const latestByDevice = new Map(latest.map((r) => [r.deviceId, r]));
+
+  return devices.map((d) => {
+    const r = latestByDevice.get(d.id);
+    return {
       deviceId: d.id,
-      currentVersion: latest?.appVersion ?? null,
-      lastReportedAt: latest?.reportedAt ?? null,
-    });
-  }
-  return out;
+      currentVersion: r?.appVersion ?? null,
+      lastReportedAt: r?.reportedAt ?? null,
+    };
+  });
 }
 
 export async function rolloutAgentVersion(input: RolloutInput): Promise<RolloutResult> {
