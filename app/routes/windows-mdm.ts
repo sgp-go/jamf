@@ -670,6 +670,80 @@ w.post("/api/mdm/win/devices/:udid/provision-lock-policy", async (c) => {
   });
 });
 
+/**
+ * POST /api/mdm/win/devices/provision-lock-policy/bulk — 批量補發遠端鎖定 ADMX ingest
+ *
+ * 供「存量設備」批量補 ingest 鎖定策略（單台版見上方端點）。8000 台鋪開時用。
+ * Body 二選一：
+ *   { all: true }              — 對所有 windows 設備補 ingest
+ *   { deviceUdids: string[] }  — 對指定設備補 ingest
+ *
+ * 命令僅入庫，設備靠各自 poll 週期（1-60min）自然錯峰拉取，批量入隊不發 WNS，
+ * 故無 429 風險（錯峰由 poll 週期天然分散，不需限速）。重複對已 ingest 設備
+ * 調用：設備回 418（已就緒，無害）。不存在/非 windows 設備記入 failures 不中斷整批。
+ */
+w.post("/api/mdm/win/devices/provision-lock-policy/bulk", async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid json body" }, 400);
+  }
+
+  const failures: Array<{ udid: string; error: string }> = [];
+  let udids: string[];
+
+  if (body.all === true) {
+    // 全部 windows 設備：list 已保證 platform，無需逐台重查 getMdmDevice。
+    // udid schema 可空，過濾掉未完成 enrollment 的空 udid 設備。
+    udids = (await listMdmDevicesByPlatform("windows"))
+      .map((d) => d.udid)
+      .filter((u): u is string => u !== null);
+  } else if (Array.isArray(body.deviceUdids) && body.deviceUdids.length > 0) {
+    // 指定設備：逐台驗證存在且為 windows，不存在的記入 failures 不中斷。
+    udids = [];
+    for (const udid of body.deviceUdids as string[]) {
+      const device = await getMdmDevice(udid);
+      if (!device || device.platform !== "windows") {
+        failures.push({ udid, error: "device not found" });
+        continue;
+      }
+      udids.push(udid);
+    }
+  } else {
+    return c.json(
+      { error: "either { all: true } or { deviceUdids: string[] } required" },
+      400,
+    );
+  }
+
+  // 命令內容對所有設備相同，構造一次複用（單台端點每次重建）。
+  const admx = buildLockAdmxInstall();
+  let queued = 0;
+  for (const udid of udids) {
+    try {
+      await enqueueWindowsCommand({
+        deviceUdid: udid,
+        commandType: "policy_admx_install",
+        command: admx,
+      });
+      queued++;
+    } catch (e) {
+      failures.push({ udid, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return c.json({
+    total: queued + failures.length,
+    queued,
+    failed: failures.length,
+    failures,
+    note:
+      "Lock ADMX ingest 已批量入隊。設備靠各自 poll 週期(1-60min)自然錯峰拉取，" +
+      "批量入隊不發 WNS，無 429 風險。已 ingest 設備回 418(無害)。",
+  });
+});
+
 /** POST /api/mdm/win/devices/:udid/reboot — 排入 Reboot 命令 */
 w.post("/api/mdm/win/devices/:udid/reboot", async (c) => {
   const udid = c.req.param("udid");
