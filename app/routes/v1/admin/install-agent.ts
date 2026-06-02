@@ -4,6 +4,7 @@ import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
+import { rolloutAgentVersion } from "~/services/agent-rollout.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/devices/{deviceId}/install-agent
@@ -100,6 +101,106 @@ installAgentAdminApp.openapi(installAgentSpec, async (c) => {
       appId: body.appId,
       apiEndpoint: body.apiEndpoint,
       commandIds: result.commandIds,
+    },
+  });
+  return c.json({ ok: true as const, data: result }, 202);
+});
+
+// ============================================================
+// 灰度發佈：派 agent 版本到設備子集（分批升級，防壞 build 一次推全量災難）
+// ============================================================
+
+const rolloutParamsSchema = z.object({
+  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+});
+
+const rolloutBody = z
+  .object({
+    appId: z.string().uuid().openapi({
+      description: "目標 agent .msi App ID（目標版本來自 app.version）",
+    }),
+    apiEndpoint: z.string().url().openapi({
+      example: "https://api.cogrow.com/api/agent/v1",
+    }),
+    selection: z
+      .discriminatedUnion("mode", [
+        z.object({
+          mode: z.literal("deviceIds"),
+          deviceIds: z.array(z.string().uuid()).min(1),
+        }),
+        z.object({ mode: z.literal("count"), count: z.number().int().min(1) }),
+        z.object({ mode: z.literal("percentage"), percent: z.number().min(1).max(100) }),
+      ])
+      .openapi({
+        description:
+          "本批設備選擇：deviceIds 指定 / count 取前 N / percentage 取候選百分比。" +
+          "候選 = 租戶 windows 設備中當前版本 != 目標版本者，逐批調用自然收斂。",
+      }),
+  })
+  .openapi("AgentRolloutInput");
+
+const rolloutResponse = z
+  .object({
+    targetVersion: z.string(),
+    eligible: z.number().openapi({ description: "候選數（當前版本 != 目標版本）" }),
+    selected: z.number().openapi({ description: "本批選中派發數" }),
+    skipped: z.number().openapi({ description: "已是目標版本、跳過數" }),
+    queued: z.number(),
+    failed: z.number(),
+    results: z.array(
+      z.object({
+        deviceId: z.string(),
+        commandIds: z.array(z.string()).optional(),
+        error: z.string().optional(),
+      }),
+    ),
+  })
+  .openapi("AgentRolloutResult");
+
+const rolloutSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/agent-rollout",
+  tags: ["Admin: install-agent"],
+  security: [{ BearerAuth: [] }],
+  summary: "灰度派發 Agent 版本到設備子集（分批升級）",
+  request: {
+    params: rolloutParamsSchema,
+    body: { content: { "application/json": { schema: rolloutBody } } },
+  },
+  responses: {
+    202: {
+      description: "本批命令已排入隊列",
+      content: { "application/json": { schema: successSchema(rolloutResponse) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+installAgentAdminApp.openapi(rolloutSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const result = await rolloutAgentVersion({
+    tenantId,
+    appId: body.appId,
+    apiEndpoint: body.apiEndpoint,
+    selection: body.selection,
+  });
+  // 只記匯總（results 可能含上百台，全記會撐大 audit 行）
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "agent.rollout",
+    resourceType: "tenant",
+    resourceId: tenantId,
+    payload: {
+      appId: body.appId,
+      targetVersion: result.targetVersion,
+      selection: body.selection,
+      eligible: result.eligible,
+      selected: result.selected,
+      skipped: result.skipped,
+      queued: result.queued,
+      failed: result.failed,
     },
   });
   return c.json({ ok: true as const, data: result }, 202);
