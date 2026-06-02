@@ -107,6 +107,7 @@
     <Component
       Id="AgentConfigRegistry"
       Directory="INSTALLFOLDER"
+      Guid="7B123AC5-EDE0-4EB9-90C1-6578E014C81A"
       Permanent="yes"
       NeverOverwrite="yes">
       <!--
@@ -162,7 +163,7 @@
       </Directory>
     </StandardDirectory>
 
-    <Component Id="AgentDataFolder" Directory="AGENTDATAFOLDER" Guid="*">
+    <Component Id="AgentDataFolder" Directory="AGENTDATAFOLDER" Guid="52E1C4C0-7D34-46D2-BFDE-3A0BFF13CF71">
       <CreateFolder>
         <util:PermissionEx User="SYSTEM" GenericAll="yes" />
         <util:PermissionEx User="Administrators" GenericAll="yes" />
