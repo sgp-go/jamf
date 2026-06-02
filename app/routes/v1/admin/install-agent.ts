@@ -4,7 +4,7 @@ import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
-import { rolloutAgentVersion } from "~/services/agent-rollout.ts";
+import { getRolloutHealth, rolloutAgentVersion } from "~/services/agent-rollout.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/devices/{deviceId}/install-agent
@@ -204,4 +204,58 @@ installAgentAdminApp.openapi(rolloutSpec, async (c) => {
     },
   });
   return c.json({ ok: true as const, data: result }, 202);
+});
+
+// ============================================================
+// 灰度健康驗證：升級後設備是否還在上報（silent = 失聯告警，運維據此回滾）
+// ============================================================
+
+const healthQuerySchema = z.object({
+  appId: z.string().uuid().openapi({
+    param: { name: "appId", in: "query" },
+    description: "目標 agent App ID（健康判定的目標版本來自 app.version）",
+  }),
+  windowMinutes: z.coerce.number().int().min(1).default(30).openapi({
+    param: { name: "windowMinutes", in: "query" },
+    description: "上報靜默窗口（分鐘）；曾上報但超此窗口無上報的設備判為 silent",
+  }),
+});
+
+const healthResponseSchema = z
+  .object({
+    targetVersion: z.string(),
+    windowMinutes: z.number(),
+    upgraded: z.array(z.string()).openapi({ description: "已升級到目標版本" }),
+    silent: z.array(z.string()).openapi({
+      description: "曾上報、現超窗口無上報——升級後失聯告警目標（考慮回滾）",
+    }),
+    pending: z.array(z.string()).openapi({ description: "未升級但窗口內有上報（進行中）" }),
+    neverReported: z.array(z.string()).openapi({ description: "從未上報（可能未裝 agent）" }),
+  })
+  .openapi("AgentRolloutHealth");
+
+const healthSpec = createRoute({
+  method: "get",
+  path: "/admin/tenants/{tenantId}/agent-rollout/health",
+  tags: ["Admin: install-agent"],
+  security: [{ BearerAuth: [] }],
+  summary: "查灰度升級健康（silent = 升級後失聯，告警目標）",
+  request: {
+    params: rolloutParamsSchema,
+    query: healthQuerySchema,
+  },
+  responses: {
+    200: {
+      description: "升級健康分類",
+      content: { "application/json": { schema: successSchema(healthResponseSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+installAgentAdminApp.openapi(healthSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const { appId, windowMinutes } = c.req.valid("query");
+  const health = await getRolloutHealth({ tenantId, appId, windowMinutes });
+  return c.json({ ok: true as const, data: health }, 200);
 });

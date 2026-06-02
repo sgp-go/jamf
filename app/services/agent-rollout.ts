@@ -6,22 +6,24 @@ import { getLatestAgentReport } from "~/services/agent.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
 import {
   applySelection,
-  type DeviceVersion,
+  assessRolloutHealth,
+  type DeviceHealthInput,
   partitionByVersion,
+  type RolloutHealth,
   type RolloutSelection,
 } from "~/services/agent-rollout-selection.ts";
 
 export type { RolloutSelection } from "~/services/agent-rollout-selection.ts";
 
 /**
- * Agent 灰度發佈：選候選設備子集，逐個走 installAgentOnDevice 派新版 MSI。
+ * Agent 灰度發佈 + 升級健康驗證。
  *
  * 起因（[[windows-agent-update-delivery]] §4）：一個 DI-bug build 一次推 8000 台 =
- * 全體崩潰循環。更新必須分批：先推一小批 → 健康驗證觀察（2c）→ 再放量。
+ * 全體崩潰循環。更新必須分批：先推一小批（rolloutAgentVersion）→ 健康驗證觀察
+ * （getRolloutHealth：silent = 升級後失聯，告警目標）→ 再放量。
  *
- * 候選 = 租戶下 windows 設備中「當前版本 != 目標版本」者；本批 = 候選按 selection
- * 取子集（純邏輯見 agent-rollout-selection.ts）。逐批調用（count→percentage→更大）
- * 靠候選自然收斂覆蓋全量，升級成功的設備自動退出候選，不重複派發。
+ * 候選 = 租戶下 windows 設備中「當前版本 != 目標版本」者；逐批調用靠候選自然收斂
+ * 覆蓋全量，升級成功的設備下次上報版本即等於目標版本，自動退出候選。
  */
 
 export interface RolloutInput {
@@ -50,13 +52,18 @@ export interface RolloutResult {
   results: RolloutDeviceResult[];
 }
 
-export async function rolloutAgentVersion(input: RolloutInput): Promise<RolloutResult> {
-  // 1. 目標 app + 版本
+export interface RolloutHealthResult extends RolloutHealth {
+  targetVersion: string;
+  windowMinutes: number;
+}
+
+/** app 存在性 + 租戶歸屬 + windows 平台校驗，回傳目標版本。 */
+async function resolveTargetVersion(tenantId: string, appId: string): Promise<string> {
   const app = await db.query.apps.findFirst({
-    where: (t, { eq: eqOp }) => eqOp(t.id, input.appId),
+    where: (t, { eq: eqOp }) => eqOp(t.id, appId),
   });
   if (!app) throw new AppError(404, "app_not_found", "Agent app not found");
-  if (app.tenantId !== null && app.tenantId !== input.tenantId) {
+  if (app.tenantId !== null && app.tenantId !== tenantId) {
     throw new AppError(403, "forbidden", "App belongs to another tenant");
   }
   if (app.platform !== "windows") {
@@ -66,26 +73,40 @@ export async function rolloutAgentVersion(input: RolloutInput): Promise<RolloutR
       "Rollout currently only supports Windows agent apps",
     );
   }
-  const targetVersion = app.version;
+  return app.version;
+}
 
-  // 2. 租戶 windows 設備（core query 避免 findMany list 慢，見 devices.ts 註記）
+/**
+ * 租戶 windows 設備 + 各自最新上報的版本/時間。
+ * core query 避免 findMany list 慢（見 devices.ts 註記）；逐台 findFirst 取最新上報
+ * （灰度子集規模有限，可接受）。
+ */
+async function loadDeviceVersions(tenantId: string): Promise<DeviceHealthInput[]> {
   const devices = await db
     .select({ id: mdmDevices.id })
     .from(mdmDevices)
-    .where(and(eq(mdmDevices.tenantId, input.tenantId), eq(mdmDevices.platform, "windows")));
+    .where(and(eq(mdmDevices.tenantId, tenantId), eq(mdmDevices.platform, "windows")));
 
-  // 3. 各設備當前 agent 版本（最新上報）。灰度子集規模有限，逐台 findFirst 可接受。
-  const deviceVersions: DeviceVersion[] = [];
+  const out: DeviceHealthInput[] = [];
   for (const d of devices) {
-    const latest = await getLatestAgentReport({ tenantId: input.tenantId, deviceId: d.id });
-    deviceVersions.push({ deviceId: d.id, currentVersion: latest?.appVersion ?? null });
+    const latest = await getLatestAgentReport({ tenantId, deviceId: d.id });
+    out.push({
+      deviceId: d.id,
+      currentVersion: latest?.appVersion ?? null,
+      lastReportedAt: latest?.reportedAt ?? null,
+    });
   }
+  return out;
+}
 
-  // 4. 分區 + 選本批
+export async function rolloutAgentVersion(input: RolloutInput): Promise<RolloutResult> {
+  const targetVersion = await resolveTargetVersion(input.tenantId, input.appId);
+  const deviceVersions = await loadDeviceVersions(input.tenantId);
+
   const { eligible, skipped } = partitionByVersion(deviceVersions, targetVersion);
   const selected = applySelection(eligible, input.selection);
 
-  // 5. 逐個派發（單台失敗記入 results 不中斷整批）
+  // 逐個派發（單台失敗記入 results 不中斷整批）
   const results: RolloutDeviceResult[] = [];
   for (const deviceId of selected) {
     try {
@@ -110,4 +131,24 @@ export async function rolloutAgentVersion(input: RolloutInput): Promise<RolloutR
     failed: results.filter((r) => r.error).length,
     results,
   };
+}
+
+/**
+ * 灰度升級健康：對租戶 windows 設備按目標版本 + 上報時間分類。
+ * silent（曾上報、現超 windowMinutes 無上報）= 升級後失聯告警目標，運維據此決定回滾。
+ */
+export async function getRolloutHealth(opts: {
+  tenantId: string;
+  appId: string;
+  windowMinutes: number;
+}): Promise<RolloutHealthResult> {
+  const targetVersion = await resolveTargetVersion(opts.tenantId, opts.appId);
+  const deviceVersions = await loadDeviceVersions(opts.tenantId);
+  const health = assessRolloutHealth(
+    deviceVersions,
+    targetVersion,
+    Date.now(),
+    opts.windowMinutes,
+  );
+  return { targetVersion, windowMinutes: opts.windowMinutes, ...health };
 }

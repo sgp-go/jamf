@@ -1,5 +1,5 @@
 /**
- * Agent 灰度發佈的純選擇邏輯（無 DB 依賴，便於單測隔離）。
+ * Agent 灰度發佈的純邏輯（無 DB 依賴，便於單測隔離）：設備選擇 + 升級健康評估。
  * 編排見 [[agent-rollout.ts]]。
  */
 
@@ -52,4 +52,56 @@ export function applySelection(
       return eligible.slice(0, Math.ceil((eligible.length * pct) / 100));
     }
   }
+}
+
+export interface DeviceHealthInput {
+  deviceId: string;
+  currentVersion: string | null;
+  lastReportedAt: Date | null;
+}
+
+/**
+ * 灰度升級健康分類。核心信號（[[windows-agent-update-delivery]] §4）：升級後設備
+ * 是否還在上報——DI-bug 壞 build 啟動即崩 → 不上報 → 落入 <c>silent</c> → 告警。
+ */
+export interface RolloutHealth {
+  /** 當前版本 == 目標版本（升級成功） */
+  upgraded: string[];
+  /** 曾上報、現超窗口無上報 → 失聯告警（可能崩潰循環，考慮回滾） */
+  silent: string[];
+  /** 未升級但窗口內有上報（正常進行中 / 尚未輪到） */
+  pending: string[];
+  /** 從未上報（可能從未裝 agent，不計入告警） */
+  neverReported: string[];
+}
+
+/**
+ * 純函數：按「最新上報版本 + 上報時間」把設備分到四類。
+ * silent = 曾上報但超 <paramref name="windowMinutes"/> 無上報，是「升級後失聯」的
+ * 告警目標（與「從未裝 agent」的 neverReported 區分，避免誤報）。
+ */
+export function assessRolloutHealth(
+  devices: readonly DeviceHealthInput[],
+  targetVersion: string,
+  nowMs: number,
+  windowMinutes: number,
+): RolloutHealth {
+  const windowMs = Math.max(0, windowMinutes) * 60_000;
+  const upgraded: string[] = [];
+  const silent: string[] = [];
+  const pending: string[] = [];
+  const neverReported: string[] = [];
+
+  for (const d of devices) {
+    if (d.currentVersion === targetVersion) {
+      upgraded.push(d.deviceId);
+    } else if (d.lastReportedAt === null) {
+      neverReported.push(d.deviceId);
+    } else if (nowMs - d.lastReportedAt.getTime() > windowMs) {
+      silent.push(d.deviceId);
+    } else {
+      pending.push(d.deviceId);
+    }
+  }
+  return { upgraded, silent, pending, neverReported };
 }
