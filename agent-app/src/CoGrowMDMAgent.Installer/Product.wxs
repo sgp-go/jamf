@@ -86,7 +86,29 @@
     所以 SYSTEM / Administrators 必須顯式列出，否則 service 自己也讀不到。
   -->
   <Fragment>
-    <Component Id="AgentConfigRegistry" Directory="INSTALLFOLDER">
+    <!--
+      升級保留配置（修 MajorUpgrade 清空 AgentConfig bug）：
+      MajorUpgrade Schedule="afterInstallInitialize" 會在新版安裝前先移除舊產品。
+      若此 component 隨舊產品一起卸載，device_id/agent_token/api_endpoint/tenant_id
+      四個值會被刪；新版安裝時 msiexec 公開屬性多半未帶（升級走 EDA-CSP MajorUpgrade，
+      backend 不重傳 enrollment property），於是 RegistryValue 寫入空字串 → 配置被清空，
+      service 啟動即因 RegistryConfig.ReadRequired 拋「value missing」而崩。
+
+      Permanent="yes"   → 任何卸載（含升級的 RemoveExistingProducts）都不移除本 component，
+                          四個注冊表值在升級過程中存活。
+      NeverOverwrite="yes" → 安裝時若 KeyPath（device_id）已存在則整個 component 跳過，
+                          不會用空屬性覆蓋既有值。首裝（值不存在）仍正常寫入。
+
+      取捨：Permanent 使「管理員顯式卸載 agent」時這四個值殘留 HKLM（含 agent_token 明文）。
+      設備級 token 卸載後可在服務端吊銷，殘留風險可控；配置「更新」走 MDM Policy CSP 運行時
+      TryReload，不靠重裝 MSI（重 enroll 換 token 同理）。
+      ⚠️ 此改動無法在 Mac 驗證，須 Windows wix build + 真機帶空屬性升級驗證 device_id 保留。
+    -->
+    <Component
+      Id="AgentConfigRegistry"
+      Directory="INSTALLFOLDER"
+      Permanent="yes"
+      NeverOverwrite="yes">
       <!--
         ForceCreateOnInstall="yes" + Id 是 WiX 4 對「掛 PermissionEx 的 RegistryKey」
         的硬要求（WIX5063）。Id 在 RegistryKey 表中作為主鍵，並讓 util ext 找到掛點。
