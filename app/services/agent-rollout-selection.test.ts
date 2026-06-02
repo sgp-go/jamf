@@ -3,12 +3,29 @@ import {
   applySelection,
   assessRolloutHealth,
   type DeviceVersion,
+  normalizeVersion,
   partitionByVersion,
 } from "~/services/agent-rollout-selection.ts";
 
 const dv = (deviceId: string, currentVersion: string | null): DeviceVersion => ({
   deviceId,
   currentVersion,
+});
+
+Deno.test("normalizeVersion: 剝離 +build metadata + null 透傳", () => {
+  assertEquals(normalizeVersion("1.3.5.0+abc123"), "1.3.5.0");
+  assertEquals(normalizeVersion("1.3.5.0"), "1.3.5.0");
+  assertEquals(normalizeVersion(" 1.3.5.0 "), "1.3.5.0");
+  assertEquals(normalizeVersion(null), null);
+});
+
+Deno.test("partitionByVersion: +build metadata 視為同版本→skipped", () => {
+  const { eligible, skipped } = partitionByVersion(
+    [dv("a", "1.3.5.0+sha"), dv("b", "1.3.4.0")],
+    "1.3.5.0",
+  );
+  assertEquals(eligible, ["b"]);
+  assertEquals(skipped, ["a"]);
 });
 
 Deno.test("partitionByVersion: 已是目標版本→skipped，其餘（含 null）→eligible", () => {
@@ -111,6 +128,19 @@ Deno.test("assessRolloutHealth: 已升級設備即使無上報也算 upgraded（
   assertEquals(health.upgraded, ["x"]);
   assertEquals(health.silent, []);
   assertEquals(health.neverReported, []);
+});
+
+Deno.test("⭐ assessRolloutHealth: 版本帶 +gitsha 後綴仍判 upgraded（防真機契約錯配）", () => {
+  // agent 報 "1.3.5.0+abc123"，rollout target "1.3.5.0" → 歸一化後相等 → upgraded
+  const health = assessRolloutHealth(
+    [dh("x", "1.3.5.0+abc123", new Date("2026-06-02T12:00:00Z"))],
+    "1.3.5.0",
+    new Date("2026-06-02T12:05:00Z").getTime(),
+    30,
+  );
+  assertEquals(health.upgraded, ["x"]);
+  assertEquals(health.silent, []);
+  assertEquals(health.pending, []);
 });
 
 Deno.test("assessRolloutHealth: 窗口邊界——恰好等於窗口不算 silent", () => {

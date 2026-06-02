@@ -14,6 +14,19 @@ export interface DeviceVersion {
 }
 
 /**
+ * 版本比對歸一化：剝離 SemVer build metadata（"+" 後綴）+ 去頭尾空白。
+ *
+ * 防真機抓到的契約錯配（2026-06-02）：agent 上報的 AssemblyInformationalVersion 可能帶
+ * SourceLink 的 "+gitsha" 後綴（如 "1.3.5.0+abc123"），與 MSI ProductVersion 目標
+ * "1.3.5.0" 不字面相等 → upgraded 桶永遠為空 → 自動回滾誤觸發。build 端已修（去後綴），
+ * 此處再做一層防禦：比對只看 "+" 前的版本核心（SemVer 規定 build metadata 不參與版本相等）。
+ */
+export function normalizeVersion(v: string | null): string | null {
+  if (v === null) return null;
+  return v.split("+")[0].trim();
+}
+
+/**
  * 排除已是目標版本的設備。純函數。
  * 灰度逐批放量靠此自然收斂：升級成功的設備下次上報版本即等於目標版本，退出候選。
  */
@@ -21,10 +34,11 @@ export function partitionByVersion(
   devices: readonly DeviceVersion[],
   targetVersion: string,
 ): { eligible: string[]; skipped: string[] } {
+  const target = normalizeVersion(targetVersion);
   const eligible: string[] = [];
   const skipped: string[] = [];
   for (const d of devices) {
-    if (d.currentVersion === targetVersion) skipped.push(d.deviceId);
+    if (normalizeVersion(d.currentVersion) === target) skipped.push(d.deviceId);
     else eligible.push(d.deviceId);
   }
   return { eligible, skipped };
@@ -87,13 +101,14 @@ export function assessRolloutHealth(
   windowMinutes: number,
 ): RolloutHealth {
   const windowMs = Math.max(0, windowMinutes) * 60_000;
+  const target = normalizeVersion(targetVersion);
   const upgraded: string[] = [];
   const silent: string[] = [];
   const pending: string[] = [];
   const neverReported: string[] = [];
 
   for (const d of devices) {
-    if (d.currentVersion === targetVersion) {
+    if (normalizeVersion(d.currentVersion) === target) {
       upgraded.push(d.deviceId);
     } else if (d.lastReportedAt === null) {
       neverReported.push(d.deviceId);

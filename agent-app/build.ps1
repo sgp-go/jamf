@@ -53,6 +53,13 @@ $publishArgs = @(
     "-p:IncludeNativeLibrariesForSelfExtract=true",
     "-p:PublishTrimmed=false",
     "-p:DebugType=embedded",
+    # Reported version must equal MSI ProductVersion: set $Version on the assembly so the
+    # agent's AssemblyInformationalVersion matches the MSI version, or rollout/health version
+    # match breaks (upgraded bucket stays empty). Paired with csproj
+    # IncludeSourceRevisionInInformationalVersion=false to drop the +gitsha suffix.
+    # NOTE: keep this file ASCII-only -- Windows PowerShell 5.1 reads .ps1 in the system
+    # codepage, so non-ASCII comments can corrupt the @() array and drop following args.
+    "-p:Version=$Version",
     "-o", $publishDir,
     "--nologo"
 )
