@@ -8,6 +8,7 @@
  *   1. enrollment 風暴   — enrollWindowsDevice × N（並發）
  *   2. 命令吞吐          — enqueueWindowsCommand × (N × K)，量 P50/P99 排入延遲
  *   3. 設備 poll 消化    — handleSyncMLRequest 最小 poll，走真實命令通道拉取 + 標 sent
+ *   3b. usage 上報風暴   — upsertUsageStats × N，量每日高頻寫入（findFirst 基線 + upsert）
  *   4. webhook 風暴      — publishEvent × W + processDueDeliveries 投到本地 sink
  *
  * 用獨立 throwaway tenant 隔離，結束 CASCADE 清乾淨。
@@ -28,12 +29,13 @@ import { tenants } from "~/db/schema/tenants.ts";
 import { selfMdmConfigs } from "~/db/schema/self-mdm.ts";
 import { webhookEndpoints } from "~/db/schema/webhooks.ts";
 import { eq } from "drizzle-orm";
-import { enrollWindowsDevice } from "~/services/mdm/devices.ts";
+import { enrollWindowsDevice, getMdmDevice } from "~/services/mdm/devices.ts";
 import {
   enqueueWindowsCommand,
   handleSyncMLRequest,
 } from "~/services/mdm/windows/command.ts";
 import { buildReboot } from "~/services/mdm/windows/csp.ts";
+import { upsertUsageStats } from "~/services/agent.ts";
 import { publishEvent } from "~/services/webhooks/publisher.ts";
 import { processDueDeliveries } from "~/services/webhooks/dispatcher.ts";
 
@@ -292,6 +294,30 @@ async function main() {
       CONCURRENCY,
     );
     phases.push(summarize("3.poll", performance.now() - t0, r3.latencies, r3.errors));
+
+    // ---- 階段 3b：usage 上報風暴（每日高頻寫入；測單調性基線 findFirst + upsert 組合） ----
+    // 8000 台每日上報的最高頻 DB 寫入路徑。upsertUsageStats 每筆先 findFirst 取基線再
+    // onConflictDoUpdate，量此「讀基線 + 寫」組合在並發下的吞吐 / P99。
+    t0 = performance.now();
+    const r3b = await runPool(
+      enrolledUdids,
+      async (udid) => {
+        const device = await getMdmDevice(udid);
+        if (!device) throw new Error(`device not found: ${udid}`);
+        await upsertUsageStats({
+          tenantId,
+          deviceId: device.id,
+          stats: [{
+            date: "2026-06-02",
+            totalMinutes: 120,
+            pickup: 8,
+            maxContinuous: 45,
+          }],
+        });
+      },
+      CONCURRENCY,
+    );
+    phases.push(summarize("3b.usage", performance.now() - t0, r3b.latencies, r3b.errors));
 
     // ---- 階段 4：webhook 風暴 ----
     await db.insert(webhookEndpoints).values({
