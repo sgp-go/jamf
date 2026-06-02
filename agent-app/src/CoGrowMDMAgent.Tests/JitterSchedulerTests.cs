@@ -96,4 +96,42 @@ public class JitterSchedulerTests
         Assert.Throws<ArgumentOutOfRangeException>(
             () => new JitterScheduler(offsetMinute: offset));
     }
+
+    [Fact]
+    public void GetNextRunTime_WithOverrideInterval_IgnoresDailySlot()
+    {
+        // 測試覆蓋：固定 60s 間隔，從 now 起算，不管 daily slot。
+        var scheduler = new JitterScheduler(
+            offsetMinute: 137, overrideInterval: TimeSpan.FromSeconds(60));
+        var now = new DateTime(2026, 5, 26, 9, 30, 0, DateTimeKind.Utc);
+
+        var next = scheduler.GetNextRunTime(now);
+
+        Assert.Equal(now.AddSeconds(60), next);
+    }
+
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("0", false)]
+    [InlineData("-5", false)]
+    [InlineData("abc", false)]
+    [InlineData("60", true)]
+    public void ReadOverrideInterval_ParsesEnvVar(string? raw, bool expectInterval)
+    {
+        var original = Environment.GetEnvironmentVariable(JitterScheduler.OverrideIntervalEnvVar);
+        try
+        {
+            Environment.SetEnvironmentVariable(JitterScheduler.OverrideIntervalEnvVar, raw);
+            var result = JitterScheduler.ReadOverrideInterval();
+            if (expectInterval)
+                Assert.Equal(TimeSpan.FromSeconds(60), result);
+            else
+                Assert.Null(result);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(JitterScheduler.OverrideIntervalEnvVar, original);
+        }
+    }
 }
