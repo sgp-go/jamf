@@ -49,18 +49,21 @@
           Wait="yes" />
 
         <!--
-          Service Recovery：服務 crash 後自動重啟（防學生強制 stop / kill）。
-          - FirstFailureActionType="restart" 5 秒後第一次重啟嘗試
-          - SecondFailureActionType="restart" 30 秒後第二次
-          - ThirdFailureActionType="restart" 60 秒後第三次
-          - ResetPeriodInDays="1" 一天無 crash 則重置 failure 計數
-          這對應 services.msc → CoGrowMDMAgent 屬性 → 「復原」分頁三段選 restart。
+          Service Recovery：兼顧「防學生強制 stop / kill」與「壞 build 崩潰循環安全網」。
+          - First/Second = restart（5s 後）：自愈瞬時故障 + 擋學生手動停服務。
+          - Third = none：連續第三次失敗即停服務、不再重啟。配合啟動自檢
+            Environment.Exit(78)：壞 config / DI-bug build 啟動即失敗時，最多重啟 2 次
+            後停下，不無限循環燒 CPU；明確 Event Log 留診斷，由健康驗證告警捕獲後回滾
+            （[[windows-agent-update-delivery]] §4：壞 build 上量=災難，需安全網）。
+          - ResetPeriodInDays="1"：一天無失敗則重置計數，保留瞬時故障的自愈能力。
+          注意：util:ServiceConfig 只有單一 RestartServiceDelayInSeconds（5s），
+          三段 action 共用此延遲（無 per-action delay）。
         -->
         <util:ServiceConfig
           ServiceName="CoGrowMDMAgent"
           FirstFailureActionType="restart"
           SecondFailureActionType="restart"
-          ThirdFailureActionType="restart"
+          ThirdFailureActionType="none"
           RestartServiceDelayInSeconds="5"
           ResetPeriodInDays="1" />
       </Component>

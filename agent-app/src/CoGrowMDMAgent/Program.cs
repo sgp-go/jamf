@@ -1,5 +1,6 @@
 using CoGrowMDMAgent;
 using CoGrowMDMAgent.Config;
+using CoGrowMDMAgent.Diagnostics;
 using CoGrowMDMAgent.Locking;
 using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
@@ -70,6 +71,23 @@ builder.Services.AddHostedService<LockWatcher>();
 builder.Services.AddHostedService<SessionUsageMonitor>();
 
 var host = builder.Build();
+
+// 啟動自檢：主動解析關鍵服務 + 驗證 config，提前把 DI/config 錯誤暴露為明確 Event Log
+// 診斷（Windows service host 的 EventLog provider 落 Critical），而非延遲到 Worker 首次
+// 使用才裸崩成 unhandled exception → FailureActions 崩潰循環（[[windows-agent-update-delivery]] §4）。
+var startupLogger = host.Services.GetRequiredService<ILogger<Program>>();
+var selfCheck = StartupSelfCheck.Run(host.Services);
+if (!selfCheck.Ok)
+{
+    startupLogger.LogCritical(
+        "Startup self-check FAILED — service will not start. {Count} problem(s):\n{Failures}",
+        selfCheck.Failures.Count,
+        string.Join("\n", selfCheck.Failures));
+    // 非 0 退出碼（EX_CONFIG）：SCM 標記服務失敗，Event Log 留明確診斷，
+    // 不再是裸 unhandled exception。崩潰循環由 Service.wxs FailureActions 限制。
+    Environment.Exit(78);
+}
+startupLogger.LogInformation("Startup self-check passed");
 
 // Initialise SQLite schemas before hosted services start (idempotent CREATE TABLE IF NOT EXISTS).
 await host.Services.GetRequiredService<IReportQueue>()
