@@ -36,6 +36,8 @@ export const WEBHOOK_EVENT_TYPES = [
   "agent.installed",
   "agent.reported",
   "agent.usage_reported",
+  // 使用統計回退異常：同設備同日累計值較既有值變小（疑似本地 db 被篡改）。
+  "agent.usage_anomaly",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

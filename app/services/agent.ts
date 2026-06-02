@@ -3,6 +3,13 @@ import { db } from "~/db/client.ts";
 import { agentReports, deviceUsageStats } from "~/db/schema/agent.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
+import {
+  mergeUsage,
+  type UsageAnomaly,
+  type UsageStatItemInput,
+} from "~/services/usage-merge.ts";
+
+export type { UsageAnomaly, UsageStatItemInput };
 
 /**
  * Agent App 端只認識自己的 serialNumber（與可選的 udid）。
@@ -122,28 +129,47 @@ export function getLatestAgentReport(opts: { tenantId: string; deviceId: string 
   });
 }
 
-export interface UsageStatItemInput {
-  date: string;
-  totalMinutes: number;
-  pickup: number;
-  maxContinuous: number;
-  timeStats?: Record<string, number>;
+export interface UsageUpsertResult {
+  ids: string[];
+  anomalies: UsageAnomaly[];
 }
 
 /**
  * 同設備同日 upsert（device_usage_stats unique(device_id, date)）。
- * Drizzle 的 onConflictDoUpdate 用 target 指向 unique constraint 對應的欄位組。
+ *
+ * 防篡改第 2 層（服務端權威）：合併邏輯見 {@link mergeUsage} —— 天內累計單調
+ * 只增，max 合併挫敗「改小本地 db 少報」，回退記為 anomaly 供呼叫端告警。
  */
 export async function upsertUsageStats(opts: {
   tenantId: string;
   deviceId: string;
   sessionId?: string;
   stats: UsageStatItemInput[];
-}): Promise<{ ids: string[] }> {
+}): Promise<UsageUpsertResult> {
   const now = new Date();
   const ids: string[] = [];
+  const anomalies: UsageAnomaly[] = [];
 
   for (const item of opts.stats) {
+    // 取既有行作單調性基線（findFirst 單條查不受 findMany list 慢問題影響）。
+    const existing = await db.query.deviceUsageStats.findFirst({
+      where: (t, { and: andOp, eq: eqOp }) =>
+        andOp(eqOp(t.deviceId, opts.deviceId), eqOp(t.date, item.date)),
+    });
+
+    const { merged, anomalies: rowAnomalies } = mergeUsage(
+      existing
+        ? {
+          totalMinutes: existing.totalMinutes,
+          pickup: existing.pickup,
+          maxContinuous: existing.maxContinuous,
+          timeStats: existing.timeStats as Record<string, number> | null,
+        }
+        : null,
+      item,
+    );
+    anomalies.push(...rowAnomalies);
+
     const [row] = await db
       .insert(deviceUsageStats)
       .values({
@@ -151,26 +177,17 @@ export async function upsertUsageStats(opts: {
         deviceId: opts.deviceId,
         sessionId: opts.sessionId ?? null,
         date: item.date,
-        totalMinutes: item.totalMinutes,
-        pickup: item.pickup,
-        maxContinuous: item.maxContinuous,
-        timeStats: item.timeStats ?? null,
+        ...merged,
         reportedAt: now,
       })
       .onConflictDoUpdate({
         target: [deviceUsageStats.deviceId, deviceUsageStats.date],
-        set: {
-          totalMinutes: item.totalMinutes,
-          pickup: item.pickup,
-          maxContinuous: item.maxContinuous,
-          timeStats: item.timeStats ?? null,
-          reportedAt: now,
-        },
+        set: { ...merged, reportedAt: now },
       })
       .returning({ id: deviceUsageStats.id });
     if (row) ids.push(row.id);
   }
-  return { ids };
+  return { ids, anomalies };
 }
 
 export function listUsageStats(opts: {

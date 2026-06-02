@@ -14,6 +14,7 @@ import {
   authorizeAgentReport,
   extractBearerToken,
 } from "~/services/install-agent.ts";
+import { verifyUsageSignature } from "~/services/usage-signature.ts";
 import { publishEvent } from "~/services/webhooks/index.ts";
 
 /**
@@ -441,12 +442,42 @@ agentApp.openapi(usageReportRoute, async (c) => {
     serialNumber: body.serialNumber,
   });
 
-  await authorizeAgentReport({
-    device,
-    token: extractBearerToken(c.req.header("authorization")),
-  });
+  const token = extractBearerToken(c.req.header("authorization"));
+  await authorizeAgentReport({ device, token });
 
-  const { ids } = await upsertUsageStats({
+  // 防篡改第 3 層：驗 HMAC 簽名（密鑰＝agent_token）。無簽名（iOS / 舊版 agent）
+  // 跳過驗簽（相容降級）；簽名不符不拒絕，僅告警 —— 與第 2 層單調性互補，且渐进
+  // 上线不丢数据。未來可收緊為直接拒絕。
+  const signature = c.req.header("x-usage-signature");
+  if (signature && token) {
+    const valid = await verifyUsageSignature(
+      token,
+      {
+        serialNumber: body.serialNumber,
+        sessionId: body.sessionId,
+        stats: body.stats,
+      },
+      signature,
+    );
+    if (!valid) {
+      console.warn(
+        `[agent.usage_signature_invalid] device=${device.id} serial=${body.serialNumber}`,
+      );
+      void publishEvent({
+        tenantId,
+        eventType: "agent.usage_anomaly",
+        data: {
+          device_id: device.id,
+          serial_number: body.serialNumber,
+          reason: "signature_invalid",
+        },
+      }).catch((err) => {
+        console.error("[agent.usage_anomaly] publishEvent failed", err);
+      });
+    }
+  }
+
+  const { ids, anomalies } = await upsertUsageStats({
     tenantId,
     deviceId: device.id,
     sessionId: body.sessionId,
@@ -467,6 +498,24 @@ agentApp.openapi(usageReportRoute, async (c) => {
   }).catch((err) => {
     console.error("[agent.usage_reported] publishEvent failed", err);
   });
+
+  // 防篡改第 2 層：累計值回退＝疑似本地 db 被改，告警給後端做風控。
+  if (anomalies.length > 0) {
+    console.warn(
+      `[agent.usage_anomaly] device=${device.id} serial=${body.serialNumber} regressions=${anomalies.length}`,
+    );
+    void publishEvent({
+      tenantId,
+      eventType: "agent.usage_anomaly",
+      data: {
+        device_id: device.id,
+        serial_number: body.serialNumber,
+        anomalies,
+      },
+    }).catch((err) => {
+      console.error("[agent.usage_anomaly] publishEvent failed", err);
+    });
+  }
 
   return c.json({ ok: true as const, data: { savedCount: ids.length } }, 200);
 });

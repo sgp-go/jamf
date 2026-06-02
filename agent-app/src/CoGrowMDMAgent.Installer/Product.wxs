@@ -62,6 +62,7 @@
     <Feature Id="MainFeature" Title="CoGrow MDM Agent" Level="1" Display="expand">
       <ComponentGroupRef Id="ServiceComponents" />
       <ComponentRef Id="AgentConfigRegistry" />
+      <ComponentRef Id="AgentDataFolder" />
     </Feature>
 
   </Package>
@@ -115,6 +116,35 @@
           User="Users"
           Read="yes" />
       </RegistryKey>
+    </Component>
+  </Fragment>
+
+  <!--
+    本地資料目錄 C:\ProgramData\CoGrow\MDM Agent\（usage.db / queue.db 所在）。
+    MSI 安裝時建目錄並鎖 ACL，防標準用戶改 / 刪本地使用統計 db（第 1 層防篡改）。
+
+    路徑必須與 Program.cs DataDir()（CommonApplicationData\CoGrow\MDM Agent）一致。
+
+    Self-protection：util:PermissionEx 重置 ACL —— SYSTEM / Administrators 全控，
+    Users 不列＝無任何權限（usage 數據無需用戶讀，連讀都去掉）。service=LocalSystem
+    走 SYSTEM ACE 讀寫。⚠️ PermissionEx 替換整個 ACL，SYSTEM/Admin 必須顯式列出，
+    否則 service 自己也存取不了。
+    ⚠️ 沿用 [[wix4-permission-on-registrykey]] 教訓：Mac dotnet restore 通過 ≠
+    wix build 通過；本 Fragment（CreateFolder + PermissionEx）必須真機 / windows-latest
+    runner 跑一次 wix build 驗證後才算數。
+  -->
+  <Fragment>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DataManufacturerFolder" Name="CoGrow">
+        <Directory Id="AGENTDATAFOLDER" Name="MDM Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <Component Id="AgentDataFolder" Directory="AGENTDATAFOLDER" Guid="*">
+      <CreateFolder>
+        <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+      </CreateFolder>
     </Component>
   </Fragment>
 
