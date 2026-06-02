@@ -75,12 +75,25 @@ export interface CommandEventInput {
  * - 無對應事件的狀態（commandStatusToEvent → null）直接跳過
  * - publishEvent 失敗只記 log，不拋出（不阻塞呼叫端的命令排隊 / 狀態更新）
  */
-export function publishCommandEvent(input: CommandEventInput): void {
+/**
+ * 可注入的 publisher（預設 publishEvent）；分離出來讓整合測試能斷言推送行為
+ * （推送了什麼 payload、內部命令/非終態是否跳過、publisher reject 是否被吞）。
+ */
+export type CommandEventPublisher = (opts: {
+  tenantId: string;
+  eventType: WebhookEventType;
+  data: Record<string, unknown>;
+}) => Promise<unknown>;
+
+export function publishCommandEvent(
+  input: CommandEventInput,
+  publish: CommandEventPublisher = publishEvent,
+): void {
   if (isInternalCommandType(input.commandType)) return;
   const eventType = commandStatusToEvent(input.status);
   if (!eventType) return;
 
-  void publishEvent({
+  void publish({
     tenantId: input.tenantId,
     eventType,
     data: {
