@@ -1,0 +1,90 @@
+name: Agent Roll-forward Build
+
+# 手動觸發回滾包構建：給「已知好版本源碼 + 更高版本號」打 roll-forward MSI。
+#
+# ⭐ 為何走 CI 而非真機/本地：build-rollforward.ps1 用 `git worktree add` checkout 舊 tag
+# 源碼，需完整 git repo + pwsh + WiX。設備是 git archive 拷貝（無 .git），Mac 無 pwsh →
+# CI windows-latest 是唯一天然齊備的環境。
+#
+# 產物：MSI artifact + manifest.json（version/sha256/productCode/fileUrl/file）。
+# 下游：下載 manifest → 上傳 MSI 到下載託管並回填 fileUrl →
+#   deno task auto-rollback --execute --manifest <manifest.json> 派發給壞 build 設備。
+# 設計見 brain/projects/jamf-explore/wiki/agent-rollback-strategy.md §6。
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: '已知好版本的 git ref（tag/commit/branch），如 agent-v1.2.0.0'
+        required: true
+        type: string
+      version:
+        description: 'roll-forward 包版本號 a.b.c.d（須 > 當前壞版本，否則 MajorUpgrade 拒裝）'
+        required: true
+        type: string
+      file_url:
+        description: '可選：MSI 託管下載路徑（相對 publicBaseUrl 或絕對 URL），寫入 manifest.fileUrl'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      # build-rollforward.ps1 需完整 git 歷史做 worktree checkout 舊 ref
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        shell: pwsh
+        run: |
+          if ("${{ inputs.version }}" -notmatch '^\d+\.\d+\.\d+\.\d+$') {
+            throw "version 須為 a.b.c.d：${{ inputs.version }}"
+          }
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install WiX
+        run: dotnet tool install --global wix
+
+      # 可選簽名：repo secret SIGNING_CERT_THUMBPRINT 設了才簽（github-hosted runner
+      # 通常無 OV 證書；未簽名包亦可歸檔，正式簽名走自託管 runner / 下游流程）。
+      - name: Build roll-forward MSI + manifest
+        id: build
+        shell: pwsh
+        working-directory: agent-app
+        env:
+          SIGNING_CERT_THUMBPRINT: ${{ secrets.SIGNING_CERT_THUMBPRINT }}
+        run: |
+          $p = @{
+            SourceRef    = "${{ inputs.source_ref }}"
+            Version      = "${{ inputs.version }}"
+            EmitManifest = $true
+          }
+          if ("${{ inputs.file_url }}") { $p.FileUrl = "${{ inputs.file_url }}" }
+          if ($env:SIGNING_CERT_THUMBPRINT) { $p.CertThumbprint = $env:SIGNING_CERT_THUMBPRINT }
+          pwsh -File build-rollforward.ps1 @p | Tee-Object -Variable out
+          # build-rollforward.ps1 末行 MANIFEST=<path>，透傳給後續 step
+          $line = $out | Select-String '^MANIFEST=' | Select-Object -Last 1
+          if (-not $line) { throw "未取得 MANIFEST 路徑" }
+          $manifestPath = ($line.Line -replace '^MANIFEST=', '').Trim()
+          "manifest=$manifestPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Show manifest
+        shell: pwsh
+        run: Get-Content "${{ steps.build.outputs.manifest }}"
+
+      - name: Upload MSI + manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rollforward-${{ inputs.version }}
+          path: |
+            agent-app/build/rollforward/*.msi
+            agent-app/build/rollforward/*.manifest.json
+          retention-days: 90

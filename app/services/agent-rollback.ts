@@ -230,9 +230,89 @@ export async function registerRollforwardApp(o: {
 }
 
 /**
- * 預設 build：spawn `pwsh agent-app/build-rollforward.ps1`，讀其產出的 JSON manifest。
- * ⚠️ 僅在有 git + pwsh + WiX 的 Windows ops 機可用（設備無 git，見 handoff 待辦 #3）。
- * manifest 須含 fileUrl（MSI 上傳託管後填入；自建 MDM 可由後端直接服務 → 相對路徑）。
+ * 純函數：解析 + 校驗 build-rollforward.ps1 -EmitManifest 產出的 manifest，轉成
+ * 可註冊的 artifact。req 用於守門（manifest 必須與計畫的 version/sourceRef 一致，
+ * 防錯用了別的包）。pwsh 模式與 manifest 模式共用，故抽出可單測。
+ */
+export function parseRollforwardManifest(
+  raw: unknown,
+  req: BuildRollforwardRequest,
+): RollforwardArtifact {
+  if (typeof raw !== "object" || raw === null) {
+    throw new AppError(500, "rollforward_manifest_invalid", "manifest 非物件");
+  }
+  const m = raw as Record<string, unknown>;
+  const str = (k: string) => (typeof m[k] === "string" ? (m[k] as string) : undefined);
+
+  const version = str("version");
+  const sha256 = str("sha256");
+  const productCode = str("productCode");
+  const fileUrl = str("fileUrl");
+
+  if (!version || !sha256 || !productCode) {
+    throw new AppError(
+      500,
+      "rollforward_manifest_invalid",
+      "manifest 缺 version / sha256 / productCode",
+    );
+  }
+  // 守門：manifest 必須對應本次回滾計畫，否則可能誤派了別的構建
+  if (version !== req.version) {
+    throw new AppError(
+      500,
+      "rollforward_version_mismatch",
+      `manifest 版本 ${version} != 計畫版本 ${req.version}`,
+    );
+  }
+  const manifestSourceRef = str("sourceRef");
+  if (manifestSourceRef && manifestSourceRef !== req.sourceRef) {
+    throw new AppError(
+      500,
+      "rollforward_sourceref_mismatch",
+      `manifest 源碼 ref ${manifestSourceRef} != 計畫 ${req.sourceRef}`,
+    );
+  }
+  if (!fileUrl) {
+    throw new AppError(
+      500,
+      "rollforward_fileurl_missing",
+      "manifest 缺 fileUrl：請先上傳 MSI 到下載託管並在 manifest 寫入下載路徑",
+    );
+  }
+  return {
+    version,
+    sha256,
+    productCode,
+    fileUrl,
+    fileSizeBytes: typeof m.fileSizeBytes === "number" ? m.fileSizeBytes : undefined,
+  };
+}
+
+/**
+ * build dep：直接讀 CI（agent-rollforward.yml workflow）產出的 manifest，不本地構建。
+ * ⭐ 解開「哪裡 build」死結：build-rollforward.ps1 需完整 git repo（worktree checkout 舊
+ * tag），Mac 無 pwsh、真機是 git archive 拷貝無 .git → 唯一順跑處是 CI windows-latest。
+ * ops 流程：CI 構建 → 下載 manifest（+ 上傳 MSI 託管、回填 fileUrl）→ auto-rollback --manifest。
+ */
+export function buildFromManifest(manifestPath: string) {
+  return async (req: BuildRollforwardRequest): Promise<RollforwardArtifact> => {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await Deno.readTextFile(manifestPath));
+    } catch (e) {
+      throw new AppError(
+        500,
+        "rollforward_manifest_read_failed",
+        `讀取 manifest 失敗（${manifestPath}）：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    return parseRollforwardManifest(raw, req);
+  };
+}
+
+/**
+ * build dep：spawn `pwsh agent-app/build-rollforward.ps1` 本地構建並讀 manifest。
+ * ⚠️ 僅在有 git + pwsh + WiX 的環境可用（首選 CI；見 buildFromManifest 的死結說明）。
  */
 export async function buildRollforwardViaPwsh(
   req: BuildRollforwardRequest,
@@ -262,49 +342,31 @@ export async function buildRollforwardViaPwsh(
 
   // 約定：build-rollforward.ps1 -EmitManifest 末行輸出 manifest 路徑（MANIFEST=<path>）
   const out = new TextDecoder().decode(stdout);
-  const m = out.match(/^MANIFEST=(.+)$/m);
-  if (!m) {
+  const mm = out.match(/^MANIFEST=(.+)$/m);
+  if (!mm) {
     throw new AppError(500, "rollforward_manifest_missing", "未從構建輸出解析到 MANIFEST 路徑");
   }
-  const manifestPath = m[1].trim();
-  const manifest = JSON.parse(await Deno.readTextFile(manifestPath)) as Partial<
-    RollforwardArtifact
-  >;
-
-  if (!manifest.version || !manifest.sha256 || !manifest.productCode) {
-    throw new AppError(
-      500,
-      "rollforward_manifest_invalid",
-      "manifest 缺 version / sha256 / productCode",
-    );
-  }
-  if (!manifest.fileUrl) {
-    throw new AppError(
-      500,
-      "rollforward_fileurl_missing",
-      "manifest 缺 fileUrl：請先上傳 MSI 到下載託管並在 manifest 寫入下載路徑",
-    );
-  }
-  return {
-    version: manifest.version,
-    sha256: manifest.sha256,
-    productCode: manifest.productCode,
-    fileUrl: manifest.fileUrl,
-    fileSizeBytes: manifest.fileSizeBytes,
-  };
+  const raw = JSON.parse(await Deno.readTextFile(mm[1].trim()));
+  return parseRollforwardManifest(raw, req);
 }
 
 /**
- * 生產 deps：真實查健康 + pwsh 構建 + DB 註冊 + 灰度派發。
+ * 生產 deps：真實查健康 + 構建 + DB 註冊 + 灰度派發。
+ * - 給 manifestPath（首選）：用 CI 產出的 manifest，不本地構建。
+ * - 否則：spawn 本地 pwsh build-rollforward.ps1（需 git+pwsh+WiX）。
  * 本地/測試請自行拼裝（如真 dispatch + stub build）。
  */
 export function makeDefaultDeps(opts?: {
+  manifestPath?: string;
   certThumbprint?: string;
   scriptPath?: string;
 }): AutoRollbackDeps {
+  const build = opts?.manifestPath
+    ? buildFromManifest(opts.manifestPath)
+    : (req: BuildRollforwardRequest) => buildRollforwardViaPwsh(req, opts);
   return {
     getHealth: getRolloutHealth,
-    build: (req) => buildRollforwardViaPwsh(req, opts),
+    build,
     registerApp: registerRollforwardApp,
     dispatch: ({ tenantId, appId, apiEndpoint, deviceIds }) =>
       rolloutAgentVersion({

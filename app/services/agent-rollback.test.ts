@@ -1,7 +1,8 @@
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert@^1";
+import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@^1";
 import {
   type AutoRollbackDeps,
   autoRollback,
+  parseRollforwardManifest,
   type RollforwardArtifact,
 } from "~/services/agent-rollback.ts";
 import type { RolloutHealthResult, RolloutResult } from "~/services/agent-rollout.ts";
@@ -139,6 +140,55 @@ Deno.test("構建版本與計畫不符 → 拋錯（守住 MajorUpgrade 命門�
     Error,
     "roll-forward 構建版本",
   );
+});
+
+// ---- parseRollforwardManifest（CI manifest 解析/校驗）----
+
+const req = { sourceRef: "agent-v1.3.0.0", version: "1.3.1.1" };
+const validManifest = {
+  version: "1.3.1.1",
+  sourceRef: "agent-v1.3.0.0",
+  sha256: "d".repeat(64),
+  productCode: "{44444444-4444-4444-4444-444444444444}",
+  fileUrl: "/api/v1/apps/rf/download/x.msi",
+  fileSizeBytes: 123456,
+};
+
+Deno.test("parseManifest: 合法 manifest → artifact", () => {
+  const a = parseRollforwardManifest(validManifest, req);
+  assertEquals(a.version, "1.3.1.1");
+  assertEquals(a.productCode, validManifest.productCode);
+  assertEquals(a.fileSizeBytes, 123456);
+});
+
+Deno.test("parseManifest: 版本不符 → 拋（守 MajorUpgrade 命門）", () => {
+  assertThrows(
+    () => parseRollforwardManifest({ ...validManifest, version: "9.9.9.9" }, req),
+    Error,
+    "manifest 版本",
+  );
+});
+
+Deno.test("parseManifest: sourceRef 不符 → 拋（防誤派別的構建）", () => {
+  assertThrows(
+    () => parseRollforwardManifest({ ...validManifest, sourceRef: "agent-v0.0.0.0" }, req),
+    Error,
+    "源碼 ref",
+  );
+});
+
+Deno.test("parseManifest: 缺 productCode → 拋", () => {
+  const { productCode: _omit, ...rest } = validManifest;
+  assertThrows(() => parseRollforwardManifest(rest, req), Error, "productCode");
+});
+
+Deno.test("parseManifest: 缺 fileUrl → 拋（須先上傳託管回填）", () => {
+  const { fileUrl: _omit, ...rest } = validManifest;
+  assertThrows(() => parseRollforwardManifest(rest, req), Error, "fileUrl");
+});
+
+Deno.test("parseManifest: 非物件 → 拋", () => {
+  assertThrows(() => parseRollforwardManifest("nope", req), Error, "manifest");
 });
 
 Deno.test("pending 不稀釋：大量 pending 下仍正確觸發並只派壞 build 設備", async () => {
