@@ -53,6 +53,33 @@ public class ReportSchemaTests
     }
 
     [Fact]
+    public void Report_SerializesAlignedDeviceFields_BatteryAndNetwork()
+    {
+        // 對齊 iOS 端 report payload：batteryLevel / networkType / networkSsid
+        var payload = new AgentReportPayload
+        {
+            SerialNumber = "F2L1234567",
+            OsVersion = "Microsoft Windows NT 10.0.19045.0",
+            AppVersion = "1.3.1.0",
+            BatteryLevel = 87,
+            NetworkType = "WiFi",
+            NetworkSsid = "Campus-WLAN",
+            ReportedAt = "2026-06-01T03:14:15Z",
+        };
+
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions
+        {
+            DefaultIgnoreCondition = System.Text.Json.Serialization
+                .JsonIgnoreCondition.WhenWritingNull,
+        });
+        var node = JsonNode.Parse(json)!.AsObject();
+
+        Assert.Equal(87, (int?)node["batteryLevel"]);
+        Assert.Equal("WiFi", (string?)node["networkType"]);
+        Assert.Equal("Campus-WLAN", (string?)node["networkSsid"]);
+    }
+
+    [Fact]
     public void Usage_Payload_SerializesStatsArray()
     {
         var payload = new UsageStatsPayload

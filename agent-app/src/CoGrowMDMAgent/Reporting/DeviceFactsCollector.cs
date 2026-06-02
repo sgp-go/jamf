@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Security.Principal;
@@ -31,6 +33,7 @@ public sealed class DeviceFactsCollector
     public DeviceFacts Collect()
     {
         var systemDrive = GetSystemDriveStats();
+        var network = GetNetwork();
 
         return new DeviceFacts
         {
@@ -39,9 +42,15 @@ public sealed class DeviceFactsCollector
             AppVersion = AppVersion,
             StorageAvailableMb = systemDrive.AvailableMb,
             StorageTotalMb = systemDrive.TotalMb,
+            BatteryLevel = GetBatteryLevel(),
+            NetworkType = network.Type,
+            NetworkSsid = network.Ssid,
             Windows = OperatingSystem.IsWindows() ? CollectWindowsFacts() : null,
         };
     }
+
+    /// <summary>序號採集對外暴露（usage 上報只需序號，不必跑完整 Collect）。</summary>
+    public string CollectSerialNumber() => GetSerialNumber();
 
     private string GetSerialNumber()
     {
@@ -86,6 +95,102 @@ public sealed class DeviceFactsCollector
         {
             _logger.LogWarning(ex, "Failed to read system drive stats");
             return (null, null);
+        }
+    }
+
+    private int? GetBatteryLevel()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            return PowerInterop.GetBatteryPercent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read battery level");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 取目前有預設閘道（即實際對外）的網卡，映射成 networkType；WiFi 時再解析
+    /// SSID。<see cref="NetworkInterface"/> 跨平台可用（dev 機亦可跑），SSID 解析
+    /// 僅 Windows。
+    /// </summary>
+    private (string? Type, string? Ssid) GetNetwork()
+    {
+        try
+        {
+            var active = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up
+                    && n.NetworkInterfaceType != NetworkInterfaceType.Loopback
+                    && n.NetworkInterfaceType != NetworkInterfaceType.Tunnel)
+                .FirstOrDefault(n => n.GetIPProperties().GatewayAddresses
+                    .Any(g => g.Address is not null && !g.Address.Equals(IPAddress.Any)));
+
+            if (active is null) return (null, null);
+
+            var type = active.NetworkInterfaceType switch
+            {
+                NetworkInterfaceType.Wireless80211 => "WiFi",
+                NetworkInterfaceType.Ethernet
+                    or NetworkInterfaceType.GigabitEthernet
+                    or NetworkInterfaceType.FastEthernetT
+                    or NetworkInterfaceType.FastEthernetFx => "Ethernet",
+                _ => active.NetworkInterfaceType.ToString(),
+            };
+
+            var ssid = (type == "WiFi" && OperatingSystem.IsWindows())
+                ? TryWifiSsid()
+                : null;
+
+            return (type, ssid);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read network info");
+            return (null, null);
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private string? TryWifiSsid()
+    {
+        // netsh wlan show interfaces 解析 SSID。⚠️ 輸出在地化（[[ps5-sc-locale-binary-parse]]）：
+        // 不依賴在地化欄位名，只匹配行首 ASCII "SSID"（排除 "BSSID"），值在冒號後。
+        // 拿不到（無 WiFi 介面 / 服務未啟）回 null，不阻斷上報。
+        try
+        {
+            var psi = new ProcessStartInfo("netsh", "wlan show interfaces")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var proc = Process.Start(psi);
+            if (proc is null) return null;
+            var output = proc.StandardOutput.ReadToEnd();
+            if (!proc.WaitForExit(2000)) { proc.Kill(); return null; }
+
+            foreach (var raw in output.Split('\n'))
+            {
+                var line = raw.Trim();
+                if (line.StartsWith("SSID", StringComparison.OrdinalIgnoreCase)
+                    && !line.StartsWith("BSSID", StringComparison.OrdinalIgnoreCase))
+                {
+                    var colon = line.IndexOf(':');
+                    if (colon < 0) continue;
+                    var value = line[(colon + 1)..].Trim();
+                    return string.IsNullOrEmpty(value) ? null : value;
+                }
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "netsh wlan ssid probe failed");
+            return null;
         }
     }
 
@@ -152,5 +257,8 @@ public sealed record DeviceFacts
     public required string AppVersion { get; init; }
     public long? StorageAvailableMb { get; init; }
     public long? StorageTotalMb { get; init; }
+    public int? BatteryLevel { get; init; }
+    public string? NetworkType { get; init; }
+    public string? NetworkSsid { get; init; }
     public WindowsFacts? Windows { get; init; }
 }

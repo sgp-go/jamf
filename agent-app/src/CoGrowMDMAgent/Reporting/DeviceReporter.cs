@@ -58,6 +58,9 @@ public sealed class DeviceReporter
             AppVersion = facts.AppVersion,
             StorageAvailableMb = facts.StorageAvailableMb,
             StorageTotalMb = facts.StorageTotalMb,
+            BatteryLevel = facts.BatteryLevel,
+            NetworkType = facts.NetworkType,
+            NetworkSsid = facts.NetworkSsid,
             ExtraData = facts.Windows is null
                 ? null
                 : new WindowsExtraData { Windows = facts.Windows },

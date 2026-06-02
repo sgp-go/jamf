@@ -3,6 +3,7 @@ using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Locking;
 using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
+using CoGrowMDMAgent.Reporting.Usage;
 using CoGrowMDMAgent.Scheduling;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -30,18 +31,32 @@ builder.Services.AddSingleton<AgentConfig>(sp =>
 builder.Services.AddSingleton<JitterScheduler>();
 builder.Services.AddSingleton<DeviceFactsCollector>();
 
-// Local persistent queue for failed reports. Path:
-//   Windows:  C:\ProgramData\CoGrow\MDM Agent\queue.db
-//   dev/test: $TMPDIR/CoGrow/MDM Agent/queue.db （SpecialFolder fallback）
-builder.Services.AddSingleton<IReportQueue>(sp =>
+// Local persistent SQLite stores. Path:
+//   Windows:  C:\ProgramData\CoGrow\MDM Agent\*.db
+//   dev/test: $TMPDIR/CoGrow/MDM Agent/*.db （SpecialFolder fallback）
+static string DataDir()
 {
     var dir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "CoGrow", "MDM Agent");
     Directory.CreateDirectory(dir);
-    var dbPath = Path.Combine(dir, "queue.db");
+    return dir;
+}
+
+// 失敗上報的持久重試佇列（queue.db）。
+builder.Services.AddSingleton<IReportQueue>(sp =>
+{
+    var dbPath = Path.Combine(DataDir(), "queue.db");
     var logger = sp.GetRequiredService<ILogger<SqliteReportQueue>>();
     return new SqliteReportQueue(dbPath, logger);
+});
+
+// 每日使用統計持久化（usage.db）；與佇列分開，schema 互不干擾。
+builder.Services.AddSingleton<IUsageStore>(sp =>
+{
+    var dbPath = Path.Combine(DataDir(), "usage.db");
+    var logger = sp.GetRequiredService<ILogger<SqliteUsageStore>>();
+    return new SqliteUsageStore(dbPath, logger);
 });
 
 builder.Services.AddHttpClient<DeviceReporter>();
@@ -50,11 +65,16 @@ builder.Services.AddHostedService<Worker>();
 // 遠端鎖定：監控 Registry 鎖定旗標，在使用者 session 拉起全螢幕鎖定窗（[[windows-lock-design]]）。
 // 與上報 Worker 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<LockWatcher>();
+// 使用時長採集：每分鐘探測 active console session 在用狀態，累計並持久化到 usage.db。
+// 與 Worker / LockWatcher 並行的獨立 hosted service；非 Windows 平台 no-op。
+builder.Services.AddHostedService<SessionUsageMonitor>();
 
 var host = builder.Build();
 
-// Initialise SQLite schema before Worker starts (idempotent CREATE TABLE IF NOT EXISTS).
+// Initialise SQLite schemas before hosted services start (idempotent CREATE TABLE IF NOT EXISTS).
 await host.Services.GetRequiredService<IReportQueue>()
+    .InitializeAsync(CancellationToken.None);
+await host.Services.GetRequiredService<IUsageStore>()
     .InitializeAsync(CancellationToken.None);
 
 host.Run();

@@ -1,9 +1,11 @@
 using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Locking;
+using CoGrowMDMAgent.Reporting.Usage;
 using CoGrowMDMAgent.Scheduling;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CoGrowMDMAgent.Tests;
 
@@ -57,5 +59,23 @@ public class DiWiringTests
 
         var hosted = provider.GetServices<IHostedService>();
         Assert.Contains(hosted, h => h is LockWatcher);
+    }
+
+    [Fact]
+    public void SessionUsageMonitor_resolves_as_hosted_service()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        // 鏡像 Program.cs：monitor 依賴 IUsageStore
+        services.AddSingleton<IUsageStore>(
+            new SqliteUsageStore(
+                Path.Combine(Path.GetTempPath(), $"di-usage-{Guid.NewGuid():N}.db"),
+                NullLogger<SqliteUsageStore>.Instance));
+        services.AddHostedService<SessionUsageMonitor>();
+
+        using var provider = services.BuildServiceProvider();
+
+        var hosted = provider.GetServices<IHostedService>();
+        Assert.Contains(hosted, h => h is SessionUsageMonitor);
     }
 }

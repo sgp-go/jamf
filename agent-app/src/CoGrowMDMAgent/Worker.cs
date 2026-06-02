@@ -1,6 +1,8 @@
+using System.Globalization;
 using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
+using CoGrowMDMAgent.Reporting.Usage;
 using CoGrowMDMAgent.Scheduling;
 
 namespace CoGrowMDMAgent;
@@ -21,10 +23,16 @@ public class Worker : BackgroundService
     /// (kept in DB for audit, never re-tried). 10 ≈ ~10 days at 1 cycle/day.</summary>
     private const int MaxAttempts = 10;
 
+    /// <summary>每次上報週期回填的使用統計天數窗口（含當天）。後端以
+    /// (deviceId, date) upsert，重複上報同一天會覆蓋，故安全地多帶幾天。</summary>
+    private const int UsageReportDays = 7;
+
     private readonly ILogger<Worker> _logger;
     private readonly JitterScheduler _scheduler;
     private readonly DeviceReporter _deviceReporter;
     private readonly UsageReporter _usageReporter;
+    private readonly IUsageStore _usageStore;
+    private readonly DeviceFactsCollector _facts;
     private readonly IReportQueue _queue;
     private readonly AgentConfigProvider _configProvider;
 
@@ -33,6 +41,8 @@ public class Worker : BackgroundService
         JitterScheduler scheduler,
         DeviceReporter deviceReporter,
         UsageReporter usageReporter,
+        IUsageStore usageStore,
+        DeviceFactsCollector facts,
         IReportQueue queue,
         AgentConfigProvider configProvider)
     {
@@ -40,6 +50,8 @@ public class Worker : BackgroundService
         _scheduler = scheduler;
         _deviceReporter = deviceReporter;
         _usageReporter = usageReporter;
+        _usageStore = usageStore;
+        _facts = facts;
         _queue = queue;
         _configProvider = configProvider;
     }
@@ -94,6 +106,49 @@ public class Worker : BackgroundService
         {
             // Reporter 已自動入隊；這裡只記 log 不再額外處理
             _logger.LogError(ex, "Report cycle failed — payload enqueued for retry");
+        }
+
+        await ReportUsageAsync(ct);
+    }
+
+    /// <summary>
+    /// 上報 <see cref="SessionUsageMonitor"/> 持續累計、持久化於 store 的近幾天
+    /// 使用統計。失敗時 <see cref="UsageReporter"/> 已自行入隊重試；store 為真相
+    /// 源，下個週期會再次全量回填，故此處只記 log 不額外處理。
+    /// </summary>
+    private async Task ReportUsageAsync(CancellationToken ct)
+    {
+        try
+        {
+            var since = DateTime.Now.Date
+                .AddDays(-(UsageReportDays - 1))
+                .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            var days = await _usageStore.LoadSinceAsync(since, ct);
+            if (days.Count == 0) return;
+
+            var stats = days
+                .Select(d => new UsageStatItem
+                {
+                    Date = d.Date,
+                    TotalMinutes = d.TotalMinutes,
+                    Pickup = d.Pickup,
+                    MaxContinuous = d.MaxContinuous,
+                    TimeStats = d.TimeStats.Count == 0
+                        ? null
+                        : new Dictionary<string, int>(d.TimeStats),
+                })
+                .ToList();
+
+            await _usageReporter.ReportAsync(
+                stats, sessionId: null, _facts.CollectSerialNumber(), ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Usage report cycle failed — payload enqueued for retry");
         }
     }
 
