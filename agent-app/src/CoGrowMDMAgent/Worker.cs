@@ -19,9 +19,10 @@ public class Worker : BackgroundService
     /// bounded; remaining rows wait for the next cycle).</summary>
     private const int DrainBatchSize = 25;
 
-    /// <summary>Reports that fail this many retries become dead-letters
-    /// (kept in DB for audit, never re-tried). 10 ≈ ~10 days at 1 cycle/day.</summary>
-    private const int MaxAttempts = 10;
+    /// <summary>保留窗口（天）：created_at 早於 now-此天數的失敗報告不再重試，
+    /// 成為 dead-letter（留庫審計）。30 天涵蓋寒暑假長期關機設備上線後仍可補送；
+    /// usage 另有 <see cref="UsageReportDays"/> 天回填作雙保險。</summary>
+    private const int RetentionDays = 30;
 
     /// <summary>每次上報週期回填的使用統計天數窗口（含當天）。後端以
     /// (deviceId, date) upsert，重複上報同一天會覆蓋，故安全地多帶幾天。</summary>
@@ -72,11 +73,18 @@ public class Worker : BackgroundService
             _configProvider.TryReload();
 
             var nowUtc = DateTime.UtcNow;
-            var nextRun = _scheduler.GetNextRunTime(nowUtc);
-            var wait = nextRun - nowUtc;
+            var dailySlot = _scheduler.GetNextRunTime(nowUtc);
+
+            // 佇列有待重試項時，提前喚醒到最近的 next_retry_at，不必死等次日 slot
+            // —— 一次網路抖動的補報延遲從「整天」降到退避間隔（首次 15min）。
+            var earliestRetry = await GetEarliestRetryAsync(nowUtc, stoppingToken);
+            var nextWake = earliestRetry is { } r && r < dailySlot ? r : dailySlot;
+            var wait = nextWake - nowUtc;
+            if (wait < TimeSpan.Zero) wait = TimeSpan.Zero;
+
             _logger.LogInformation(
-                "Next report at {NextRun:o} (in {Hours:F2}h)",
-                nextRun, wait.TotalHours);
+                "Next wake at {NextWake:o} (in {Hours:F2}h); daily slot {Slot:o}",
+                nextWake, wait.TotalHours, dailySlot);
 
             try
             {
@@ -87,8 +95,27 @@ public class Worker : BackgroundService
                 return;
             }
 
-            await RunReportCycleAsync(stoppingToken);
+            // 越過本次算出的 daily slot 才跑完整採集 cycle；否則只是 retry 喚醒，僅 drain。
+            if (DateTime.UtcNow >= dailySlot)
+            {
+                await RunReportCycleAsync(stoppingToken);
+            }
             await DrainQueueAsync(stoppingToken);
+        }
+    }
+
+    /// <summary>佇列中最近的 next_retry_at（保留窗口內）；查詢失敗不崩主循環，回 null。</summary>
+    private async Task<DateTime?> GetEarliestRetryAsync(DateTime nowUtc, CancellationToken ct)
+    {
+        try
+        {
+            return await _queue.GetEarliestNextRetryAsync(
+                nowUtc.AddDays(-RetentionDays), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "GetEarliestNextRetry failed — falling back to daily slot");
+            return null;
         }
     }
 
@@ -154,10 +181,12 @@ public class Worker : BackgroundService
 
     private async Task DrainQueueAsync(CancellationToken ct)
     {
+        var nowUtc = DateTime.UtcNow;
+        var cutoff = nowUtc.AddDays(-RetentionDays);
         IReadOnlyList<PendingReport> batch;
         try
         {
-            batch = await _queue.DequeueBatchAsync(DrainBatchSize, MaxAttempts, ct);
+            batch = await _queue.DequeueDueAsync(DrainBatchSize, nowUtc, cutoff, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -166,7 +195,7 @@ public class Worker : BackgroundService
         }
         if (batch.Count == 0) return;
 
-        _logger.LogInformation("Draining {Count} pending reports", batch.Count);
+        _logger.LogInformation("Draining {Count} due reports", batch.Count);
         foreach (var item in batch)
         {
             if (ct.IsCancellationRequested) return;
