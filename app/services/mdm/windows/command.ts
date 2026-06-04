@@ -22,12 +22,18 @@ import {
 } from "~/services/mdm/devices.ts";
 import {
   getNextQueuedWindowsCommand,
+  listMdmCommands,
   queueWindowsCommand,
   updateMdmCommand,
 } from "~/services/mdm/commands.ts";
 import { isInternalCommandType } from "~/services/mdm/command-events.ts";
 import { upsertWindowsApp } from "~/services/mdm/windows/windows-apps.ts";
 import { parseSyncML, buildSyncML, type SyncMLCommand } from "./syncml.ts";
+import {
+  buildAppInventoryFetch,
+  buildGetPushChannelUri,
+  buildSetPushPfn,
+} from "./csp.ts";
 import { parseInventoryData, isInventoryResult } from "./inventory.ts";
 import { getWnsClient, WnsAuthError } from "~/services/wns/client.ts";
 import type { MdmDevice } from "~/db/schema/devices.ts";
@@ -148,10 +154,59 @@ export async function handleSyncMLRequest(opts: {
           version: e.version ?? null,
           installState: e.installState ?? null,
         });
+        // 自動 push 配置（時序後半段）：push MSIX 裝好（installState=0）且設備尚無
+        // channel → 下發 push-config（Replace Push/PFN + Get ChannelURI）。
+        // 卡點：PFN CSP 要求對應 MSIX 已裝，故必須等 inventory 確認裝好才能下發。
+        const pushPfn = Deno.env.get("WNS_PFN");
+        if (
+          pushPfn && e.packageFamilyName === pushPfn &&
+          e.installState === "0" && !device.wnsChannelUri
+        ) {
+          await enqueueWindowsCommand({
+            deviceUdid: device.udid!,
+            commandType: "PushSetPfn",
+            command: buildSetPushPfn(pushPfn),
+          });
+          await enqueueWindowsCommand({
+            deviceUdid: device.udid!,
+            commandType: "PushGetChannelUri",
+            command: buildGetPushChannelUri(),
+          });
+          console.log(
+            `[Win MDM] push MSIX 已裝，自動配置 push channel udid=${device.udid}`,
+          );
+        }
       }
       console.log(
         `[Win MDM] Inventory: device=${deviceId} 收到 ${entries.length} 個應用`,
       );
+
+      // 自愈：配 push 中但 push MSIX 還沒裝好 → 續一個 inventory fetch 驅動設備再上報，
+      // 直到裝好觸發上面的 push-config。一進一出（每次上報續一個，設備執行後再上報），不堆積。
+      const healPfn = Deno.env.get("WNS_PFN");
+      if (healPfn && !device.wnsChannelUri) {
+        const batchPush = entries.find((e) => e.packageFamilyName === healPfn);
+        if (batchPush?.installState !== "0") {
+          // 還沒裝好。確認設備確在配 push（有 push MSIX install 命令）才續，
+          // 避免普通 inventory 查詢（無 push MSIX）被無限續 fetch。
+          const cmds = await listMdmCommands(device.udid!, { limit: 30 });
+          const configuringPush = cmds.some(
+            (cmd) =>
+              cmd.commandType === "MsixInstall" &&
+              (cmd.cspPath ?? "").includes(healPfn),
+          );
+          if (configuringPush) {
+            await enqueueWindowsCommand({
+              deviceUdid: device.udid!,
+              commandType: "AppInventoryFetch",
+              command: buildAppInventoryFetch(),
+            });
+            console.log(
+              `[Win MDM] push 配置中,push MSIX 未就緒,續 inventory fetch udid=${device.udid}`,
+            );
+          }
+        }
+      }
       continue;
     }
     // DMClient Push/ChannelURI Get 結果 → 入庫供 WNS push 使用

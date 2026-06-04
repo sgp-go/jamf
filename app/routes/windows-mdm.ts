@@ -46,6 +46,8 @@ import {
   type PollConfig,
   type WipeAction,
 } from "~/services/mdm/windows/csp.ts";
+import { buildSetManualUnenroll } from "~/services/mdm/windows/csp-experience.ts";
+import { setupDevicePush } from "~/services/mdm/windows/push-setup.ts";
 import { getWnsClient, WnsAuthError } from "~/services/wns/client.ts";
 import {
   enrollWindowsDevice,
@@ -208,6 +210,44 @@ w.post("/EnrollmentServer/Enrollment.svc", async (c) => {
       hardwareId ?? "?"
     }`,
   );
+
+  // 教育場景防脫離：註冊成功即自動下發「禁止手動注銷」策略（灰掉設定裡「斷開連接」）。
+  // 命令入隊後由設備首次 management session（1201）拉取執行。
+  // try-catch 隔離：鎖命令失敗絕不能連累 enrollment 的 200 響應，否則設備註冊失敗。
+  // 需豁免某台（如演示機）→ POST /api/mdm/win/devices/:udid/enrollment-lock {"allow":true} 單獨解鎖。
+  try {
+    await enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: "SetManualUnenroll",
+      command: buildSetManualUnenroll(false),
+    });
+    console.log(`[Win MDM] 已自動排入禁手動注銷策略 udid=${udid}`);
+  } catch (e) {
+    console.warn(
+      `[Win MDM] 自動禁手動注銷下發失敗（不影響註冊）: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+
+  // 教育場景：註冊成功後自動啟動 push 配置（下發信任 cert + 派送 push MSIX）。
+  // 設備裝完 push MSIX 後，command.ts 的 inventory 處理會自動接上 push-config。
+  // try-catch 隔離：push 配置失敗（如 WNS_PFN 未配 / push MSIX 未上傳）不影響 enrollment 200。
+  try {
+    const pushResult = await setupDevicePush({
+      udid,
+      tenantId: config.tenantId,
+    });
+    console.log(
+      `[Win MDM] 已自動排入 push 配置 udid=${udid} cmds=${pushResult.commandUuids.length} contentUri=${pushResult.contentUri}`,
+    );
+  } catch (e) {
+    console.warn(
+      `[Win MDM] 自動 push 配置失敗（不影響註冊）: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
 
   setSoapHeaders(c, SOAP_ENROLLMENT_RESP, result.soapResponse);
   return c.body(result.soapResponse, 200);
@@ -800,6 +840,67 @@ w.post("/api/mdm/win/devices/:udid/wipe", async (c) => {
     note:
       "Command queued. Device will pick up on next poll (1-60 min) or via WNS push (if configured).",
   });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/enrollment-lock — 防脫離：設定是否允許手動注銷 MDM
+ *
+ * body: { allow?: boolean }（省略 / false = 鎖定納管，禁止使用者在設定裡「斷開連接」；
+ * true = 恢復 Windows 預設允許）。下發 Experience/AllowManualMDMUnenrollment 策略。
+ *
+ * ⚠️ 只擋 GUI 注銷，擋不住管理員抹機重裝（見 buildSetManualUnenroll 註釋的縱深防禦）。
+ */
+w.post("/api/mdm/win/devices/:udid/enrollment-lock", async (c) => {
+  const udid = c.req.param("udid");
+  const device = await getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  // 預設鎖定（allow=false）；明確傳 true 才解鎖
+  const body = await c.req.json().catch(() => ({}));
+  const allow = body.allow === true;
+
+  const cmd = buildSetManualUnenroll(allow);
+  const commandUuid = await enqueueWindowsCommand({
+    deviceUdid: udid,
+    commandType: "SetManualUnenroll",
+    command: cmd,
+  });
+
+  return c.json({
+    commandUuid,
+    allow,
+    note: allow
+      ? "Manual MDM unenrollment ALLOWED (Windows default). Queued; device picks up on next poll or WNS push."
+      : "Manual MDM unenrollment BLOCKED (disconnect button disabled). Queued; device picks up on next poll or WNS push.",
+  });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/setup-push — 手動觸發 push 配置（下發信任 cert + 派送 push MSIX）
+ *
+ * 與 enrollment 自動 hook 共用 setupDevicePush()。設備裝完 push MSIX 後，
+ * inventory 處理會自動接上 push-config（Replace Push/PFN + Get ChannelURI）。
+ * 用於對已註冊設備補配 push，或手動驗證整條鏈。
+ */
+w.post("/api/mdm/win/devices/:udid/setup-push", async (c) => {
+  const udid = c.req.param("udid");
+  const device = await getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+  try {
+    const r = await setupDevicePush({
+      udid,
+      tenantId: device.tenantId!,
+    });
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json(
+      { ok: false, error: e instanceof Error ? e.message : String(e) },
+      500,
+    );
+  }
 });
 
 // ============================================================
