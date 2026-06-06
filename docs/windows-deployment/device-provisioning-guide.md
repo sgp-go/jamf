@@ -46,11 +46,48 @@
 
 ---
 
+## 1.5 新租戶初始化（台灣團隊後端操作，每校一次）
+
+每個學校（租戶）首次使用前，需完成以下初始化：
+
+```bash
+# 1. 建立租戶
+curl -X POST /api/v1/admin/tenants \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"slug": "school-a", "displayName": "A 學校"}'
+# → 記下 tenantId
+
+# 2. 初始化 MDM 配置（自動生成 CA 根憑證）
+curl -X POST /api/v1/admin/tenants/{tenantId}/mdm-config \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"publicBaseUrl": "https://mdm.school-a.edu"}'
+
+# 3. （選填）設定文件下載走校內 LAN
+curl -X PATCH /api/v1/admin/tenants/{tenantId}/mdm-config \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"appDownloadBaseUrl": "http://192.168.1.100:3000"}'
+
+# 4. 上傳 Agent MSI（詳見 agent-app-build-and-deploy.md）
+curl -X POST /api/v1/admin/tenants/{tenantId}/apps \
+  -F "file=@CoGrowMDMAgent.msi" \
+  -F "displayName=CoGrow MDM Agent" \
+  -F "version=1.3.12.0" \
+  -F "bundleId={176848CB-7917-4829-B158-F18F7585B7DA}"
+```
+
+完成後即可生成 PPKG、接受設備 enrollment。
+
+> ⚠️ `POST /mdm-config` 會自動生成 per-tenant CA 根憑證（10 年有效期）。無需手動建立 CA。
+> PPKG 裡的 DiscoveryUrl 會自動帶上 tenant slug：`{publicBaseUrl}/t/{slug}/EnrollmentServer/Discovery.svc`，確保多租戶 enrollment 路由正確。
+
+---
+
 ## 2. 前置準備（IT / 台灣團隊一次性）
 
 | 項目 | 說明 |
 |---|---|
 | **後端服務 + 公網 HTTPS** | MDM 後端須對外有有效 CA 的 HTTPS 域名（Windows 拒絕自簽 TLS）。生產用固定域名。 |
+| **租戶已初始化** | 已完成 §1.5 的租戶建立 + MDM 配置。 |
 | **一台 ADK 工具機** | 裝有 Windows ADK 的 Win10/11，用來把 API 產出的 `customizations.xml` build 成 `.ppkg`（ICD 是 Windows 專屬工具）。可由台灣團隊集中維護一台。 |
 | **Admin API Token** | 呼叫 PPKG 生成 API 用。 |
 | **校園 WiFi 資訊** | SSID + 密碼（填進 PPKG，設備 OOBE 即自動連網）。 |
