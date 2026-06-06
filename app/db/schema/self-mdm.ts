@@ -26,6 +26,7 @@ export const selfMdmConfigs = pgTable(
       .references(() => tenants.id, { onDelete: "cascade" })
       .unique(),
     publicBaseUrl: text().notNull(),
+    appDownloadBaseUrl: text(),
     apnsTopic: text(),
     apnsCertPem: text(),
     apnsKeyPemEnc: text(),

@@ -32,13 +32,21 @@ import {
   buildAppInventoryConfig,
   buildAppInventoryFetch,
   buildGetPushChannelUri,
+  buildLapsAdmxInstall,
   buildLockAdmxInstall,
   buildMsixInstall,
   buildMsixInstallAddNode,
   buildMsixUninstall,
   buildMsixUpdate,
   buildReboot,
+  buildLapsClear,
+  buildLapsRotation,
+  buildLockState,
+  buildPpkgRemoval,
+  buildPpkgRemovalClear,
+  buildSelfUninstall,
   buildRemoteWipe,
+  buildUnenroll,
   buildSetPollInterval,
   buildSetPushPfn,
   buildUpdateScan,
@@ -46,8 +54,10 @@ import {
   type PollConfig,
   type WipeAction,
 } from "~/services/mdm/windows/csp.ts";
-import { buildSetManualUnenroll } from "~/services/mdm/windows/csp-experience.ts";
+import { buildSetAllowRestore, buildSetManualUnenroll } from "~/services/mdm/windows/csp-experience.ts";
+import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { setupDevicePush } from "~/services/mdm/windows/push-setup.ts";
+import { installAgentOnDevice } from "~/services/install-agent.ts";
 import { getWnsClient, WnsAuthError } from "~/services/wns/client.ts";
 import {
   enrollWindowsDevice,
@@ -59,6 +69,7 @@ import { listMdmCommands } from "~/services/mdm/commands.ts";
 import { listWindowsAppsByDevice } from "~/services/mdm/windows/windows-apps.ts";
 import {
   getActiveSelfMdmConfig,
+  getSelfMdmConfigByTenantSlug,
   loadCaFromConfig,
 } from "~/services/mdm/self-mdm-config.ts";
 
@@ -93,7 +104,169 @@ function setSoapHeaders(c: Context, contentType: string, body: string) {
   c.header("Content-Encoding", "identity");
 }
 
-/** POST /EnrollmentServer/Discovery.svc — Discover SOAP */
+// ============================================================
+// 多租戶 Enrollment 路由（/t/:tenantSlug/EnrollmentServer/...）
+// ============================================================
+
+/** POST /t/:tenantSlug/EnrollmentServer/Discovery.svc */
+w.post("/t/:tenantSlug/EnrollmentServer/Discovery.svc", async (c) => {
+  const slug = c.req.param("tenantSlug");
+  const xml = await c.req.text();
+  const req = parseDiscoverRequest(xml);
+  if (!req.messageId) return c.text("missing MessageID", 400);
+
+  const baseUrl = getBaseUrl(c);
+  const tenantBase = `${baseUrl}/t/${slug}`;
+  const responseXml = buildDiscoverResponse({
+    requestMessageId: req.messageId,
+    baseUrl: tenantBase,
+  });
+  console.log(
+    `[Win MDM] Discovery (tenant=${slug}): email=${req.emailAddress ?? "?"} baseUrl=${tenantBase}`,
+  );
+  setSoapHeaders(c, SOAP_DISCOVER_RESP, responseXml);
+  return c.body(responseXml, 200);
+});
+
+/** POST /t/:tenantSlug/EnrollmentServer/Policy.svc */
+w.post("/t/:tenantSlug/EnrollmentServer/Policy.svc", async (c) => {
+  const xml = await c.req.text();
+  const messageId = parsePolicyMessageId(xml);
+  if (!messageId) return c.text("missing MessageID", 400);
+  const responseXml = buildPolicyResponse({ requestMessageId: messageId });
+  setSoapHeaders(c, SOAP_POLICY_RESP, responseXml);
+  return c.body(responseXml, 200);
+});
+
+/** POST /t/:tenantSlug/EnrollmentServer/Enrollment.svc */
+w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", async (c) => {
+  const slug = c.req.param("tenantSlug");
+  const xml = await c.req.text();
+  let parsed;
+  try {
+    parsed = parseEnrollmentRequest(xml);
+  } catch (e) {
+    console.error("[Win MDM] Enrollment 解析失敗:", e);
+    return c.text(`bad RST: ${(e as Error).message}`, 400);
+  }
+  if (!parsed.messageId) return c.text("missing MessageID", 400);
+
+  let config;
+  try {
+    config = await getSelfMdmConfigByTenantSlug(slug);
+  } catch (e) {
+    console.error(`[Win MDM] tenant slug "${slug}" config 取得失敗:`, e);
+    return c.text(`tenant "${slug}" not configured`, 404);
+  }
+  const ca = loadCaFromConfig(config);
+
+  const deviceId = parsed.context.DeviceID ||
+    parsed.context["DeviceID"] ||
+    crypto.randomUUID();
+  const hardwareId = parsed.context.HWDevID ?? null;
+  const baseUrl = getBaseUrl(c);
+  const managementUrl = `${baseUrl}/api/mdm/win/manage/${encodeURIComponent(deviceId)}`;
+  const wnsPfn: string | undefined = undefined;
+
+  let result;
+  try {
+    result = buildEnrollmentResponse({
+      requestMessageId: parsed.messageId,
+      deviceId,
+      managementUrl,
+      csrPem: parsed.csrPem,
+      wnsPfn,
+      ca,
+    });
+  } catch (e) {
+    console.error("[Win MDM] CSR 簽發失敗:", e);
+    return c.text(`signing failed: ${(e as Error).message}`, 500);
+  }
+
+  const udid = `windows-${deviceId}`;
+  await enrollWindowsDevice({
+    tenantId: config.tenantId,
+    selfMdmConfigId: config.id,
+    udid,
+    windowsDeviceId: deviceId,
+    windowsHardwareId: hardwareId,
+    deviceName: parsed.context.DeviceName ?? null,
+    osVersion: parsed.context.OSVersion ?? null,
+  });
+
+  await insertDeviceCertificate({
+    selfMdmConfigId: config.id,
+    deviceUdid: udid,
+    certificatePem: result.deviceCertPem,
+    subject: `CN=${deviceId}`,
+  });
+
+  console.log(
+    `[Win MDM] Enrolled (tenant=${slug}): deviceId=${deviceId} udid=${udid}`,
+  );
+
+  // enrollment hook: 禁手動註銷 + 隱藏復原頁面
+  try {
+    await enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: "SetManualUnenroll",
+      command: buildSetManualUnenroll(false),
+    });
+    await enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: "DisableRestore",
+      command: buildSetAllowRestore(false),
+    });
+    console.log(`[Win MDM] 已自動排入防脫離策略 udid=${udid}`);
+  } catch (e) {
+    console.warn(`[Win MDM] 防脫離策略下發失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // push 配置
+  try {
+    const pushResult = await setupDevicePush({ udid, tenantId: config.tenantId });
+    console.log(`[Win MDM] 已自動排入 push 配置 udid=${udid} cmds=${pushResult.commandUuids.length}`);
+  } catch (e) {
+    console.warn(`[Win MDM] 自動 push 配置失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // install-agent + LAPS
+  try {
+    const { db: dbImport } = await import("~/db/client.ts");
+    const { apps } = await import("~/db/schema/apps.ts");
+    const { eq: eqOp, and: andOp, desc: descOp } = await import("drizzle-orm");
+    const enrolledDevice = await getMdmDevice(udid);
+    const latestApp = await dbImport.query.apps.findFirst({
+      where: andOp(
+        eqOp(apps.tenantId, config.tenantId),
+        eqOp(apps.platform, "windows"),
+        eqOp(apps.kind, "msi"),
+      ),
+      orderBy: [descOp(apps.createdAt)],
+      columns: { id: true },
+    });
+    if (latestApp && enrolledDevice) {
+      const agentResult = await installAgentOnDevice({
+        tenantId: config.tenantId,
+        deviceId: enrolledDevice.id,
+        appId: latestApp.id,
+        apiEndpoint: `${config.publicBaseUrl}/api/v1`,
+      });
+      console.log(`[Win MDM] 已自動排入 install-agent + LAPS udid=${udid} cmds=${agentResult.commandIds.length}`);
+    }
+  } catch (e) {
+    console.warn(`[Win MDM] 自動 install-agent 失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  setSoapHeaders(c, SOAP_ENROLLMENT_RESP, result.soapResponse);
+  return c.body(result.soapResponse, 200);
+});
+
+// ============================================================
+// 舊路由（向下相容，單租戶 / 已有設備）
+// ============================================================
+
+/** POST /EnrollmentServer/Discovery.svc — Discover SOAP（舊路由，向下相容） */
 w.post("/EnrollmentServer/Discovery.svc", async (c) => {
   const xml = await c.req.text();
   const req = parseDiscoverRequest(xml);
@@ -221,10 +394,15 @@ w.post("/EnrollmentServer/Enrollment.svc", async (c) => {
       commandType: "SetManualUnenroll",
       command: buildSetManualUnenroll(false),
     });
-    console.log(`[Win MDM] 已自動排入禁手動注銷策略 udid=${udid}`);
+    await enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: "DisableRestore",
+      command: buildSetAllowRestore(false),
+    });
+    console.log(`[Win MDM] 已自動排入禁手動注銷 + 禁重設策略 udid=${udid}`);
   } catch (e) {
     console.warn(
-      `[Win MDM] 自動禁手動注銷下發失敗（不影響註冊）: ${
+      `[Win MDM] 自動防脫離策略下發失敗（不影響註冊）: ${
         e instanceof Error ? e.message : String(e)
       }`,
     );
@@ -244,6 +422,43 @@ w.post("/EnrollmentServer/Enrollment.svc", async (c) => {
   } catch (e) {
     console.warn(
       `[Win MDM] 自動 push 配置失敗（不影響註冊）: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+
+  // 自動派發 Agent App（含 LAPS ADMX + 密碼輪換）。
+  // 需要 tenant 下有 Windows Agent App 記錄，否則靜默跳過。
+  try {
+    const { db } = await import("~/db/client.ts");
+    const { apps } = await import("~/db/schema/apps.ts");
+    const { eq: eqOp, and: andOp, desc: descOp } = await import("drizzle-orm");
+    const enrolledDevice = await getMdmDevice(udid);
+    const latestApp = await db.query.apps.findFirst({
+      where: andOp(
+        eqOp(apps.tenantId, config.tenantId),
+        eqOp(apps.platform, "windows"),
+        eqOp(apps.kind, "msi"),
+      ),
+      orderBy: [descOp(apps.createdAt)],
+      columns: { id: true },
+    });
+    if (latestApp && enrolledDevice) {
+      const agentResult = await installAgentOnDevice({
+        tenantId: config.tenantId,
+        deviceId: enrolledDevice.id,
+        appId: latestApp.id,
+        apiEndpoint: `${config.publicBaseUrl}/api/v1`,
+      });
+      console.log(
+        `[Win MDM] 已自動排入 install-agent + LAPS udid=${udid} cmds=${agentResult.commandIds.length}`,
+      );
+    } else {
+      console.warn(`[Win MDM] 自動 install-agent 跳過：${!latestApp ? "tenant 下無 Windows MSI app" : "device 未找到"}`);
+    }
+  } catch (e) {
+    console.warn(
+      `[Win MDM] 自動 install-agent 失敗（不影響註冊）: ${
         e instanceof Error ? e.message : String(e)
       }`,
     );
@@ -733,14 +948,16 @@ w.post("/api/mdm/win/devices/provision-lock-policy/bulk", async (c) => {
   const failures: Array<{ udid: string; error: string }> = [];
   let udids: string[];
 
+  const tenantId = typeof body.tenantId === "string" ? body.tenantId : undefined;
+
   if (body.all === true) {
-    // 全部 windows 設備：list 已保證 platform，無需逐台重查 getMdmDevice。
-    // udid schema 可空，過濾掉未完成 enrollment 的空 udid 設備。
-    udids = (await listMdmDevicesByPlatform("windows"))
+    if (!tenantId) {
+      return c.json({ error: "all=true requires tenantId for tenant isolation" }, 400);
+    }
+    udids = (await listMdmDevicesByPlatform("windows", tenantId))
       .map((d) => d.udid)
       .filter((u): u is string => u !== null);
   } else if (Array.isArray(body.deviceUdids) && body.deviceUdids.length > 0) {
-    // 指定設備：逐台驗證存在且為 windows，不存在的記入 failures 不中斷。
     udids = [];
     for (const udid of body.deviceUdids as string[]) {
       const device = await getMdmDevice(udid);
@@ -752,12 +969,11 @@ w.post("/api/mdm/win/devices/provision-lock-policy/bulk", async (c) => {
     }
   } else {
     return c.json(
-      { error: "either { all: true } or { deviceUdids: string[] } required" },
+      { error: "either { all: true, tenantId: '...' } or { deviceUdids: string[] } required" },
       400,
     );
   }
 
-  // 命令內容對所有設備相同，構造一次複用（單台端點每次重建）。
   const admx = buildLockAdmxInstall();
   let queued = 0;
   for (const udid of udids) {
@@ -780,6 +996,74 @@ w.post("/api/mdm/win/devices/provision-lock-policy/bulk", async (c) => {
     failures,
     note:
       "Lock ADMX ingest 已批量入隊。設備靠各自 poll 週期(1-60min)自然錯峰拉取，" +
+      "批量入隊不發 WNS，無 429 風險。已 ingest 設備回 418(無害)。",
+  });
+});
+
+/**
+ * POST /api/mdm/win/devices/provision-laps-policy/bulk — 批量補發 LAPS ADMX ingest
+ *
+ * 供「存量設備」批量補 ingest LAPS 策略。模式與 Lock bulk 端點完全相同。
+ */
+w.post("/api/mdm/win/devices/provision-laps-policy/bulk", async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid json body" }, 400);
+  }
+
+  const failures: Array<{ udid: string; error: string }> = [];
+  let udids: string[];
+
+  const tenantId = typeof body.tenantId === "string" ? body.tenantId : undefined;
+
+  if (body.all === true) {
+    if (!tenantId) {
+      return c.json({ error: "all=true requires tenantId for tenant isolation" }, 400);
+    }
+    udids = (await listMdmDevicesByPlatform("windows", tenantId))
+      .map((d) => d.udid)
+      .filter((u): u is string => u !== null);
+  } else if (Array.isArray(body.deviceUdids) && body.deviceUdids.length > 0) {
+    udids = [];
+    for (const udid of body.deviceUdids as string[]) {
+      const device = await getMdmDevice(udid);
+      if (!device || device.platform !== "windows") {
+        failures.push({ udid, error: "device not found" });
+        continue;
+      }
+      udids.push(udid);
+    }
+  } else {
+    return c.json(
+      { error: "either { all: true, tenantId: '...' } or { deviceUdids: string[] } required" },
+      400,
+    );
+  }
+
+  const admx = buildLapsAdmxInstall();
+  let queued = 0;
+  for (const udid of udids) {
+    try {
+      await enqueueWindowsCommand({
+        deviceUdid: udid,
+        commandType: "policy_admx_install",
+        command: admx,
+      });
+      queued++;
+    } catch (e) {
+      failures.push({ udid, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return c.json({
+    total: queued + failures.length,
+    queued,
+    failed: failures.length,
+    failures,
+    note:
+      "LAPS ADMX ingest 已批量入隊。設備靠各自 poll 週期自然錯峰拉取，" +
       "批量入隊不發 WNS，無 429 風險。已 ingest 設備回 418(無害)。",
   });
 });
@@ -839,6 +1123,103 @@ w.post("/api/mdm/win/devices/:udid/wipe", async (c) => {
     action,
     note:
       "Command queued. Device will pick up on next poll (1-60 min) or via WNS push (if configured).",
+  });
+});
+
+/**
+ * POST /api/mdm/win/devices/:udid/unenroll — 遠端移除 MDM 管控
+ *
+ * 按序下發清理命令 + unenroll：
+ *   1. 解鎖手動註銷（AllowManualMDMUnenrollment=1）
+ *   2. 禁用 LAPS 策略（清 registry 密碼殘留）
+ *   3. 禁用 Lock 策略（解鎖設備）
+ *   4. 卸載 Agent MSI（如已安裝）
+ *   5. 卸載 Push MSIX（如已安裝）
+ *   6. Unenroll（DMClient/Unenroll）
+ *   7. 更新 DB 狀態
+ */
+w.post("/api/mdm/win/devices/:udid/unenroll", async (c) => {
+  const udid = c.req.param("udid");
+  const device = await getMdmDevice(udid);
+  if (!device || device.platform !== "windows") {
+    return c.json({ error: "device not found" }, 404);
+  }
+
+  const cmds: { type: string; cmd: SyncMLCommand }[] = [];
+
+  // 1. 解鎖手動註銷
+  cmds.push({ type: "SetManualUnenroll", cmd: buildSetManualUnenroll(true) });
+  cmds.push({ type: "EnableRestore", cmd: buildSetAllowRestore(true) });
+
+  // 2. 重置管理員密碼（LAPS 改回固定值，Agent 還在跑會執行）
+  {
+    const { db } = await import("~/db/client.ts");
+    const { mdmWindowsLaps } = await import("~/db/schema/laps.ts");
+    const { eq: eqOp, desc: descOp, and: andOp } = await import("drizzle-orm");
+    const latestLaps = await db.query.mdmWindowsLaps.findFirst({
+      where: eqOp(mdmWindowsLaps.deviceId, device.id),
+      orderBy: [descOp(mdmWindowsLaps.createdAt)],
+      columns: { adminAccount: true },
+    });
+    const adminAccount = latestLaps?.adminAccount ?? "Administrator";
+    const resetCmd = buildLapsRotation({
+      newPassword: "123456",
+      adminAccount,
+      rotationId: crypto.randomUUID(),
+    });
+    cmds.push({ type: "LapsResetPassword", cmd: resetCmd[0] });
+  }
+
+  // 3. 移除預配套件（Agent 執行 Remove-ProvisioningPackage）
+  cmds.push({ type: "PpkgRemoval", cmd: buildPpkgRemoval("cogrow")[0] });
+
+  // 4. 清 LAPS 策略（清 registry 密碼殘留）
+  cmds.push({ type: "LapsClear", cmd: buildLapsClear()[0] });
+
+  // 5. 清 PPKG 移除策略
+  cmds.push({ type: "PpkgRemovalClear", cmd: buildPpkgRemovalClear()[0] });
+
+  // 6. 解鎖設備
+  cmds.push({ type: "Unlock", cmd: buildLockState({ enabled: false })[0] });
+
+  // 6. Agent 自卸載（通過 ADMX 信箱讓 Agent 自己跑 msiexec /x）
+  cmds.push({ type: "AgentSelfUninstall", cmd: buildSelfUninstall()[0] });
+
+  // 7. 卸載 Push MSIX
+  const pushPfn = Deno.env.get("WNS_PFN");
+  if (pushPfn) {
+    cmds.push({ type: "MsixUninstall", cmd: buildMsixUninstall(pushPfn) });
+  }
+
+  // 8. Unenroll
+  cmds.push({ type: "Unenroll", cmd: buildUnenroll() });
+
+  // 排入命令隊列
+  const uuids: string[] = [];
+  for (const { type, cmd } of cmds) {
+    const uuid = await enqueueWindowsCommand({
+      deviceUdid: udid,
+      commandType: type,
+      command: cmd,
+    });
+    uuids.push(uuid);
+  }
+
+  // 更新 DB 狀態
+  {
+    const { db } = await import("~/db/client.ts");
+    const { mdmDevices } = await import("~/db/schema/devices.ts");
+    const { eq: eqOp } = await import("drizzle-orm");
+    await db.update(mdmDevices).set({
+      enrollmentStatus: "unenrolled",
+      selfMdmManaged: false,
+    }).where(eqOp(mdmDevices.id, device.id));
+  }
+
+  return c.json({
+    commandUuids: uuids,
+    steps: cmds.map((c) => c.type),
+    note: "清理命令 + unenroll 已排入。設備 poll 消化後將完全脫離 MDM。",
   });
 });
 

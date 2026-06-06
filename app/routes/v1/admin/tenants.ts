@@ -10,6 +10,7 @@ import {
   listTenants,
   updateTenant,
 } from "~/services/admin/tenants.ts";
+import { AppError } from "~/lib/errors.ts";
 
 /**
  * Tenant 概念說明 — 寫在 schema description，Scalar 會渲染在「Tenant」型別頁面上方。
@@ -289,4 +290,226 @@ tenantsAdminApp.openapi(deleteRouteSpec, async (c) => {
   });
   await deleteTenant(tenantId);
   return c.body(null, 204);
+});
+
+// ── MDM Config ──────────────────────────────────────────────────────────────
+
+const mdmConfigSchema = z
+  .object({
+    publicBaseUrl: z.string().openapi({
+      description: "MDM 管理通道 URL（公網 HTTPS）。用於 SyncML enrollment / discovery / management 以及 Agent App 上報。",
+      example: "https://mdm.school.edu",
+    }),
+    appDownloadBaseUrl: z.string().nullable().openapi({
+      description:
+        "文件下載基底 URL（Agent MSI / Push MSIX）。可指向校內 LAN 或 CDN 讓大檔走局域網下載。" +
+        "為 null 時回退到 publicBaseUrl（所有流量走同一地址）。",
+      example: "http://192.168.1.100:3000",
+    }),
+  })
+  .openapi("MdmConfig");
+
+const mdmConfigUpdateBody = z
+  .object({
+    publicBaseUrl: z.string().url().optional().openapi({
+      description: "MDM 管理通道 URL（公網 HTTPS）。",
+      example: "https://mdm.school.edu",
+    }),
+    appDownloadBaseUrl: z.string().url().nullable().optional().openapi({
+      description:
+        "文件下載基底 URL。傳 null 清除（回退到 publicBaseUrl）。" +
+        "傳 URL 字串設定獨立的下載地址。不傳此欄位則不修改。",
+      example: "http://192.168.1.100:3000",
+    }),
+  })
+  .openapi("MdmConfigUpdate");
+
+const createMdmConfigBody = z
+  .object({
+    publicBaseUrl: z.string().url().openapi({
+      description: "MDM 管理通道 URL（公網 HTTPS）。",
+      example: "https://mdm.school.edu",
+    }),
+    appDownloadBaseUrl: z.string().url().nullable().optional().openapi({
+      description: "文件下載基底 URL（選填）。為 null 或不傳時回退到 publicBaseUrl。",
+      example: "http://192.168.1.100:3000",
+    }),
+  })
+  .openapi("CreateMdmConfig");
+
+const createMdmConfigSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/mdm-config",
+  tags: ["Admin: tenants"],
+  security: [{ BearerAuth: [] }],
+  summary: "初始化 MDM 配置（自動生成 CA 根憑證）",
+  description: [
+    "為新租戶建立 MDM 配置。包含：",
+    "- 設定 `publicBaseUrl`（必填）和 `appDownloadBaseUrl`（選填）",
+    "- 自動生成 per-tenant CA 根憑證（有效期 10 年，用於簽發設備憑證）",
+    "",
+    "⚠️ 每個租戶只能有一份 MDM 配置（unique constraint）。重複呼叫會回 409。",
+    "建立後即可開始生成 PPKG 和接受設備 enrollment。",
+  ].join("\n"),
+  request: {
+    params: z.object({ tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }) }),
+    body: { content: { "application/json": { schema: createMdmConfigBody } } },
+  },
+  responses: {
+    201: {
+      description: "MDM 配置已建立（含自動生成的 CA）",
+      content: { "application/json": { schema: successSchema(mdmConfigSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const getMdmConfigSpec = createRoute({
+  method: "get",
+  path: "/admin/tenants/{tenantId}/mdm-config",
+  tags: ["Admin: tenants"],
+  security: [{ BearerAuth: [] }],
+  summary: "查詢 MDM 配置（publicBaseUrl / appDownloadBaseUrl）",
+  description: [
+    "回傳此 tenant 的 MDM URL 配置。",
+    "",
+    "- **publicBaseUrl**：MDM SyncML 管理通道（enrollment / discovery / management / Agent 上報）。必須是公網可達的 HTTPS。",
+    "- **appDownloadBaseUrl**：Agent MSI / Push MSIX 的下載基底 URL。為 `null` 時回退到 `publicBaseUrl`。",
+    "",
+    "設備下載 MSI 時的完整 URL = `(appDownloadBaseUrl ?? publicBaseUrl) + app.fileUrl`",
+    "",
+    "**典型場景**：",
+    "- 簡單部署：`appDownloadBaseUrl = null`（所有流量走 publicBaseUrl）",
+    "- 校內加速：`publicBaseUrl = https://mdm.school.edu`，`appDownloadBaseUrl = http://192.168.1.100:3000`（MSI 走 LAN）",
+    "- CDN 分發：`appDownloadBaseUrl = https://cdn.school.edu`",
+  ].join("\n"),
+  request: { params: z.object({ tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }) }) },
+  responses: {
+    200: {
+      description: "MDM 配置",
+      content: { "application/json": { schema: successSchema(mdmConfigSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const updateMdmConfigSpec = createRoute({
+  method: "patch",
+  path: "/admin/tenants/{tenantId}/mdm-config",
+  tags: ["Admin: tenants"],
+  security: [{ BearerAuth: [] }],
+  summary: "更新 MDM 配置（publicBaseUrl / appDownloadBaseUrl）",
+  description: [
+    "部分更新此 tenant 的 MDM URL 配置。只傳需要修改的欄位。",
+    "",
+    "**appDownloadBaseUrl 的三種傳法**：",
+    "- 不傳（省略欄位）：不修改",
+    "- 傳 `null`：清除，回退到 publicBaseUrl",
+    "- 傳 URL 字串：設定獨立的文件下載地址",
+  ].join("\n"),
+  request: {
+    params: z.object({ tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }) }),
+    body: { content: { "application/json": { schema: mdmConfigUpdateBody } } },
+  },
+  responses: {
+    200: {
+      description: "更新後的 MDM 配置",
+      content: { "application/json": { schema: successSchema(mdmConfigSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+tenantsAdminApp.openapi(createMdmConfigSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const { db } = await import("~/db/client.ts");
+  const { selfMdmConfigs } = await import("~/db/schema/self-mdm.ts");
+  const { eq: eqOp } = await import("drizzle-orm");
+  const forge = await import("node-forge");
+  const { generateCA } = await import("~/services/mdm/crypto.ts");
+  const { encryptSecret } = await import("~/lib/secrets.ts");
+
+  const existing = await db.query.selfMdmConfigs.findFirst({
+    where: eqOp(selfMdmConfigs.tenantId, tenantId),
+    columns: { id: true },
+  });
+  if (existing) {
+    throw new AppError(409, "mdm_config_exists", "此 tenant 已有 MDM 配置，請用 PATCH 更新");
+  }
+
+  const ca = generateCA();
+  const caCertPem = forge.default.pki.certificateToPem(ca.cert);
+  const caKeyPem = forge.default.pki.privateKeyToPem(ca.key);
+
+  const [row] = await db.insert(selfMdmConfigs).values({
+    tenantId,
+    publicBaseUrl: body.publicBaseUrl,
+    appDownloadBaseUrl: body.appDownloadBaseUrl ?? null,
+    caCertPem,
+    caKeyPemEnc: encryptSecret(caKeyPem),
+    isActive: true,
+  }).returning({
+    publicBaseUrl: selfMdmConfigs.publicBaseUrl,
+    appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl,
+  });
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "mdm_config.create",
+    resourceType: "self_mdm_config",
+    resourceId: tenantId,
+    payload: { publicBaseUrl: body.publicBaseUrl },
+  });
+
+  return c.json({ ok: true as const, data: row }, 201);
+});
+
+tenantsAdminApp.openapi(getMdmConfigSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const { db } = await import("~/db/client.ts");
+  const { selfMdmConfigs } = await import("~/db/schema/self-mdm.ts");
+  const { eq } = await import("drizzle-orm");
+  const cfg = await db.query.selfMdmConfigs.findFirst({
+    where: eq(selfMdmConfigs.tenantId, tenantId),
+    columns: { publicBaseUrl: true, appDownloadBaseUrl: true },
+  });
+  if (!cfg) throw new AppError(404, "mdm_config_not_found", "此 tenant 無 MDM 配置");
+  return c.json({ ok: true as const, data: cfg }, 200);
+});
+
+tenantsAdminApp.openapi(updateMdmConfigSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const { db } = await import("~/db/client.ts");
+  const { selfMdmConfigs } = await import("~/db/schema/self-mdm.ts");
+  const { eq } = await import("drizzle-orm");
+
+  const updates: Record<string, unknown> = {};
+  if (body.publicBaseUrl !== undefined) updates.publicBaseUrl = body.publicBaseUrl;
+  if (body.appDownloadBaseUrl !== undefined) updates.appDownloadBaseUrl = body.appDownloadBaseUrl;
+
+  if (Object.keys(updates).length === 0) {
+    throw new AppError(400, "no_fields", "至少提供一個欄位");
+  }
+
+  const [row] = await db
+    .update(selfMdmConfigs)
+    .set(updates)
+    .where(eq(selfMdmConfigs.tenantId, tenantId))
+    .returning({ publicBaseUrl: selfMdmConfigs.publicBaseUrl, appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl });
+
+  if (!row) throw new AppError(404, "mdm_config_not_found", "此 tenant 無 MDM 配置");
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "mdm_config.update",
+    resourceType: "self_mdm_config",
+    resourceId: tenantId,
+    payload: updates,
+  });
+
+  return c.json({ ok: true as const, data: row }, 200);
 });

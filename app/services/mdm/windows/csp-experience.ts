@@ -27,10 +27,31 @@ const ALLOW_MANUAL_UNENROLL_TARGET =
  */
 export function buildSetManualUnenroll(allow: boolean): SyncMLCommand {
   return {
-    cmdId: "0", // 由 buildSyncML 填入真實值
+    cmdId: "0",
     verb: "Replace",
     target: ALLOW_MANUAL_UNENROLL_TARGET,
     format: "int",
     data: allow ? "1" : "0",
+  };
+}
+
+/**
+ * 隱藏「重設此電腦」入口（設定 → 系統 → 復原頁面整頁隱藏）。
+ *
+ * 路徑：./Device/Vendor/MSFT/Policy/Config/Settings/PageVisibilityList
+ * 值：`hide:recovery`（隱藏 ms-settings:recovery 頁面）
+ *
+ * ⚠️ 這是 UI 層隱藏，不是系統層禁用。搭配標準帳戶 + LAPS 已足夠。
+ */
+const PAGE_VISIBILITY_TARGET =
+  "./Device/Vendor/MSFT/Policy/Config/Settings/PageVisibilityList";
+
+export function buildSetAllowRestore(allow: boolean): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: PAGE_VISIBILITY_TARGET,
+    format: "chr",
+    data: allow ? "showonly:" : "hide:recovery",
   };
 }

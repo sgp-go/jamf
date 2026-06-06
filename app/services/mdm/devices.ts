@@ -17,7 +17,7 @@
  * - deviceInfo 同上 jsonb 處理。
  */
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import {
   type MdmDevice,
@@ -41,14 +41,14 @@ export async function getMdmDeviceByWindowsId(
 
 export async function listMdmDevicesByPlatform(
   platform: "apple" | "windows",
+  tenantId?: string,
 ): Promise<MdmDevice[]> {
-  // core query（db.select）而非 relational findMany：後者在本專案 relations
-  // graph 下對 list 查詢有數秒級延遲（findFirst 不受影響）。list 端點不需要
-  // eager-load relations，core query 直接生成單表 SELECT，毫秒級返回。
+  const conditions = [eq(mdmDevices.platform, platform)];
+  if (tenantId) conditions.push(eq(mdmDevices.tenantId, tenantId));
   return db
     .select()
     .from(mdmDevices)
-    .where(eq(mdmDevices.platform, platform))
+    .where(and(...conditions))
     .orderBy(desc(mdmDevices.createdAt));
 }
 

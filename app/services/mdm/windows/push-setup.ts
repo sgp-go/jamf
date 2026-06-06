@@ -69,16 +69,16 @@ export async function setupDevicePush(opts: {
     throw new Error(`push MSIX app (bundleId=${pfn}) not found for tenant ${opts.tenantId}`);
   }
 
-  // 3. contentUri 用 tenant 配置的 publicBaseUrl（設備可達的穩定公網域名），
-  //    不依賴請求 host（手動端點 curl localhost 會拿到 localhost）。
+  // 3. contentUri 用文件下載基底（appDownloadBaseUrl 優先，回退 publicBaseUrl）。
   const cfg = await db.query.selfMdmConfigs.findFirst({
     where: eq(selfMdmConfigs.tenantId, opts.tenantId),
-    columns: { publicBaseUrl: true },
+    columns: { publicBaseUrl: true, appDownloadBaseUrl: true },
   });
   if (!cfg?.publicBaseUrl) {
     throw new Error(`publicBaseUrl not configured for tenant ${opts.tenantId}`);
   }
-  const contentUri = `${cfg.publicBaseUrl.replace(/\/+$/, "")}${pushApp.fileUrl}`;
+  const downloadBase = (cfg.appDownloadBaseUrl ?? cfg.publicBaseUrl).replace(/\/+$/, "");
+  const contentUri = `${downloadBase}${pushApp.fileUrl}`;
 
   const commandUuids: string[] = [];
 

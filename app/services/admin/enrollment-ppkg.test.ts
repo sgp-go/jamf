@@ -17,7 +17,7 @@ Deno.test("renderCustomizationsXml: OnPremise（預設）含 Workplace/Enrollmen
   assertStringIncludes(xml, `<AuthPolicy>OnPremise</AuthPolicy>`);
   assertStringIncludes(
     xml,
-    `<DiscoveryServiceFullUrl>https://mdm.example.com/EnrollmentServer/Discovery.svc</DiscoveryServiceFullUrl>`,
+    `<DiscoveryServiceFullUrl>https://mdm.example.com/t/demo/EnrollmentServer/Discovery.svc</DiscoveryServiceFullUrl>`,
   );
   assertStringIncludes(xml, `<Secret>P@ssw0rd!</Secret>`);
 });
@@ -29,11 +29,11 @@ Deno.test("renderCustomizationsXml: publicBaseUrl trailing slash 不重複", () 
   });
   assertStringIncludes(
     xml,
-    "https://mdm.example.com/EnrollmentServer/Discovery.svc",
+    "https://mdm.example.com/t/demo/EnrollmentServer/Discovery.svc",
   );
   // 不該出現 // 雙斜線
   assertEquals(
-    xml.includes("https://mdm.example.com//EnrollmentServer"),
+    xml.includes("https://mdm.example.com//t"),
     false,
   );
 });

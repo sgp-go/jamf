@@ -110,13 +110,20 @@ export async function generatePpkgCustomizations(
 
   const cfg = await db.query.selfMdmConfigs.findFirst({
     where: eq(selfMdmConfigs.tenantId, input.tenantId),
-    columns: { publicBaseUrl: true, isActive: true },
+    columns: { publicBaseUrl: true, isActive: true, caCertPem: true },
   });
   if (!cfg || !cfg.isActive) {
     throw new AppError(
       409,
       "self_mdm_not_configured",
-      "Self-MDM not configured (or inactive) for this tenant; configure publicBaseUrl + certs first",
+      "Self-MDM not configured (or inactive) for this tenant; call POST /admin/tenants/{tid}/mdm-config first",
+    );
+  }
+  if (!cfg.caCertPem) {
+    throw new AppError(
+      409,
+      "ca_not_configured",
+      "CA 根憑證未配置。POST /admin/tenants/{tid}/mdm-config 會自動生成，或手動上傳。設備 enrollment 需要 CA 簽發憑證。",
     );
   }
 
@@ -144,7 +151,7 @@ export function renderCustomizationsXml(ctx: RenderContext): string {
   const { tenant, cfg, input } = ctx;
 
   const discoveryUrl =
-    `${cfg.publicBaseUrl.replace(/\/+$/, "")}/EnrollmentServer/Discovery.svc`;
+    `${cfg.publicBaseUrl.replace(/\/+$/, "")}/t/${tenant.slug}/EnrollmentServer/Discovery.svc`;
   const packageId = randomUUID();
   const timestamp = new Date().toISOString().slice(0, 10);
   const packageName = `cogrow-${tenant.slug}-${timestamp}`;

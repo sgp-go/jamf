@@ -9,11 +9,12 @@
  * 多租戶 URL 路由（baseUrl 帶 /t/{tenantId}）後續 additive 增強，不破壞此 helper。
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import { type CaKeyPair, loadCa } from "~/services/mdm/crypto.ts";
 import { decryptSecret } from "~/lib/secrets.ts";
 import { type SelfMdmConfig, selfMdmConfigs } from "~/db/schema/self-mdm.ts";
+import { tenants } from "~/db/schema/tenants.ts";
 
 /**
  * 取唯一 active 的 self_mdm_config（MVP 單租戶 enrollment 入口）。
@@ -27,6 +28,32 @@ export async function getActiveSelfMdmConfig(): Promise<SelfMdmConfig> {
     throw new Error(
       "No active self_mdm_config found — run `deno task db:seed` to create one",
     );
+  }
+  return config;
+}
+
+/**
+ * 按 tenant slug 取 self_mdm_config（多租戶 enrollment 路由用）。
+ * @throws Error 若 slug 不存在或無 active config
+ */
+export async function getSelfMdmConfigByTenantSlug(
+  slug: string,
+): Promise<SelfMdmConfig> {
+  const tenant = await db.query.tenants.findFirst({
+    where: eq(tenants.slug, slug),
+    columns: { id: true },
+  });
+  if (!tenant) {
+    throw new Error(`Tenant slug "${slug}" not found`);
+  }
+  const config = await db.query.selfMdmConfigs.findFirst({
+    where: and(
+      eq(selfMdmConfigs.tenantId, tenant.id),
+      eq(selfMdmConfigs.isActive, true),
+    ),
+  });
+  if (!config) {
+    throw new Error(`No active self_mdm_config for tenant slug "${slug}"`);
   }
   return config;
 }
