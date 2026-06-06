@@ -4,6 +4,7 @@ import { appAssignments, apps, customAppAuthorizations } from "./apps.ts";
 import { asmInstances, depDevices, depTokens } from "./asm.ts";
 import { auditLogs } from "./audit.ts";
 import { mdmCommands, mdmDevices, mdmMigrations } from "./devices.ts";
+import { mdmWindowsLaps } from "./laps.ts";
 import { jamfInstances, jamfTokenCache } from "./jamf.ts";
 import { profileAssignments, profiles } from "./profiles.ts";
 import { mdmDeviceCertificates, selfMdmConfigs } from "./self-mdm.ts";
@@ -102,6 +103,7 @@ export const mdmDevicesRelations = relations(mdmDevices, ({ one, many }) => ({
   commands: many(mdmCommands),
   reports: many(agentReports),
   usageStats: many(deviceUsageStats),
+  lapsRotations: many(mdmWindowsLaps),
 }));
 
 export const mdmCommandsRelations = relations(mdmCommands, ({ one }) => ({
@@ -226,5 +228,18 @@ export const webhookDeliveriesRelations = relations(webhookDeliveries, ({ one })
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   tenant: one(tenants, { fields: [auditLogs.tenantId], references: [tenants.id] }),
+}));
+
+// ── LAPS ─────────────────────────────────────────────────────────────────────
+
+export const mdmWindowsLapsRelations = relations(mdmWindowsLaps, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [mdmWindowsLaps.tenantId],
+    references: [tenants.id],
+  }),
+  device: one(mdmDevices, {
+    fields: [mdmWindowsLaps.deviceId],
+    references: [mdmDevices.id],
+  }),
 }));
 

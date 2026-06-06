@@ -5,13 +5,21 @@ import { apps } from "~/db/schema/apps.ts";
 import { mdmCommands, mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
 import {
+  buildLapsAdmxInstall,
+  buildLapsRotation,
   buildLockAdmxInstall,
+  buildPpkgRemovalAdmxInstall,
+  buildSelfUninstallAdmxInstall,
   buildMsiInstall,
   buildMsiStatusQuery,
 } from "~/services/mdm/windows/csp.ts";
 import { getActiveSelfMdmConfig } from "~/services/mdm/self-mdm-config.ts";
+import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
 import { publishCommandEvent } from "~/services/mdm/command-events.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
+import { encryptSecret } from "~/lib/secrets.ts";
+import { generateLapsPassword } from "~/services/laps.ts";
+import { mdmWindowsLaps } from "~/db/schema/laps.ts";
 
 /**
  * Agent App 一鍵安裝流程：把「給設備派 Agent App」這個業務動作封裝為單一 API。
@@ -108,12 +116,11 @@ export async function installAgentOnDevice(
 
   const tenantId = input.tenantId;
 
-  // 取 active config 的 publicBaseUrl 拼 MSI 下載 URL。
-  // 設備的 EnterpriseDesktopAppManagement 需要完整公網 HTTPS URL，
-  // app.fileUrl 只是相對路徑（/api/v1/apps/{id}/download/...），必須在此拼上 baseUrl。
+  // 取文件下載基底 URL（appDownloadBaseUrl 優先，未設時回退 publicBaseUrl）。
+  // 分離管理通道 URL 和文件下載 URL，讓 MSI 可從局域網 / CDN 下載不走公網。
   const config = await getActiveSelfMdmConfig();
-  const baseUrl = config.publicBaseUrl.replace(/\/+$/, "");
-  const contentUri = `${baseUrl}${app.fileUrl}`;
+  const downloadBase = (config.appDownloadBaseUrl ?? config.publicBaseUrl).replace(/\/+$/, "");
+  const contentUri = `${downloadBase}${app.fileUrl}`;
 
   // 配置注入：Registry CSP 在 Win10 22H2 不可用（所有 LocURI 不分 verb 都回 404），
   // 改由 msiexec public property 帶進 MsiInstallJob 的 CommandLine，MSI 安裝時寫入
@@ -159,21 +166,35 @@ export async function installAgentOnDevice(
   }
 
   // 組裝成 mdm_commands 行：
-  //   - policy_admx_install：一次性 ingest 遠端鎖定的自定義 ADMX（lock 投遞前置；
-  //     桌面 Registry CSP 死路，改走 ADMX-backed Policy CSP，見 csp.ts buildLockAdmxInstall）。
-  //     重裝 agent 時重複 Add 回 418 Already exists，無害（策略已就緒）。
-  //   - MSI 派發 = Add（建 job）+ Exec（觸發下載安裝）+ Status（查進度）三條。
-  // cspPath/verb/data/format 皆終態。
+  //   - policy_admx_install：一次性 ingest Lock + LAPS 自定義 ADMX
+  //   - MSI 派發 = Add（建 job）+ Exec（觸發下載安裝）+ Status（查進度）
+  //   - LAPS 輪換：自動生成隨機密碼，Agent 啟動後 LapsWatcher 讀 registry 執行改密
+  const lapsPassword = generateLapsPassword();
+  const lapsPasswordEnc = encryptSecret(lapsPassword);
+  const lapsRotationId = crypto.randomUUID();
+  const lapsAdminAccount = "Administrator";
+  const lapsCmd = buildLapsRotation({
+    newPassword: lapsPassword,
+    adminAccount: lapsAdminAccount,
+    rotationId: lapsRotationId,
+  });
+
+  // ADMX + MSI 命令（批量 INSERT，同一事務）
   const commandRows: {
-    commandType: "msi_install" | "msi_status_query" | "policy_admx_install";
+    commandType: string;
     cmd: SyncMLCommand;
     commandUuid: string;
   }[] = [
-    { commandType: "policy_admx_install" as const, cmd: buildLockAdmxInstall(), commandUuid: crypto.randomUUID() },
-    { commandType: "msi_install" as const, cmd: msiInstall, commandUuid: crypto.randomUUID() }, // Add：創建 job
-    { commandType: "msi_install" as const, cmd: msiInstallExec, commandUuid: crypto.randomUUID() }, // Exec：觸發下載安裝
-    { commandType: "msi_status_query" as const, cmd: msiStatus, commandUuid: crypto.randomUUID() },
+    { commandType: "policy_admx_install", cmd: buildLockAdmxInstall(), commandUuid: crypto.randomUUID() },
+    { commandType: "policy_admx_install", cmd: buildLapsAdmxInstall(), commandUuid: crypto.randomUUID() },
+    { commandType: "policy_admx_install", cmd: buildPpkgRemovalAdmxInstall(), commandUuid: crypto.randomUUID() },
+    { commandType: "policy_admx_install", cmd: buildSelfUninstallAdmxInstall(), commandUuid: crypto.randomUUID() },
+    { commandType: "msi_install", cmd: msiInstall, commandUuid: crypto.randomUUID() },
+    { commandType: "msi_install", cmd: msiInstallExec, commandUuid: crypto.randomUUID() },
+    { commandType: "msi_status_query", cmd: msiStatus, commandUuid: crypto.randomUUID() },
   ];
+  // LAPS rotation 不入批量 INSERT——單獨在事務後 enqueue，保證 queued_at 晚於 ADMX，
+  // 避免同一 SyncML session 裡 ADMX 還沒生效就收到 Replace（→ 500）。
 
   const result = await db.transaction(async (tx) => {
     // 1. 更新 device 上的 token 紀錄
@@ -235,10 +256,31 @@ export async function installAgentOnDevice(
     });
   }
 
+  // LAPS：事務提交後單獨 enqueue，queued_at 自然晚於 ADMX ingest，
+  // 確保設備在後續 SyncML session 才拉到 LAPS Replace（ADMX 已生效）。
+  if (!device.udid) {
+    throw new AppError(500, "device_missing_udid", "Windows device missing udid after enrollment");
+  }
+  const lapsCommandUuid = await enqueueWindowsCommand({
+    deviceUdid: device.udid,
+    commandType: "LapsRotatePassword",
+    command: lapsCmd[0],
+  });
+  await db.insert(mdmWindowsLaps).values({
+    tenantId,
+    deviceId: device.id,
+    rotationId: lapsRotationId,
+    adminAccount: lapsAdminAccount,
+    passwordEnc: lapsPasswordEnc,
+    status: "pending",
+    commandUuid: lapsCommandUuid,
+    triggeredBy: "auto",
+  });
+
   return {
     deviceId: device.id,
     agentToken,
-    commandIds: result.commandIds,
+    commandIds: [...result.commandIds, lapsCommandUuid],
   };
 }
 

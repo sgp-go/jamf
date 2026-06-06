@@ -33,6 +33,29 @@ export function buildRemoteWipe(action: WipeAction = "doWipe"): SyncMLCommand {
 }
 
 // ============================================================
+// MDM Unenroll（遠端移除 MDM 管控）
+// ============================================================
+
+/**
+ * 遠端觸發設備移除 MDM enrollment。
+ *
+ * Exec ./Device/Vendor/MSFT/DMClient/Unenroll
+ * data = providerId（通常 "MS DM Server"，與 enrollment 時一致）
+ *
+ * 設備收到後會移除 enrollment + 清除 MDM 下發的策略。
+ * 注意：EDA-CSP 安裝的 MSI 不會被自動移除，需提前下發 MSI uninstall。
+ */
+export function buildUnenroll(providerId = "MS DM Server"): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Exec",
+    target: `./Device/Vendor/MSFT/DMClient/Unenroll`,
+    format: "chr",
+    data: providerId,
+  };
+}
+
+// ============================================================
 // RemoteLock 說明（桌面無即時鎖屏 CSP → 走 Agent + Registry 信箱）
 // ============================================================
 //
@@ -1035,6 +1058,218 @@ export function buildLockState(input: LockStateInput): SyncMLCommand[] {
     target: LOCK_POLICY_TARGET,
     format: "chr",
     data,
+  }];
+}
+
+// ============================================================
+// LAPS-like 密碼託管（ADMX-backed Policy CSP，獨立 ADMX ID）
+// ============================================================
+//
+// 與 Lock 同一 ADMX App（CoGrowMDM），但用獨立 Policy ID（LapsPolicy），
+// 避免修改已部署的 Lock ADMX。落點 HKLM\Software\CoGrow\Agent\Laps，
+// Agent 端 LapsWatcher 輪詢讀取後執行本機帳號密碼變更。
+
+export const AGENT_LAPS_REG_PATH = "SOFTWARE/CoGrow/Agent/Laps";
+
+const LAPS_ADMX_ID = "LapsPolicy";
+const LAPS_POLICY_AREA = `${LOCK_ADMX_APP}~Policy~CoGrowLaps`;
+const LAPS_POLICY_NAME = "LapsRotation";
+const LAPS_POLICY_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${LAPS_POLICY_AREA}/${LAPS_POLICY_NAME}`;
+
+const LAPS_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="cogrowlaps" namespace="CoGrow.MDM.LapsPolicies" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="CoGrowLaps" displayName="CoGrow LAPS" />
+  </categories>
+  <policies>
+    <policy name="LapsRotation" class="Machine" displayName="LAPS Rotation" explainText="CoGrow LAPS password rotation" key="Software\\CoGrow\\Agent\\Laps" valueName="Pending">
+      <parentCategory ref="CoGrowLaps" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+      <elements>
+        <text id="NewPassword" valueName="NewPassword" />
+        <text id="AdminAccount" valueName="AdminAccount" />
+        <text id="RotationId" valueName="RotationId" />
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>`;
+
+/**
+ * LAPS ADMX ingest（一次性，與 Lock ADMX 獨立）。
+ * 重複 Add 回 418 Already exists，無害。
+ */
+export function buildLapsAdmxInstall(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target:
+      `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${LAPS_ADMX_ID}`,
+    format: "chr",
+    data: LAPS_ADMX_XML,
+  };
+}
+
+export interface LapsRotationInput {
+  newPassword: string;
+  adminAccount: string;
+  rotationId: string;
+}
+
+/**
+ * 下發 LAPS 改密指令：啟用 LapsRotation 策略，Agent 讀到 Pending=1 後執行。
+ *
+ * 值落 HKLM\Software\CoGrow\Agent\Laps\{Pending=1, NewPassword, AdminAccount, RotationId}。
+ * Agent 改完密碼後清 NewPassword + 設 Pending=0，並透過 report 帶 rotationId 確認。
+ */
+export function buildLapsRotation(input: LapsRotationInput): SyncMLCommand[] {
+  const pwd = escapeAttr(input.newPassword);
+  const account = escapeAttr(input.adminAccount);
+  const rotId = escapeAttr(input.rotationId);
+  const data = `<enabled/>` +
+    `<data id="NewPassword" value="${pwd}"/>` +
+    `<data id="AdminAccount" value="${account}"/>` +
+    `<data id="RotationId" value="${rotId}"/>`;
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: LAPS_POLICY_TARGET,
+    format: "chr",
+    data,
+  }];
+}
+
+/**
+ * 清除 LAPS 策略（disabled）：Agent 確認改密後由後端下發，清除 registry 殘留。
+ */
+export function buildLapsClear(): SyncMLCommand[] {
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: LAPS_POLICY_TARGET,
+    format: "chr",
+    data: `<disabled/>`,
+  }];
+}
+
+// ============================================================
+// 預配套件移除（ADMX-backed Policy CSP）
+// ============================================================
+
+const PPKG_ADMX_ID = "PpkgPolicy";
+const PPKG_POLICY_AREA = `${LOCK_ADMX_APP}~Policy~CoGrowPpkg`;
+const PPKG_POLICY_NAME = "PpkgRemoval";
+const PPKG_POLICY_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${PPKG_POLICY_AREA}/${PPKG_POLICY_NAME}`;
+
+const PPKG_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="cogrowppkg" namespace="CoGrow.MDM.PpkgPolicies" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="CoGrowPpkg" displayName="CoGrow PPKG" />
+  </categories>
+  <policies>
+    <policy name="PpkgRemoval" class="Machine" displayName="PPKG Removal" explainText="CoGrow provisioning package removal" key="Software\\CoGrow\\Agent\\RemovePpkg" valueName="Pending">
+      <parentCategory ref="CoGrowPpkg" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+      <elements>
+        <text id="PackageNameFilter" valueName="PackageNameFilter" />
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>`;
+
+export function buildPpkgRemovalAdmxInstall(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target:
+      `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${PPKG_ADMX_ID}`,
+    format: "chr",
+    data: PPKG_ADMX_XML,
+  };
+}
+
+/**
+ * 下發預配套件移除指令。Agent 讀到 Pending=1 後移除匹配的 PPKG。
+ * @param packageNameFilter 套件名稱過濾（如 "cogrow"），空字串 = 移除所有非系統 PPKG
+ */
+export function buildPpkgRemoval(packageNameFilter = ""): SyncMLCommand[] {
+  const filter = escapeAttr(packageNameFilter);
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: PPKG_POLICY_TARGET,
+    format: "chr",
+    data: `<enabled/><data id="PackageNameFilter" value="${filter}"/>`,
+  }];
+}
+
+export function buildPpkgRemovalClear(): SyncMLCommand[] {
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: PPKG_POLICY_TARGET,
+    format: "chr",
+    data: `<disabled/>`,
+  }];
+}
+
+// ============================================================
+// Agent 自卸載（ADMX-backed Policy CSP）
+// ============================================================
+
+const SELF_UNINSTALL_ADMX_ID = "SelfUninstallPolicy";
+const SELF_UNINSTALL_POLICY_AREA = `${LOCK_ADMX_APP}~Policy~CoGrowSelfUninstall`;
+const SELF_UNINSTALL_POLICY_NAME = "AgentSelfUninstall";
+const SELF_UNINSTALL_POLICY_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${SELF_UNINSTALL_POLICY_AREA}/${SELF_UNINSTALL_POLICY_NAME}`;
+
+const SELF_UNINSTALL_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="cogrowuninstall" namespace="CoGrow.MDM.SelfUninstallPolicies" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="CoGrowSelfUninstall" displayName="CoGrow Self Uninstall" />
+  </categories>
+  <policies>
+    <policy name="AgentSelfUninstall" class="Machine" displayName="Agent Self Uninstall" explainText="CoGrow Agent self-uninstall" key="Software\\CoGrow\\Agent\\SelfUninstall" valueName="Pending">
+      <parentCategory ref="CoGrowSelfUninstall" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+    </policy>
+  </policies>
+</policyDefinitions>`;
+
+export function buildSelfUninstallAdmxInstall(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Add",
+    target:
+      `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${SELF_UNINSTALL_ADMX_ID}`,
+    format: "chr",
+    data: SELF_UNINSTALL_ADMX_XML,
+  };
+}
+
+export function buildSelfUninstall(): SyncMLCommand[] {
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: SELF_UNINSTALL_POLICY_TARGET,
+    format: "chr",
+    data: `<enabled/>`,
   }];
 }
 

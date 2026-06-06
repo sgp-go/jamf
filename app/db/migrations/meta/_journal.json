@@ -36,6 +36,20 @@
       "when": 1779960071344,
       "tag": "0004_mysterious_tarot",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780627275702,
+      "tag": "0005_white_stark_industries",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780652482469,
+      "tag": "0006_wandering_zaladane",
+      "breakpoints": true
     }
   ]
 }

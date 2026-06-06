@@ -10,6 +10,7 @@ import {
   saveAgentReport,
   upsertUsageStats,
 } from "~/services/agent.ts";
+import { handleLapsOnReport } from "~/services/laps.ts";
 import {
   authorizeAgentReport,
   extractBearerToken,
@@ -346,6 +347,17 @@ agentApp.openapi(reportRoute, async (c) => {
     extraData: body.extraData,
     reportedAt: body.reportedAt,
   });
+
+  // 非阻塞 LAPS 處理（Windows 設備：自動觸發改密 / 接收確認）
+  if (body.extraData && (body.extraData as Record<string, unknown>).platform === "windows") {
+    void handleLapsOnReport({
+      tenantId,
+      deviceId: device.id,
+      extraData: body.extraData as Record<string, unknown>,
+    }).catch((err) => {
+      console.error("[laps] handleLapsOnReport failed", err);
+    });
+  }
 
   // 非阻塞觸發 webhook：失敗不影響 Agent 上報成功，但會在 webhook_deliveries
   // 留 pending row 由 scheduler 重試

@@ -71,6 +71,21 @@ public sealed record WindowsFacts
 
     [JsonPropertyName("is_local_admin")]
     public bool? IsLocalAdmin { get; init; }
+
+    [JsonPropertyName("laps")]
+    public LapsFacts? Laps { get; init; }
+}
+
+public sealed record LapsFacts
+{
+    [JsonPropertyName("rotation_id")]
+    public string? RotationId { get; init; }
+
+    [JsonPropertyName("confirmed_at")]
+    public string? ConfirmedAt { get; init; }
+
+    [JsonPropertyName("success")]
+    public bool? Success { get; init; }
 }
 
 /// <summary>

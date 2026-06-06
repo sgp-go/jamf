@@ -1,6 +1,7 @@
 using CoGrowMDMAgent;
 using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Diagnostics;
+using CoGrowMDMAgent.Laps;
 using CoGrowMDMAgent.Locking;
 using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
@@ -66,6 +67,9 @@ builder.Services.AddHostedService<Worker>();
 // 遠端鎖定：監控 Registry 鎖定旗標，在使用者 session 拉起全螢幕鎖定窗（[[windows-lock-design]]）。
 // 與上報 Worker 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<LockWatcher>();
+builder.Services.AddHostedService<LapsWatcher>();
+builder.Services.AddHostedService<PpkgRemovalWatcher>();
+builder.Services.AddHostedService<SelfUninstallWatcher>();
 // 使用時長採集：每分鐘探測 active console session 在用狀態，累計並持久化到 usage.db。
 // 與 Worker / LockWatcher 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<SessionUsageMonitor>();

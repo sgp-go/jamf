@@ -4,6 +4,7 @@ export * from "./asm.ts";
 export * from "./audit.ts";
 export * from "./devices.ts";
 export * from "./jamf.ts";
+export * from "./laps.ts";
 export * from "./profiles.ts";
 export * from "./relations.ts";
 export * from "./self-mdm.ts";

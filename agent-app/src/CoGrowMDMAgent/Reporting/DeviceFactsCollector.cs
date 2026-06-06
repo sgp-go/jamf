@@ -4,6 +4,7 @@ using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.Versioning;
 using System.Security.Principal;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 
 namespace CoGrowMDMAgent.Reporting;
@@ -201,12 +202,39 @@ public sealed class DeviceFactsCollector
         {
             WingetVersion = TryWingetVersion(),
             IsLocalAdmin = IsCurrentUserLocalAdmin(),
-            // defender / firewall / pending_updates probe TBD (W3) — left null
-            // intentionally so the field appears but the value is not faked.
             DefenderEnabled = null,
             FirewallEnabled = null,
             PendingUpdates = null,
+            Laps = ReadLapsConfirmation(),
         };
+    }
+
+    /// <summary>
+    /// 讀取 LAPS 確認檔（LapsWatcher 改密成功後寫入）。讀到後刪除，
+    /// 確保只上報一次。解析失敗靜默返回 null。
+    /// </summary>
+    private LapsFacts? ReadLapsConfirmation()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "CoGrow", "MDM Agent", "laps-confirmation.json");
+            if (!File.Exists(path)) return null;
+
+            var json = File.ReadAllText(path);
+            var data = JsonSerializer.Deserialize<LapsFacts>(json);
+            if (data?.RotationId is null) return null;
+
+            File.Delete(path);
+            _logger.LogInformation("LAPS 確認檔已讀取並刪除: rotation={RotationId}", data.RotationId);
+            return data;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "LAPS confirmation read failed");
+            return null;
+        }
     }
 
     [SupportedOSPlatform("windows")]

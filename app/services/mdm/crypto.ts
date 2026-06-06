@@ -59,7 +59,7 @@ export function getOrCreateCA(): { cert: forge.pki.Certificate; key: forge.pki.P
 }
 
 /** 生成 CA 根憑證（有效期 10 年） */
-function generateCA(): { cert: forge.pki.Certificate; key: forge.pki.PrivateKey } {
+export function generateCA(): { cert: forge.pki.Certificate; key: forge.pki.PrivateKey } {
   const keys = forge.pki.rsa.generateKeyPair(2048);
   const cert = forge.pki.createCertificate();
 
