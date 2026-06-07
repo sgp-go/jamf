@@ -17,8 +17,16 @@ import { getRolloutHealth, rolloutAgentVersion } from "~/services/agent-rollout.
  */
 
 const paramsSchema = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
-  deviceId: z.string().uuid().openapi({ param: { name: "deviceId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
+  deviceId: z.string().uuid().openapi({
+    param: { name: "deviceId", in: "path" },
+    description: "設備 UUID",
+    example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c",
+  }),
 });
 
 const requestBody = z
@@ -59,9 +67,21 @@ const responseSchema = z
 const installAgentSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/devices/{deviceId}/install-agent",
-  tags: ["Admin: devices"],
+  tags: ["Agent 派發"],
   security: [{ BearerAuth: [] }],
   summary: "一鍵派發 Agent App + 注入配置（Registry CSP + EDA-CSP）",
+  description: [
+    "為指定設備一次性完成 Agent App 部署：",
+    "",
+    "1. 簽發 `agent_token`（32 bytes hex，DB 僅存 SHA-256 hash）",
+    "2. 透過 MSI public property 注入 `DEVICE_ID` / `AGENT_TOKEN` / `API_ENDPOINT` / `TENANT_ID`",
+    "3. 排入 EDA-CSP 命令：MsiInstallJob Add → Exec → StatusQuery",
+    "4. 自動觸發 LAPS 初始密碼輪換 + ADMX 策略下發",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**⚠️ agent_token 僅此 API 回傳一次**，後續無法從 DB 復原明文。",
+  ].join("\n"),
   request: {
     params: paramsSchema,
     body: { content: { "application/json": { schema: requestBody } } },
@@ -111,7 +131,11 @@ installAgentAdminApp.openapi(installAgentSpec, async (c) => {
 // ============================================================
 
 const rolloutParamsSchema = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 
 const rolloutBody = z
@@ -160,9 +184,23 @@ const rolloutResponse = z
 const rolloutSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/agent-rollout",
-  tags: ["Admin: install-agent"],
+  tags: ["Agent 派發"],
   security: [{ BearerAuth: [] }],
   summary: "灰度派發 Agent 版本到設備子集（分批升級）",
+  description: [
+    "分批將 Agent App 升級到新版本。支援三種設備選擇模式：",
+    "",
+    "- `deviceIds`：指定設備 UUID 列表",
+    "- `count`：從候選中選前 N 台",
+    "- `percentage`：從候選中選百分比",
+    "",
+    "**候選定義**：tenant 下 Windows 設備中，當前版本 ≠ 目標版本者。逐批調用自然收斂。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**⚠️ 壞 build 上量 = 災難**。建議先用 `deviceIds` 模式推 2-3 台觀察，",
+    "確認健康後再用 `percentage` 逐步擴大。",
+  ].join("\n"),
   request: {
     params: rolloutParamsSchema,
     body: { content: { "application/json": { schema: rolloutBody } } },
@@ -237,9 +275,19 @@ const healthResponseSchema = z
 const healthSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/agent-rollout/health",
-  tags: ["Admin: install-agent"],
+  tags: ["Agent 派發"],
   security: [{ BearerAuth: [] }],
-  summary: "查灰度升級健康（silent = 升級後失聯，告警目標）",
+  summary: "查灰度升級健康狀態（失聯設備 = 回滾告警）",
+  description: [
+    "檢查灰度升級後設備的健康狀況。按上報狀態分四類：",
+    "",
+    "- **upgraded**：已升級到目標版本，正常上報",
+    "- **silent**：曾上報但超過窗口無上報 — **升級後失聯，考慮回滾**",
+    "- **pending**：未升級但窗口內有上報（升級進行中）",
+    "- **neverReported**：從未上報（可能未裝 agent）",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
   request: {
     params: rolloutParamsSchema,
     query: healthQuerySchema,

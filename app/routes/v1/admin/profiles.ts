@@ -202,7 +202,7 @@ function toAssignmentDto(row: {
 const createSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/profiles",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "建立配置描述檔（含 payload；預設 status=draft）",
   request: {
@@ -221,7 +221,7 @@ const createSpec = createRoute({
 const listSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/profiles",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "列出 tenant 下 profile（可過 platform / status）",
   request: { params: tenantParam, query: listQuery },
@@ -239,7 +239,7 @@ const listSpec = createRoute({
 const detailSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/profiles/{profileId}",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "取得 profile 詳情",
   request: { params: tenantProfileParam },
@@ -255,7 +255,7 @@ const detailSpec = createRoute({
 const updateSpec = createRoute({
   method: "patch",
   path: "/admin/tenants/{tenantId}/profiles/{profileId}",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "更新 profile（payload 變更會自動 version+1）",
   request: {
@@ -274,7 +274,7 @@ const updateSpec = createRoute({
 const deleteSpec = createRoute({
   method: "delete",
   path: "/admin/tenants/{tenantId}/profiles/{profileId}",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "刪除 profile（cascade 清所有 assignments）",
   request: { params: tenantProfileParam },
@@ -287,7 +287,7 @@ const deleteSpec = createRoute({
 const assignSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/profiles/{profileId}/assign",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "指派 profile 給 device_group 或單一 device",
   request: {
@@ -308,7 +308,7 @@ const assignSpec = createRoute({
 const statusSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/profiles/{profileId}/status",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "查詢 profile 各 assignment 的套用狀態",
   request: { params: tenantProfileParam },
@@ -328,7 +328,7 @@ const statusSpec = createRoute({
 const unassignSpec = createRoute({
   method: "delete",
   path: "/admin/tenants/{tenantId}/profiles/{profileId}/assignments/{assignmentId}",
-  tags: ["Admin: profiles"],
+  tags: ["配置描述檔"],
   security,
   summary: "解除指派",
   request: { params: tenantProfileAssignmentParam },

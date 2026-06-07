@@ -27,7 +27,11 @@ import { publishEvent } from "~/services/webhooks/index.ts";
  */
 
 const tenantParam = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 
 const tenantSerialParam = tenantParam.extend({
@@ -60,16 +64,16 @@ const reportBody = z
 const reportItem = z
   .object({
     id: z.string().uuid(),
-    batteryLevel: z.number().nullable(),
-    storageAvailableMb: z.number().nullable(),
-    storageTotalMb: z.number().nullable(),
-    networkType: z.string().nullable(),
-    networkSsid: z.string().nullable(),
-    screenBrightness: z.number().nullable(),
-    osVersion: z.string().nullable(),
-    appVersion: z.string().nullable(),
-    extraData: z.unknown().nullable(),
-    reportedAt: z.string(),
+    batteryLevel: z.number().nullable().openapi({ description: "電池電量百分比（0-100）" }),
+    storageAvailableMb: z.number().nullable().openapi({ description: "可用儲存空間（MB）" }),
+    storageTotalMb: z.number().nullable().openapi({ description: "總儲存空間（MB）" }),
+    networkType: z.string().nullable().openapi({ description: "網路類型（WiFi / Cellular / Ethernet）" }),
+    networkSsid: z.string().nullable().openapi({ description: "連線中的 WiFi SSID" }),
+    screenBrightness: z.number().nullable().openapi({ description: "螢幕亮度（0.0-1.0）" }),
+    osVersion: z.string().nullable().openapi({ description: "作業系統版本", example: "10.0.19045.4170" }),
+    appVersion: z.string().nullable().openapi({ description: "Agent App 版本", example: "1.2.0" }),
+    extraData: z.unknown().nullable().openapi({ description: "平台特定的額外資料（Windows: defender/firewall/updates 等）" }),
+    reportedAt: z.string().openapi({ description: "上報時間（ISO 8601 UTC）" }),
   })
   .openapi("AgentReportItem");
 
@@ -82,11 +86,13 @@ const latestReportItem = reportItem
 
 const usageStatItem = z
   .object({
-    date: z.string(),
-    totalMinutes: z.number().int().nonnegative(),
-    pickup: z.number().int().nonnegative(),
-    maxContinuous: z.number().int().nonnegative(),
-    timeStats: z.record(z.number()).optional(),
+    date: z.string().openapi({ description: "日期（YYYY-MM-DD）", example: "2026-06-06" }),
+    totalMinutes: z.number().int().nonnegative().openapi({ description: "當日總使用時長（分鐘）" }),
+    pickup: z.number().int().nonnegative().openapi({ description: "當日拿起次數" }),
+    maxContinuous: z.number().int().nonnegative().openapi({ description: "當日最長連續使用時長（分鐘）" }),
+    timeStats: z.record(z.number()).optional().openapi({
+      description: "按時段分佈的使用時長（key: 時段標籤，value: 分鐘數）",
+    }),
   })
   .openapi("UsageStatItem");
 
@@ -173,7 +179,7 @@ const usageStatsListSchema = z
 const reportRoute = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/agent/reports",
-  tags: ["Agent"],
+  tags: ["Agent 上報"],
   summary: "Agent App 上報設備狀態（iOS + Windows 共用）",
   description: [
     "**鑑權**：若 device 已透過 `install-agent` 簽發 token，必須帶 `Authorization: Bearer <agent_token>`",
@@ -215,12 +221,13 @@ const reportRoute = createRoute({
 const listReportsRoute = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/agent/devices/{serialNumber}/reports",
-  tags: ["Agent"],
+  tags: ["Agent 上報"],
   summary: "查詢設備上報歷史",
+  description: "回傳指定設備的上報記錄（分頁，按 reportedAt 降序）。\n\n**鑑權**：無。",
   request: { params: tenantSerialParam, query: reportsQuery },
   responses: {
     200: {
-      description: "上報清單",
+      description: "上報記錄列表",
       content: {
         "application/json": {
           schema: successSchema(agentReportsListSchema),
@@ -234,12 +241,13 @@ const listReportsRoute = createRoute({
 const latestReportRoute = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/agent/devices/{serialNumber}/reports/latest",
-  tags: ["Agent"],
+  tags: ["Agent 上報"],
   summary: "取得設備最新一筆上報",
+  description: "回傳設備最近一次上報的完整資料（含 deviceId + serialNumber）。\n\n**鑑權**：無。",
   request: { params: tenantSerialParam },
   responses: {
     200: {
-      description: "最新上報",
+      description: "最新上報物件",
       content: { "application/json": { schema: successSchema(latestReportItem) } },
     },
     ...commonErrorResponses,
@@ -249,7 +257,7 @@ const latestReportRoute = createRoute({
 const usageReportRoute = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/agent/usage",
-  tags: ["Agent"],
+  tags: ["Agent 上報"],
   summary: "上報設備使用時長（同設備同日 upsert）",
   description: [
     "**鑑權**：同 `/agent/reports`，若 device 已簽發 token 則必須帶 Bearer。",
@@ -279,12 +287,17 @@ const usageReportRoute = createRoute({
 const listUsageRoute = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/agent/devices/{serialNumber}/usage",
-  tags: ["Agent"],
-  summary: "查詢設備使用時長",
+  tags: ["Agent 上報"],
+  summary: "查詢設備使用時長統計",
+  description: [
+    "回傳設備的每日使用統計。支援單日查詢（`date`）或範圍查詢（`startDate`/`endDate`）。",
+    "",
+    "**鑑權**：無。",
+  ].join("\n"),
   request: { params: tenantSerialParam, query: usageQuery },
   responses: {
     200: {
-      description: "Usage rows",
+      description: "使用統計列表",
       content: {
         "application/json": {
           schema: successSchema(usageStatsListSchema),

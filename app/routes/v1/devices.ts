@@ -25,16 +25,25 @@ import {
  */
 
 const tenantParam = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 const tenantDeviceParam = tenantParam.extend({
-  deviceId: z.string().uuid().openapi({ param: { name: "deviceId", in: "path" } }),
+  deviceId: z.string().uuid().openapi({
+    param: { name: "deviceId", in: "path" },
+    description: "設備 UUID",
+    example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c",
+  }),
 });
 const tenantDeviceGroupParam = tenantParam.extend({
-  deviceGroupId: z
-    .string()
-    .uuid()
-    .openapi({ param: { name: "deviceGroupId", in: "path" } }),
+  deviceGroupId: z.string().uuid().openapi({
+    param: { name: "deviceGroupId", in: "path" },
+    description: "設備分組 UUID",
+    example: "a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6",
+  }),
 });
 
 const deviceItemSchema = z
@@ -261,12 +270,19 @@ function toItem(row: {
 const listSpec = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/devices",
-  tags: ["Devices"],
-  summary: "列出 tenant 內全部設備（跨校）",
+  tags: ["設備查詢與操作"],
+  summary: "列出 tenant 內全部設備（跨分組）",
+  description: [
+    "回傳指定 tenant 下所有設備，支援分頁 + 搜尋 + 按 device group 過濾。",
+    "",
+    "**鑑權**：無（tenant 端點）。",
+    "",
+    "操作員只看「設備」統一視角，不必知道底層走 Jamf 還是自建 MDM。",
+  ].join("\n"),
   request: { params: tenantParam, query: listQuery },
   responses: {
     200: {
-      description: "Device list",
+      description: "設備分頁列表",
       content: { "application/json": { schema: paginatedSchema(deviceItemSchema) } },
     },
     ...commonErrorResponses,
@@ -276,12 +292,13 @@ const listSpec = createRoute({
 const listByDeviceGroupSpec = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/device-groups/{deviceGroupId}/devices",
-  tags: ["Devices"],
-  summary: "列出指定 device group 的設備",
+  tags: ["設備查詢與操作"],
+  summary: "列出指定分組的設備",
+  description: "回傳指定 device group 下的設備（分頁 + 搜尋）。等價於 list 端點加 `deviceGroupId` 過濾。\n\n**鑑權**：無。",
   request: { params: tenantDeviceGroupParam, query: deviceGroupListQuery },
   responses: {
     200: {
-      description: "Device list",
+      description: "設備分頁列表",
       content: { "application/json": { schema: paginatedSchema(deviceItemSchema) } },
     },
     ...commonErrorResponses,
@@ -291,12 +308,19 @@ const listByDeviceGroupSpec = createRoute({
 const detailSpec = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/devices/{deviceId}",
-  tags: ["Devices"],
-  summary: "設備詳情（本地 + 即時 Jamf）",
+  tags: ["設備查詢與操作"],
+  summary: "設備詳情（本地 DB + 即時 Jamf 補充）",
+  description: [
+    "回傳設備的完整資訊。Apple 設備會即時打 Jamf API 補充詳細欄位（hardware / lostMode 等）。",
+    "",
+    "**鑑權**：無。",
+    "",
+    "若 Jamf 查詢失敗，`jamf` 為 `null` 且 `jamfError` 含失敗原因（不影響本地資料回傳）。",
+  ].join("\n"),
   request: { params: tenantDeviceParam },
   responses: {
     200: {
-      description: "Detail",
+      description: "設備詳情物件（含本地 + Jamf 即時資料）",
       content: {
         "application/json": { schema: successSchema(deviceDetailSchema) },
       },
@@ -308,15 +332,16 @@ const detailSpec = createRoute({
 const updateSpec = createRoute({
   method: "patch",
   path: "/tenants/{tenantId}/devices/{deviceId}",
-  tags: ["Devices"],
+  tags: ["設備查詢與操作"],
   summary: "更新設備（重命名 / 轉組）",
+  description: "部分更新設備屬性。可修改顯示名稱或調整所屬分組。\n\n**鑑權**：無。",
   request: {
     params: tenantDeviceParam,
     body: { content: { "application/json": { schema: updateDeviceBody } } },
   },
   responses: {
     200: {
-      description: "Updated",
+      description: "更新後的設備物件",
       content: { "application/json": { schema: successSchema(deviceItemSchema) } },
     },
     ...commonErrorResponses,
@@ -326,12 +351,20 @@ const updateSpec = createRoute({
 const deleteSpec = createRoute({
   method: "delete",
   path: "/tenants/{tenantId}/devices/{deviceId}",
-  tags: ["Devices"],
-  summary: "解除設備納管（軟刪：標記 enrollment_status=unenrolled，保留紀錄）",
+  tags: ["設備查詢與操作"],
+  summary: "解除設備納管（軟刪，保留紀錄）",
+  description: [
+    "標記設備為 `unenrolled` 狀態（軟刪除），歷史資料保留。",
+    "",
+    "**鑑權**：無。",
+    "",
+    "**注意**：此操作僅更新資料庫狀態，不會觸發設備端的 MDM unenroll 流程。",
+    "如需完整解除納管，請先派送 unenroll 命令再呼叫此端點。",
+  ].join("\n"),
   request: { params: tenantDeviceParam },
   responses: {
     200: {
-      description: "Unenrolled",
+      description: "更新後的設備物件（enrollment_status=unenrolled）",
       content: { "application/json": { schema: successSchema(deviceItemSchema) } },
     },
     ...commonErrorResponses,
@@ -341,15 +374,26 @@ const deleteSpec = createRoute({
 const commandSpec = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/devices/{deviceId}/commands",
-  tags: ["Devices"],
-  summary: "派送管理命令（內部自動找對應 Jamf）",
+  tags: ["設備查詢與操作"],
+  summary: "派送管理命令（跨平台，自動路由）",
+  description: [
+    "向設備派送管理命令。Apple 走 Jamf API，Windows 走自建 MDM CSP，自動路由。",
+    "",
+    "**鑑權**：無。",
+    "",
+    "**跨平台命令**：`LOCK` / `WIPE` / `REBOOT`（+ `ENABLE_LOST_MODE` / `DISABLE_LOST_MODE`）。",
+    "Windows 上 `LOCK` 等價 `ENABLE_LOST_MODE`：寫 Registry flag，Agent App 監聽後顯示鎖屏。",
+    "",
+    "**Apple 專用命令**：`DEVICE_LOCK` / `ERASE_DEVICE` / `CLEAR_PASSCODE` 等 Jamf 原生命令，",
+    "Windows 設備收到會回 400。",
+  ].join("\n"),
   request: {
     params: tenantDeviceParam,
     body: { content: { "application/json": { schema: commandBodySchema } } },
   },
   responses: {
     200: {
-      description: "Command sent",
+      description: "命令已派送（Apple: Jamf API response / Windows: commandUuid）",
       content: {
         "application/json": { schema: successSchema(deviceCommandResultSchema) },
       },
@@ -361,12 +405,13 @@ const commandSpec = createRoute({
 const commandHistorySpec = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/devices/{deviceId}/commands",
-  tags: ["Devices"],
-  summary: "命令歷史（按 queued_at desc 分頁）",
+  tags: ["設備查詢與操作"],
+  summary: "查詢設備命令歷史（分頁）",
+  description: "回傳設備的所有命令記錄（LOCK / WIPE / MSI install 等），按 `queuedAt` 降序排列。\n\n**鑑權**：無。",
   request: { params: tenantDeviceParam, query: paginationQuery },
   responses: {
     200: {
-      description: "Command history",
+      description: "命令歷史分頁列表",
       content: {
         "application/json": {
           schema: paginatedSchema(commandHistoryItemSchema),
@@ -454,12 +499,20 @@ function toUsageStatItem(row: {
 const telemetrySpec = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/devices/{deviceId}/telemetry",
-  tags: ["Devices"],
-  summary: "Agent 端 telemetry（最新一筆狀態 + 最近 7 天使用統計）",
+  tags: ["設備查詢與操作"],
+  summary: "設備遙測資料（最新狀態 + 近 7 天使用統計）",
+  description: [
+    "聚合兩項 Agent App 上報資料：",
+    "",
+    "- **latestReport**：最新一筆設備健康上報（電量 / 儲存 / 網路 / OS 版本）",
+    "- **usageLastWeek**：近 7 天每日使用統計（總時長 / 拿起次數 / 最長連續使用）",
+    "",
+    "**鑑權**：無。",
+  ].join("\n"),
   request: { params: tenantDeviceParam },
   responses: {
     200: {
-      description: "Telemetry",
+      description: "遙測聚合物件",
       content: { "application/json": { schema: successSchema(telemetrySchema) } },
     },
     ...commonErrorResponses,
@@ -469,12 +522,20 @@ const telemetrySpec = createRoute({
 const enableAppLockSpec = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/devices/{deviceId}/app-lock",
-  tags: ["Devices"],
-  summary: "啟用單 App 模式",
+  tags: ["設備查詢與操作"],
+  summary: "啟用單 App 模式（Kiosk）",
+  description: [
+    "啟用設備的單 App 模式（Kiosk）。",
+    "",
+    "- **Apple**：透過 Jamf 派發 single-app profile",
+    "- **Windows**：透過 MDM 動態安裝 Assigned Access profile + InstallProfile 命令",
+    "",
+    "**鑑權**：無。",
+  ].join("\n"),
   request: { params: tenantDeviceParam },
   responses: {
     200: {
-      description: "Enabled",
+      description: "已啟用",
       content: {
         "application/json": { schema: successSchema(appLockEnabledSchema) },
       },
@@ -486,12 +547,20 @@ const enableAppLockSpec = createRoute({
 const disableAppLockSpec = createRoute({
   method: "delete",
   path: "/tenants/{tenantId}/devices/{deviceId}/app-lock",
-  tags: ["Devices"],
-  summary: "停用單 App 模式",
+  tags: ["設備查詢與操作"],
+  summary: "停用單 App 模式（Kiosk）",
+  description: [
+    "停用設備的單 App 模式。",
+    "",
+    "- **Apple**：透過 Jamf 移除 single-app profile",
+    "- **Windows**：透過 MDM RemoveProfile 命令移除 Assigned Access profile",
+    "",
+    "**鑑權**：無。",
+  ].join("\n"),
   request: { params: tenantDeviceParam },
   responses: {
     200: {
-      description: "Disabled",
+      description: "已停用",
       content: {
         "application/json": { schema: successSchema(appLockDisabledSchema) },
       },

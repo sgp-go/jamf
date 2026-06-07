@@ -7,23 +7,38 @@ import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { getLapsPassword, rotateLapsPassword } from "~/services/laps.ts";
 
 const tenantDeviceParam = z.object({
-  tenantId: z
-    .string()
-    .uuid()
-    .openapi({ param: { name: "tenantId", in: "path" } }),
-  deviceId: z
-    .string()
-    .uuid()
-    .openapi({ param: { name: "deviceId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
+  deviceId: z.string().uuid().openapi({
+    param: { name: "deviceId", in: "path" },
+    description: "設備 UUID",
+    example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c",
+  }),
 });
 
 const lapsPasswordSchema = z
   .object({
-    password: z.string(),
-    adminAccount: z.string(),
-    rotatedAt: z.string(),
-    rotationId: z.string(),
-    status: z.string(),
+    password: z.string().openapi({
+      description: "解密後的管理員密碼明文（每次查詢都寫 audit log）",
+      example: "kX9#mP2$vL7@nQ4",
+    }),
+    adminAccount: z.string().openapi({
+      description: "受管的本機管理員帳號名稱",
+      example: "Administrator",
+    }),
+    rotatedAt: z.string().openapi({
+      description: "密碼最後輪換時間（ISO 8601 UTC）",
+    }),
+    rotationId: z.string().openapi({
+      description: "本次輪換的唯一識別碼（UUID）",
+    }),
+    status: z.string().openapi({
+      description: "輪換狀態：confirmed＝Agent 已確認執行；pending＝等待 Agent 回報",
+      example: "confirmed",
+    }),
   })
   .openapi("LapsPasswordInfo");
 
@@ -39,8 +54,12 @@ const rotateBody = z
 
 const rotateResultSchema = z
   .object({
-    rotationId: z.string().uuid(),
-    commandUuid: z.string().uuid(),
+    rotationId: z.string().uuid().openapi({
+      description: "本次輪換的唯一識別碼，可用於追蹤 Agent 確認狀態",
+    }),
+    commandUuid: z.string().uuid().openapi({
+      description: "已排入的 MDM 命令 UUID（ADMX Policy CSP 下發）",
+    }),
   })
   .openapi("LapsRotateResult");
 
@@ -51,7 +70,7 @@ const security = [{ BearerAuth: [] }];
 const getPasswordSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/devices/{deviceId}/laps-password",
-  tags: ["Admin: LAPS"],
+  tags: ["密碼託管（LAPS）"],
   security,
   summary: "查詢設備當前 LAPS 管理員密碼",
   description:
@@ -73,7 +92,7 @@ const getPasswordSpec = createRoute({
 const rotateSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/devices/{deviceId}/laps-rotate",
-  tags: ["Admin: LAPS"],
+  tags: ["密碼託管（LAPS）"],
   security,
   summary: "手動觸發設備 LAPS 密碼輪換",
   description:

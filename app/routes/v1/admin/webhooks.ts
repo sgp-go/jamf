@@ -20,7 +20,11 @@ import {
  */
 
 const tenantParam = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 
 // ─────────────────────────── event_log ───────────────────────────
@@ -62,13 +66,22 @@ const eventLogSchema = z
 const listEventLogSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/event-log",
-  tags: ["Admin: webhooks"],
+  tags: ["Webhook 監控"],
   security: [{ BearerAuth: [] }],
-  summary: "查詢 publishEvent 事件記錄（含沒訂閱者的事件，desc created_at）",
+  summary: "查詢事件發布記錄（含沒訂閱者的事件）",
+  description: [
+    "回傳 `publishEvent()` 記錄的所有事件，包含沒有任何訂閱者的事件（`matchedEndpointCount = 0`）。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**用途**：調試「事件到底發了沒」。搭配 `/webhook-deliveries` 可追蹤從事件發布到投遞的完整鏈路。",
+    "",
+    "**追蹤單一事件**：傳 `eventId` 可跨 event_log（1 行）+ webhook_deliveries（N 行）對齊。",
+  ].join("\n"),
   request: { params: tenantParam, query: eventLogQuery },
   responses: {
     200: {
-      description: "Event log list",
+      description: "事件記錄陣列（含分頁 meta）",
       content: {
         "application/json": {
           schema: successSchema(z.array(eventLogSchema)).extend({
@@ -132,13 +145,22 @@ const deliverySchema = z
 const listDeliveriesSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/webhook-deliveries",
-  tags: ["Admin: webhooks"],
+  tags: ["Webhook 監控"],
   security: [{ BearerAuth: [] }],
-  summary: "查詢 webhook 投遞記錄（含重試狀態 + 死信，desc created_at）",
+  summary: "查詢 webhook 投遞記錄（含重試 / 死信狀態）",
+  description: [
+    "回傳實際的 webhook 投遞嘗試記錄。每個事件 × 每個接收端點 = 一行 delivery。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**用途**：調試「投遞成功了沒 / 卡在哪」。",
+    "",
+    "**狀態流轉**：`pending`（排隊中）→ `delivered`（成功）/ `failed`（待重試，30s/5min/30min 三段退避）→ `dead`（超過重試次數）。",
+  ].join("\n"),
   request: { params: tenantParam, query: deliveriesQuery },
   responses: {
     200: {
-      description: "Webhook delivery list",
+      description: "投遞記錄陣列（含分頁 meta）",
       content: {
         "application/json": {
           schema: successSchema(z.array(deliverySchema)).extend({

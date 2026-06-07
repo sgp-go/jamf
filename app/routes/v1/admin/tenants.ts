@@ -118,7 +118,7 @@ function toDto(row: {
 const createRouteSpec = createRoute({
   method: "post",
   path: "/admin/tenants",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security,
   summary: "建立 tenant（onboarding 第一步）",
   description: [
@@ -150,7 +150,7 @@ const createRouteSpec = createRoute({
 const listRouteSpec = createRoute({
   method: "get",
   path: "/admin/tenants",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security,
   summary: "列出全部 tenants",
   description:
@@ -167,7 +167,7 @@ const listRouteSpec = createRoute({
 const detailRouteSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security,
   summary: "取得 tenant 詳情",
   description:
@@ -185,7 +185,7 @@ const detailRouteSpec = createRoute({
 const updateRouteSpec = createRoute({
   method: "patch",
   path: "/admin/tenants/{tenantId}",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security,
   summary: "更新 tenant（部分欄位）",
   description: [
@@ -209,7 +209,7 @@ const updateRouteSpec = createRoute({
 const deleteRouteSpec = createRoute({
   method: "delete",
   path: "/admin/tenants/{tenantId}",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security,
   summary: "硬刪 tenant（cascade，不可逆）",
   description: [
@@ -340,7 +340,7 @@ const createMdmConfigBody = z
 const createMdmConfigSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/mdm-config",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security: [{ BearerAuth: [] }],
   summary: "初始化 MDM 配置（自動生成 CA 根憑證）",
   description: [
@@ -367,7 +367,7 @@ const createMdmConfigSpec = createRoute({
 const getMdmConfigSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/mdm-config",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security: [{ BearerAuth: [] }],
   summary: "查詢 MDM 配置（publicBaseUrl / appDownloadBaseUrl）",
   description: [
@@ -396,7 +396,7 @@ const getMdmConfigSpec = createRoute({
 const updateMdmConfigSpec = createRoute({
   method: "patch",
   path: "/admin/tenants/{tenantId}/mdm-config",
-  tags: ["Admin: tenants"],
+  tags: ["租戶管理"],
   security: [{ BearerAuth: [] }],
   summary: "更新 MDM 配置（publicBaseUrl / appDownloadBaseUrl）",
   description: [

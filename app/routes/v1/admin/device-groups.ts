@@ -18,13 +18,21 @@ import {
 
 const deviceGroupSchema = z
   .object({
-    id: z.string().uuid(),
+    id: z.string().uuid().openapi({ example: "a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6" }),
     tenantId: z.string().uuid(),
-    code: z.string(),
-    displayName: z.string(),
-    jamfInstanceId: z.string().uuid().nullable(),
-    createdAt: z.string(),
-    updatedAt: z.string(),
+    code: z.string().openapi({
+      description: "tenant 內唯一識別碼，用於 URL 和內部引用",
+      example: "guangfu-es",
+    }),
+    displayName: z.string().openapi({
+      description: "對外顯示名稱（可中文）",
+      example: "光復國小",
+    }),
+    jamfInstanceId: z.string().uuid().nullable().openapi({
+      description: "綁定的 Jamf 實例 UUID（1:1 關係）；null 表示尚未綁定",
+    }),
+    createdAt: z.string().openapi({ description: "ISO 8601 UTC" }),
+    updatedAt: z.string().openapi({ description: "ISO 8601 UTC" }),
   })
   .openapi("DeviceGroup");
 
@@ -54,13 +62,18 @@ const updateBody = z
   .openapi("UpdateDeviceGroupInput");
 
 const tenantParam = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 const tenantDeviceGroupParam = tenantParam.extend({
-  deviceGroupId: z
-    .string()
-    .uuid()
-    .openapi({ param: { name: "deviceGroupId", in: "path" } }),
+  deviceGroupId: z.string().uuid().openapi({
+    param: { name: "deviceGroupId", in: "path" },
+    description: "設備分組 UUID",
+    example: "a1b2c3d4-5e6f-7a8b-9c0d-e1f2a3b4c5d6",
+  }),
 });
 
 const security = [{ BearerAuth: [] }];
@@ -88,16 +101,24 @@ function toDto(row: {
 const createSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/device-groups",
-  tags: ["Admin: device groups"],
+  tags: ["設備分組"],
   security,
   summary: "建立 device group（可選綁定 Jamf 實例）",
+  description: [
+    "在指定 tenant 下建立新的設備分組。建立後可透過 `PATCH` 綁定 Jamf 實例。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**教育場景**：一個 device group 通常對應一所學校（如 `guangfu-es`＝光復國小），",
+    "底下的設備共享同一套 Jamf 實例 + 策略配置。",
+  ].join("\n"),
   request: {
     params: tenantParam,
     body: { content: { "application/json": { schema: createBody } } },
   },
   responses: {
     201: {
-      description: "Created",
+      description: "建立成功，回傳完整 device group 物件",
       content: { "application/json": { schema: successSchema(deviceGroupSchema) } },
     },
     ...commonErrorResponses,
@@ -107,13 +128,14 @@ const createSpec = createRoute({
 const listSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/device-groups",
-  tags: ["Admin: device groups"],
+  tags: ["設備分組"],
   security,
   summary: "列出該 tenant 下所有 device group",
+  description: "回傳指定 tenant 下全部設備分組（不分頁）。\n\n**鑑權**：Bearer admin token。",
   request: { params: tenantParam },
   responses: {
     200: {
-      description: "Device group list",
+      description: "設備分組陣列",
       content: {
         "application/json": { schema: successSchema(z.array(deviceGroupSchema)) },
       },
@@ -125,13 +147,14 @@ const listSpec = createRoute({
 const detailSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/device-groups/{deviceGroupId}",
-  tags: ["Admin: device groups"],
+  tags: ["設備分組"],
   security,
   summary: "取得 device group 詳情",
+  description: "回傳單一設備分組的完整資訊。\n\n**鑑權**：Bearer admin token。",
   request: { params: tenantDeviceGroupParam },
   responses: {
     200: {
-      description: "Device group",
+      description: "設備分組物件",
       content: { "application/json": { schema: successSchema(deviceGroupSchema) } },
     },
     ...commonErrorResponses,
@@ -141,16 +164,23 @@ const detailSpec = createRoute({
 const updateSpec = createRoute({
   method: "patch",
   path: "/admin/tenants/{tenantId}/device-groups/{deviceGroupId}",
-  tags: ["Admin: device groups"],
+  tags: ["設備分組"],
   security,
   summary: "更新 device group（可改名 / 重綁 Jamf）",
+  description: [
+    "部分更新設備分組。可修改 `code`、`displayName` 或重新綁定 Jamf 實例。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：更改 `jamfInstanceId` 後需重新同步設備（呼叫 sync-devices）。",
+  ].join("\n"),
   request: {
     params: tenantDeviceGroupParam,
     body: { content: { "application/json": { schema: updateBody } } },
   },
   responses: {
     200: {
-      description: "Updated",
+      description: "更新後的設備分組物件",
       content: { "application/json": { schema: successSchema(deviceGroupSchema) } },
     },
     ...commonErrorResponses,
@@ -160,12 +190,19 @@ const updateSpec = createRoute({
 const deleteSpec = createRoute({
   method: "delete",
   path: "/admin/tenants/{tenantId}/device-groups/{deviceGroupId}",
-  tags: ["Admin: device groups"],
+  tags: ["設備分組"],
   security,
-  summary: "刪除 device group（cascade 將底下設備的 device_group_id 設 null）",
+  summary: "刪除 device group（底下設備的 device_group_id 設 null）",
+  description: [
+    "刪除設備分組。底下的設備不會被刪除，但其 `deviceGroupId` 會被設為 `null`（變為未分組）。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：此操作不可逆。設備需重新指派到其他分組。",
+  ].join("\n"),
   request: { params: tenantDeviceGroupParam },
   responses: {
-    204: { description: "Deleted" },
+    204: { description: "刪除成功（無回傳 body）" },
     ...commonErrorResponses,
   },
 });

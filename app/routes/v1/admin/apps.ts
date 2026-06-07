@@ -27,28 +27,61 @@ const appSchema = z
   .object({
     id: z.string().uuid(),
     tenantId: z.string().uuid().nullable(),
-    platform: z.enum(["apple", "windows"]),
+    platform: z.enum(["apple", "windows"]).openapi({
+      description: "目標平台",
+    }),
     kind: appKindSchema,
-    displayName: z.string(),
-    bundleId: z.string().nullable(),
-    version: z.string(),
-    fileUrl: z.string().nullable(),
-    fileHash: z.string().nullable(),
-    fileSizeBytes: z.number().nullable(),
-    signedBy: z.string().nullable(),
-    installArgs: z.string().nullable(),
-    iTunesStoreId: z.number().nullable(),
-    createdAt: z.string(),
-    updatedAt: z.string(),
+    displayName: z.string().openapi({
+      description: "應用顯示名稱",
+      example: "CoGrow MDM Agent",
+    }),
+    bundleId: z.string().nullable().openapi({
+      description: "Bundle ID（Apple）或 MSI ProductCode（Windows），用於版本比對",
+      example: "{A1B2C3D4-5E6F-7A8B-9C0D-E1F2A3B4C5D6}",
+    }),
+    version: z.string().openapi({
+      description: "版本號",
+      example: "1.2.0",
+    }),
+    fileUrl: z.string().nullable().openapi({
+      description: "下載路徑（相對），完整 URL = appDownloadBaseUrl + fileUrl",
+      example: "/api/v1/apps/xxx/download/agent.msi",
+    }),
+    fileHash: z.string().nullable().openapi({
+      description: "SHA-256 雜湊值（EDA-CSP MsiInstallJob 用於完整性校驗）",
+    }),
+    fileSizeBytes: z.number().nullable().openapi({
+      description: "檔案大小（bytes）",
+    }),
+    signedBy: z.string().nullable().openapi({
+      description: "數位簽名者識別（選填）",
+    }),
+    installArgs: z.string().nullable().openapi({
+      description: "msiexec 額外參數（Windows MSI 專用）",
+      example: "/qn /norestart",
+    }),
+    iTunesStoreId: z.number().nullable().openapi({
+      description: "iTunes Store ID（Apple Custom App 專用，走 ABM/ASM 派發）",
+    }),
+    createdAt: z.string().openapi({ description: "ISO 8601 UTC" }),
+    updatedAt: z.string().openapi({ description: "ISO 8601 UTC" }),
   })
   .openapi("App");
 
 const tenantParam = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 
 const tenantAppParam = tenantParam.extend({
-  appId: z.string().uuid().openapi({ param: { name: "appId", in: "path" } }),
+  appId: z.string().uuid().openapi({
+    param: { name: "appId", in: "path" },
+    description: "App UUID",
+    example: "b2c3d4e5-6f7a-8b9c-0d1e-f2a3b4c5d6e7",
+  }),
 });
 
 const security = [{ BearerAuth: [] }];
@@ -67,9 +100,17 @@ const security = [{ BearerAuth: [] }];
 const uploadSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/apps",
-  tags: ["Admin: apps"],
+  tags: ["應用套件管理"],
   security,
   summary: "上傳 App 安裝包（multipart/form-data）",
+  description: [
+    "上傳 `.msi` / `.exe` / `.msix` / `.mobileconfig` 安裝包。伺服器自動計算 SHA-256 並存儲到本地。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "上傳後可透過 `POST /admin/.../install-agent` 觸發 EDA-CSP 將 MSI 推送到 Windows 設備。",
+    "iOS Custom App 不上傳二進制（走 ABM/ASM 派發），但可建 row 記錄 `iTunesStoreId`。",
+  ].join("\n"),
   request: {
     params: tenantParam,
     body: {
@@ -90,7 +131,7 @@ const uploadSpec = createRoute({
   },
   responses: {
     201: {
-      description: "App uploaded",
+      description: "上傳成功，回傳完整 App 物件（含 fileHash / fileUrl）",
       content: { "application/json": { schema: successSchema(appSchema) } },
     },
     ...commonErrorResponses,
@@ -100,13 +141,14 @@ const uploadSpec = createRoute({
 const listSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/apps",
-  tags: ["Admin: apps"],
+  tags: ["應用套件管理"],
   security,
-  summary: "列出此 tenant 下所有 App",
+  summary: "列出此 tenant 下所有 App 安裝包",
+  description: "回傳指定 tenant 的全部已上傳 App（不分頁）。\n\n**鑑權**：Bearer admin token。",
   request: { params: tenantParam },
   responses: {
     200: {
-      description: "Apps",
+      description: "App 陣列",
       content: { "application/json": { schema: successSchema(z.array(appSchema)) } },
     },
     ...commonErrorResponses,
@@ -116,13 +158,14 @@ const listSpec = createRoute({
 const detailSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/apps/{appId}",
-  tags: ["Admin: apps"],
+  tags: ["應用套件管理"],
   security,
-  summary: "App 詳情",
+  summary: "取得 App 安裝包詳情",
+  description: "回傳單一 App 的完整資訊（含 fileHash、fileSizeBytes 等）。\n\n**鑑權**：Bearer admin token。",
   request: { params: tenantAppParam },
   responses: {
     200: {
-      description: "App",
+      description: "App 物件",
       content: { "application/json": { schema: successSchema(appSchema) } },
     },
     ...commonErrorResponses,
@@ -132,12 +175,19 @@ const detailSpec = createRoute({
 const deleteSpec = createRoute({
   method: "delete",
   path: "/admin/tenants/{tenantId}/apps/{appId}",
-  tags: ["Admin: apps"],
+  tags: ["應用套件管理"],
   security,
-  summary: "刪除 App（含本地檔案）",
+  summary: "刪除 App 安裝包（含本地檔案）",
+  description: [
+    "刪除 App 記錄並移除伺服器上的本地檔案。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：已安裝到設備上的 App 不受影響，但後續設備將無法重新下載此版本。",
+  ].join("\n"),
   request: { params: tenantAppParam },
   responses: {
-    204: { description: "Deleted" },
+    204: { description: "刪除成功（無回傳 body）" },
     ...commonErrorResponses,
   },
 });

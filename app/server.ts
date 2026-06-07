@@ -102,29 +102,59 @@ app.doc("/openapi.json", {
     },
   ],
   tags: [
-    { name: "Devices", description: "設備中心端點（list/detail/PATCH/DELETE/commands/telemetry）" },
-    { name: "Agent", description: "Agent App 上報（健康狀態 / 使用統計）" },
-    { name: "Apps", description: "App 套件下載（公開，hash 校驗）" },
-    { name: "Admin: tenants", description: "Tenant 生命週期" },
-    { name: "Admin: device groups", description: "Device group CRUD（操作員可見性邊界）" },
-    { name: "Admin: devices", description: "Admin 設備寫入（transfer 硬轉校）" },
-    { name: "Admin: profiles", description: "配置描述檔 CRUD + assign + status" },
+    // ── 公開 API（設備端 / Agent App）──
+    { name: "設備查詢與操作", description: "設備列表 / 詳情 / 命令派送 / 遙測 / App Lock / 解除納管，操作員統一視角" },
+    { name: "Agent 上報", description: "Agent App 上報設備健康狀態 + 螢幕使用時長統計（iOS / Windows 共用）" },
+    { name: "應用下載", description: "App 安裝包下載（公開端點，SHA-256 校驗，供 MDM EDA-CSP 拉取 MSI / MSIX）" },
+
+    // ── 租戶初始化 ──
+    { name: "租戶管理", description: "租戶生命週期（CRUD）+ MDM 基礎配置（publicBaseUrl / appDownloadBaseUrl / CA 憑證）" },
+    { name: "設備分組", description: "設備分組 CRUD（操作員可見性邊界 + 批次派送單位），可選綁定 Jamf 實例" },
+    { name: "Jamf 整合", description: "Jamf Pro 整合設定（憑據錄入 / 驗證 / 設備同步），支援多實例" },
+
+    // ── 設備管理 ──
+    { name: "設備操作", description: "Admin 設備寫入（transfer 跨校轉移 + Wipe 觸發 + Agent 派發）" },
+    { name: "批次註冊", description: "Windows PPKG 批次註冊（customizations.xml 生成，含 WiFi / 本機帳號配置）" },
+    { name: "Agent 派發", description: "Agent App 一鍵派發（EDA-CSP 遠端安裝 + 灰度升級 + 健康驗證）" },
+    { name: "密碼託管（LAPS）", description: "本機管理員密碼託管 —— 查詢當前密碼 / 手動觸發輪換" },
+
+    // ── 策略與合規 ──
+    { name: "配置描述檔", description: "配置描述檔 CRUD + 指派到設備或分組 + 套用狀態追蹤" },
+    { name: "策略預設", description: "高層 preset：網站黑名單 / Defender 強制 / Windows Update 策略（自動轉換為 CSP payload）" },
+    { name: "合規評估", description: "合規政策即時評估（OS 版本下限 + 離線天數上限）" },
+
+    // ── 平台營運 ──
+    { name: "應用套件管理", description: "App 安裝包上傳與管理（MSI / MSIX 二進位 + metadata）" },
+    { name: "審計日誌", description: "審計日誌查詢（唯讀；寫入由各端點自動記錄）" },
+    { name: "Webhook 監控", description: "Webhook 可觀測性（唯讀）：事件日誌 + 投遞記錄（含重試 / 死信狀態）" },
+
+    // ── 已棄用 ──
+    { name: "Jamf 原始視圖（已棄用）", description: "⚠️ 已棄用：請改用統一設備視角端點" },
+  ],
+  "x-tagGroups": [
     {
-      name: "Admin: profile presets",
-      description: "高層 preset 端點：網站黑名單 / Defender 強制 / Update Policy（自動轉 csps payload）",
+      name: "公開 API",
+      tags: ["設備查詢與操作", "Agent 上報", "應用下載"],
     },
-    { name: "Admin: compliance", description: "合規政策即時評估（OS 版本 + 離線天數）" },
-    { name: "Admin: audit", description: "審計日誌查詢（read-only；寫入由各 admin route 自行 logAudit）" },
     {
-      name: "Admin: webhooks",
-      description: "Webhook 可觀測性（read-only）：event_log（publishEvent 記錄）+ deliveries（投遞 / 重試 / 死信）",
+      name: "租戶初始化",
+      tags: ["租戶管理", "設備分組", "Jamf 整合"],
     },
-    { name: "Admin: jamf instances", description: "Jamf 整合設定與同步" },
-    { name: "Admin: apps", description: "App 套件上傳與管理" },
-    { name: "Admin: install-agent", description: "Agent App 一鍵派發" },
     {
-      name: "Admin: jamf raw view (DEPRECATED)",
-      description: "⚠️ 已棄用：請改用 /api/v1/tenants/{tid}/devices/* 統一設備視角",
+      name: "設備管理",
+      tags: ["設備操作", "批次註冊", "Agent 派發", "密碼託管（LAPS）"],
+    },
+    {
+      name: "策略與合規",
+      tags: ["配置描述檔", "策略預設", "合規評估"],
+    },
+    {
+      name: "平台營運",
+      tags: ["應用套件管理", "審計日誌", "Webhook 監控"],
+    },
+    {
+      name: "已棄用",
+      tags: ["Jamf 原始視圖（已棄用）"],
     },
   ],
 });

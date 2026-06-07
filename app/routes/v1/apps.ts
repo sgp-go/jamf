@@ -25,7 +25,7 @@ const appFileParam = z.object({
 const downloadSpec = createRoute({
   method: "get",
   path: "/apps/{appId}/download/{filename}",
-  tags: ["Apps"],
+  tags: ["應用下載"],
   summary: "下載 App 安裝包（公開，靠 SHA-256 hash 驗證完整性）",
   request: { params: appFileParam },
   responses: {

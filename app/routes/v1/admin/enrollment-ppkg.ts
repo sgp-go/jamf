@@ -67,7 +67,7 @@ const ppkgBody = z.object({
 const ppkgConfigSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/enrollment/ppkg-config",
-  tags: ["Admin: install-agent"],
+  tags: ["批次註冊"],
   security: [{ BearerAuth: [] }],
   summary:
     "生成 USB PPKG 用 customizations.xml（enrollment + 可選 WiFi + 本機帳號；含 tenant publicBaseUrl）",

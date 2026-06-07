@@ -13,10 +13,18 @@ import { transferDeviceToGroup } from "~/services/devices.ts";
  */
 
 const tenantParam = z.object({
-  tenantId: z.string().uuid().openapi({ param: { name: "tenantId", in: "path" } }),
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    description: "租戶 UUID",
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
 });
 const tenantDeviceParam = tenantParam.extend({
-  deviceId: z.string().uuid().openapi({ param: { name: "deviceId", in: "path" } }),
+  deviceId: z.string().uuid().openapi({
+    param: { name: "deviceId", in: "path" },
+    description: "設備 UUID",
+    example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c",
+  }),
 });
 
 const transferBody = z
@@ -44,16 +52,27 @@ const security = [{ BearerAuth: [] }];
 const transferSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/devices/{deviceId}/transfer",
-  tags: ["Admin: devices"],
+  tags: ["設備操作"],
   security,
-  summary: "硬轉校：標記新 device_group + 派 Wipe（重 enroll 時自動歸新組）",
+  summary: "硬轉校：標記新 device_group + 派 Wipe",
+  description: [
+    "將設備轉移到新的 device group（跨校轉移）。流程：",
+    "",
+    "1. 更新設備的 `deviceGroupId` 為目標分組",
+    "2. 自動派發 Wipe 命令（Apple 走 Jamf / Windows 走自建 MDM）",
+    "3. 設備重灌後重新 enroll，自動歸入新分組",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**⚠️ 此操作會遠端擦除設備**，確保已備份學生資料。",
+  ].join("\n"),
   request: {
     params: tenantDeviceParam,
     body: { content: { "application/json": { schema: transferBody } } },
   },
   responses: {
     200: {
-      description: "Transfer initiated",
+      description: "轉移已觸發，回傳設備 ID、新分組 ID 及 Wipe 派發結果",
       content: { "application/json": { schema: successSchema(transferResultSchema) } },
     },
     ...commonErrorResponses,

@@ -76,7 +76,7 @@ const security = [{ BearerAuth: [] }];
 const createSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/jamf-instances",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "新增 Jamf 實例（憑證寫入後不可讀回）",
   request: {
@@ -99,7 +99,7 @@ const createSpec = createRoute({
 const listSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/jamf-instances",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "列出該 tenant 下所有 Jamf 實例",
   request: { params: tenantParam },
@@ -117,7 +117,7 @@ const listSpec = createRoute({
 const detailSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/jamf-instances/{instanceId}",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "取得 Jamf 實例詳情",
   request: { params: tenantInstanceParam },
@@ -133,7 +133,7 @@ const detailSpec = createRoute({
 const updateSpec = createRoute({
   method: "patch",
   path: "/admin/tenants/{tenantId}/jamf-instances/{instanceId}",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "更新 Jamf 實例（修 clientSecret 或 baseUrl 會自動清除 token cache）",
   request: {
@@ -152,7 +152,7 @@ const updateSpec = createRoute({
 const deleteSpec = createRoute({
   method: "delete",
   path: "/admin/tenants/{tenantId}/jamf-instances/{instanceId}",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "刪除 Jamf 實例（不影響裝置記錄，但失去管理通道）",
   request: { params: tenantInstanceParam },
@@ -165,7 +165,7 @@ const deleteSpec = createRoute({
 const verifySpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/jamf-instances/{instanceId}/verify",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "用 client_credentials 真打 OAuth token 端點驗證憑證",
   request: { params: tenantInstanceParam },
@@ -274,7 +274,7 @@ jamfInstancesAdminApp.openapi(verifySpec, async (c) => {
 const syncSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/jamf-instances/{instanceId}/sync-devices",
-  tags: ["Admin: jamf instances"],
+  tags: ["Jamf 整合"],
   security,
   summary: "從該 Jamf 拉全部 mobile devices 同步到 mdm_devices（upsert）",
   request: { params: tenantInstanceParam },

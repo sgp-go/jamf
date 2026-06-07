@@ -143,7 +143,7 @@ const appLockResultSchema = z
 const listRoute = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/jamf-instances/{instanceId}/devices",
-  tags: ["Admin: jamf raw view (DEPRECATED)"],
+  tags: ["Jamf 原始視圖（已棄用）"],
   deprecated: true,
   summary: "列出 Jamf 實例下的設備",
   request: { params: tenantInstanceParams, query: paginationQuery },
@@ -159,7 +159,7 @@ const listRoute = createRoute({
 const detailRoute = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/jamf-instances/{instanceId}/devices/{id}",
-  tags: ["Admin: jamf raw view (DEPRECATED)"],
+  tags: ["Jamf 原始視圖（已棄用）"],
   deprecated: true,
   summary: "取得設備詳情（v2 detail + Classic Lost Mode）",
   request: { params: tenantInstanceDeviceParams },
@@ -175,7 +175,7 @@ const detailRoute = createRoute({
 const commandRoute = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/jamf-instances/{instanceId}/devices/{id}/command",
-  tags: ["Admin: jamf raw view (DEPRECATED)"],
+  tags: ["Jamf 原始視圖（已棄用）"],
   deprecated: true,
   summary: "派送管理命令到設備",
   request: {
@@ -194,7 +194,7 @@ const commandRoute = createRoute({
 const enableAppLockRoute = createRoute({
   method: "post",
   path: "/tenants/{tenantId}/jamf-instances/{instanceId}/devices/{id}/app-lock",
-  tags: ["Admin: jamf raw view (DEPRECATED)"],
+  tags: ["Jamf 原始視圖（已棄用）"],
   deprecated: true,
   summary: "啟用單 App 模式（加入 jamf_instances.app_lock_group_id 群組）",
   request: { params: tenantInstanceDeviceParams },
@@ -210,7 +210,7 @@ const enableAppLockRoute = createRoute({
 const disableAppLockRoute = createRoute({
   method: "delete",
   path: "/tenants/{tenantId}/jamf-instances/{instanceId}/devices/{id}/app-lock",
-  tags: ["Admin: jamf raw view (DEPRECATED)"],
+  tags: ["Jamf 原始視圖（已棄用）"],
   deprecated: true,
   summary: "停用單 App 模式（從群組移除）",
   request: { params: tenantInstanceDeviceParams },

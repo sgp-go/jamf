@@ -140,7 +140,7 @@ const blockedSitesBody = z
 const blockedSitesSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/profile-presets/blocked-sites",
-  tags: ["Admin: profile presets"],
+  tags: ["策略預設"],
   security,
   summary: "建立網站黑名單 profile（IE Site Zone → Edge Chromium 透過 Security Zones 受影響）",
   request: {
@@ -194,7 +194,7 @@ const defenderBody = z
 const defenderSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/profile-presets/defender",
-  tags: ["Admin: profile presets"],
+  tags: ["策略預設"],
   security,
   summary: "建立 Defender 強制啟用 profile",
   request: {
@@ -261,7 +261,7 @@ const updateBody = z
 const updateSpec = createRoute({
   method: "post",
   path: "/admin/tenants/{tenantId}/profile-presets/update-policy",
-  tags: ["Admin: profile presets"],
+  tags: ["策略預設"],
   security,
   summary: "建立 Windows Update Policy profile（Schedule / Defer / ActiveHours / Pause）",
   request: {
