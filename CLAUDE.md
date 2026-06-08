@@ -75,6 +75,16 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 | `/api/v1/tenants/{tid}/agent/usage` | POST | 上報裝置使用時長 |
 | `/api/v1/tenants/{tid}/agent/devices/{serial}/usage` | GET | 查詢使用時長（支援 date/startDate/endDate/limit 篩選） |
 
+### Admin API 端點（`/api/v1/admin/tenants/{tenantId}/...`）
+
+| 端點 | 方法 | 說明 |
+|------|------|------|
+| `/api/v1/admin/tenants/{tid}/devices/{did}/laps-password` | GET | 查詢設備 LAPS 管理員密碼（解密明文，寫 audit log） |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/laps-rotate` | POST | 手動觸發 LAPS 密碼輪換 |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/bitlocker-recovery` | GET | 查詢設備 BitLocker Recovery Password（解密明文，寫 audit log） |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/install-agent` | POST | 對設備下發 Agent MSI（含 LAPS + BitLocker 自動觸發） |
+| `/api/v1/admin/tenants/{tid}/apps` | POST | 上傳 App 安裝包（multipart/form-data） |
+
 ### 自建 MDM 端點（`/api/mdm`）
 
 | 端點 | 方法 | 說明 |
