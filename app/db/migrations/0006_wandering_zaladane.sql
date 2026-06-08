@@ -1,0 +1,1 @@
+ALTER TABLE "self_mdm_configs" ADD COLUMN "app_download_base_url" text;

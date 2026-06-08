@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CoGrow MDM Agent — main installer package definition.
+
+  UpgradeCode is the immutable identity of this product line. Never change it.
+  ProductCode is auto-generated each build (asterisk in Package/@ProductCode is
+  the WiX default when omitted); the ProductCode is what the platform stores in
+  apps.bundle_id and what EDA-CSP queries for install status.
+
+  Self-protection (W3 主軸 5b):
+    - ARPNOREMOVE=1  從「新增/移除程式」隱藏移除按鈕（學生 GUI 卸載不可達）
+    - ARPSYSTEMCOMPONENT=1  進一步從清單隱藏（Win10 22H2 Settings 也不顯示）
+    - Registry ACL 由 util:PermissionEx 鎖（見下 AgentConfigRegistry Fragment）
+  Admin 仍可走 `msiexec /x {ProductCode}` 或 MDM 解纳管流程 uninstall。
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package
+    Name="CoGrow MDM Agent"
+    Manufacturer="CoGrow"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="AD59A7AF-5325-4104-9695-5ACCECA889C2"
+    Scope="perMachine"
+    Compressed="yes"
+    InstallerVersion="500">
+
+    <SummaryInformation
+      Description="CoGrow MDM Agent — device telemetry service"
+      Manufacturer="CoGrow" />
+
+    <!-- Block downgrade; uninstall older versions automatically on upgrade. -->
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed."
+      Schedule="afterInstallInitialize" />
+
+    <!-- Embed all payload into the .msi itself (single-file distribution). -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!--
+      Agent config 由 msiexec 公開屬性寫入 HKLM（Registry CSP 在 Win10 22H2 全 404
+      不可用，config 只能隨 MSI property 注入）。backend install-agent 經 EDA-CSP
+      MsiInstallJob CommandLine 傳 DEVICE_ID / AGENT_TOKEN / API_ENDPOINT / TENANT_ID。
+
+      升級保留（方案 C+，修 RegistrySearch 蓋掉命令行 token 的 bug，2026-06-02 真機抓到）：
+      **命令行屬性優先，缺失才回填**。原方案把 RegistrySearch 直接掛主屬性 → 升級時舊註冊表
+      值仍在 → AppSearch 用舊值蓋掉了命令行傳入的新值（token 旋轉/重綁永遠到不了設備 → 上報
+      401）。正解：RegistrySearch 讀現值入「影子屬性」EXISTING_*，再用 SetProperty 在 AppSearch
+      之後、**僅當主屬性未由命令行提供時**才用影子值回填。
+      - rollout/install-agent 總是帶命令行屬性 → 命令行新值勝出（token 能更新到設備）。
+      - 不帶（純升級）→ 回填現值 = 保留，升級不丟 config。
+      AppSearch 在 RemoveExistingProducts 之前跑，影子屬性在舊值被刪前已讀到。
+      Secure="yes" 讓公開屬性挺過 system-context 靜默安裝且不進 MSI log 明文。
+    -->
+    <Property Id="DEVICE_ID" Secure="yes" />
+    <Property Id="AGENT_TOKEN" Secure="yes" />
+    <Property Id="API_ENDPOINT" Secure="yes" />
+    <Property Id="TENANT_ID" Secure="yes" />
+
+    <!-- 影子屬性：RegistrySearch 從現有註冊表回填現值（AppSearch 階段，RemoveExistingProducts 之前）。 -->
+    <Property Id="EXISTING_DEVICE_ID">
+      <RegistrySearch Id="SearchDeviceId" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="device_id" Type="raw" />
+    </Property>
+    <Property Id="EXISTING_AGENT_TOKEN">
+      <RegistrySearch Id="SearchAgentToken" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="agent_token" Type="raw" />
+    </Property>
+    <Property Id="EXISTING_API_ENDPOINT">
+      <RegistrySearch Id="SearchApiEndpoint" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="api_endpoint" Type="raw" />
+    </Property>
+    <Property Id="EXISTING_TENANT_ID">
+      <RegistrySearch Id="SearchTenantId" Root="HKLM" Key="SOFTWARE\Policies\CoGrowMDM\Agent" Name="tenant_id" Type="raw" />
+    </Property>
+
+    <!--
+      命令行未提供主屬性時，才用影子現值回填（保留升級配置）；提供則命令行值勝出（不被覆蓋）。
+      鏈式 After 確保順序且不撞 sequence 號；Sequence=both 覆蓋互動/靜默兩種安裝。
+    -->
+    <SetProperty Action="BackfillDeviceId" Id="DEVICE_ID" Value="[EXISTING_DEVICE_ID]"
+      After="AppSearch" Sequence="both" Condition="NOT DEVICE_ID AND EXISTING_DEVICE_ID" />
+    <SetProperty Action="BackfillAgentToken" Id="AGENT_TOKEN" Value="[EXISTING_AGENT_TOKEN]"
+      After="BackfillDeviceId" Sequence="both" Condition="NOT AGENT_TOKEN AND EXISTING_AGENT_TOKEN" />
+    <SetProperty Action="BackfillApiEndpoint" Id="API_ENDPOINT" Value="[EXISTING_API_ENDPOINT]"
+      After="BackfillAgentToken" Sequence="both" Condition="NOT API_ENDPOINT AND EXISTING_API_ENDPOINT" />
+    <SetProperty Action="BackfillTenantId" Id="TENANT_ID" Value="[EXISTING_TENANT_ID]"
+      After="BackfillApiEndpoint" Sequence="both" Condition="NOT TENANT_ID AND EXISTING_TENANT_ID" />
+
+    <!--
+      Self-protection：從「新增/移除程式」隱藏條目，讓學生無法用 GUI 卸載。
+      - ARPNOREMOVE=1 灰掉移除按鈕（舊版 Control Panel 行為）
+      - ARPSYSTEMCOMPONENT=1 整個條目不出現在清單（Win10 Settings → Apps 也不顯示）
+      管理員透過 msiexec /x 或 MDM 解纳管流程仍可卸載。
+    -->
+    <Property Id="ARPNOREMOVE" Value="1" />
+    <Property Id="ARPSYSTEMCOMPONENT" Value="1" />
+
+    <Feature Id="MainFeature" Title="CoGrow MDM Agent" Level="1" Display="expand">
+      <ComponentGroupRef Id="ServiceComponents" />
+      <ComponentRef Id="AgentConfigRegistry" />
+      <ComponentRef Id="AgentDataFolder" />
+    </Feature>
+
+  </Package>
+
+  <!-- Install directory: C:\Program Files\CoGrow\MDM Agent\ -->
+  <Fragment>
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="ManufacturerFolder" Name="CoGrow">
+        <Directory Id="INSTALLFOLDER" Name="MDM Agent" />
+      </Directory>
+    </StandardDirectory>
+  </Fragment>
+
+  <!--
+    Agent config written to HKLM at install time from the msiexec properties.
+    Key MUST match CoGrowMDMAgent RegistryConfig.cs KeyPath
+    (SOFTWARE\Policies\CoGrowMDM\Agent) and the four value names it reads.
+
+    Self-protection：util:PermissionEx 重置 ACL，Users 僅讀、Admin/SYSTEM 全控，
+    防學生直接改 token / api_endpoint 接管 Agent。注意 PermissionEx 會替換 ACL，
+    所以 SYSTEM / Administrators 必須顯式列出，否則 service 自己也讀不到。
+  -->
+  <Fragment>
+    <!--
+      升級保留配置（方案 C：RegistrySearch 回填，取代失敗的 NeverOverwrite）。
+
+      為何不用 NeverOverwrite（2026-06-02 真機驗證踩坑）：NeverOverwrite 在 AppSearch
+      階段（舊 config 還在）就判定 KeyPath 存在 → 標記 component 不安裝；之後
+      afterInstallInitialize 移除舊產品刪掉 config → 新值永不寫入 → 升級清空 config
+      （task 57 真機實證，連 token 一併清掉）。
+
+      方案 C+：影子屬性 EXISTING_* 掛 RegistrySearch 讀現值，SetProperty 在命令行未提供主屬性
+      時才回填（見上方 Property/SetProperty）。component 正常寫入 [DEVICE_ID] 等主屬性，
+      無 NeverOverwrite / 無 Permanent。命令行帶屬性 → 命令行值勝出（token 能更新）；
+      不帶 → 回填現值 = 保留。無 Permanent → 真卸載乾淨刪除（無 token 殘留）。
+      ⚠️ 命令行屬性優先級 + 回填時序須真機驗證（Mac 不可校驗）：①帶 property 升級覆蓋新值
+      ②不帶 property 升級保留現值。
+    -->
+    <Component
+      Id="AgentConfigRegistry"
+      Directory="INSTALLFOLDER"
+      Guid="7B123AC5-EDE0-4EB9-90C1-6578E014C81A">
+      <!--
+        ForceCreateOnInstall="yes" + Id 是 WiX 4 對「掛 PermissionEx 的 RegistryKey」
+        的硬要求（WIX5063）。Id 在 RegistryKey 表中作為主鍵，並讓 util ext 找到掛點。
+      -->
+      <RegistryKey
+        Id="AgentPolicyKey"
+        Root="HKLM"
+        Key="SOFTWARE\Policies\CoGrowMDM\Agent"
+        ForceCreateOnInstall="yes">
+        <RegistryValue Name="device_id" Type="string" Value="[DEVICE_ID]" KeyPath="yes" />
+        <RegistryValue Name="agent_token" Type="string" Value="[AGENT_TOKEN]" />
+        <RegistryValue Name="api_endpoint" Type="string" Value="[API_ENDPOINT]" />
+        <RegistryValue Name="tenant_id" Type="string" Value="[TENANT_ID]" />
+
+        <util:PermissionEx
+          User="SYSTEM"
+          GenericAll="yes" />
+        <util:PermissionEx
+          User="Administrators"
+          GenericAll="yes" />
+        <!--
+          WIX0067 不允許單獨用 GenericRead；改用細顆粒 Read=yes（= KEY_READ：
+          QueryValue + EnumerateSubKeys + Notify + ReadControl），語意等價且
+          通過 WiX 校驗。
+        -->
+        <util:PermissionEx
+          User="Users"
+          Read="yes" />
+      </RegistryKey>
+    </Component>
+  </Fragment>
+
+  <!--
+    本地資料目錄 C:\ProgramData\CoGrow\MDM Agent\（usage.db / queue.db 所在）。
+    MSI 安裝時建目錄並鎖 ACL，防標準用戶改 / 刪本地使用統計 db（第 1 層防篡改）。
+
+    路徑必須與 Program.cs DataDir()（CommonApplicationData\CoGrow\MDM Agent）一致。
+
+    Self-protection：util:PermissionEx 重置 ACL —— SYSTEM / Administrators 全控，
+    Users 不列＝無任何權限（usage 數據無需用戶讀，連讀都去掉）。service=LocalSystem
+    走 SYSTEM ACE 讀寫。⚠️ PermissionEx 替換整個 ACL，SYSTEM/Admin 必須顯式列出，
+    否則 service 自己也存取不了。
+    ⚠️ 沿用 [[wix4-permission-on-registrykey]] 教訓：Mac dotnet restore 通過 ≠
+    wix build 通過；本 Fragment（CreateFolder + PermissionEx）必須真機 / windows-latest
+    runner 跑一次 wix build 驗證後才算數。
+  -->
+  <Fragment>
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="DataManufacturerFolder" Name="CoGrow">
+        <Directory Id="AGENTDATAFOLDER" Name="MDM Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <Component Id="AgentDataFolder" Directory="AGENTDATAFOLDER" Guid="52E1C4C0-7D34-46D2-BFDE-3A0BFF13CF71">
+      <CreateFolder>
+        <util:PermissionEx User="SYSTEM" GenericAll="yes" />
+        <util:PermissionEx User="Administrators" GenericAll="yes" />
+      </CreateFolder>
+    </Component>
+  </Fragment>
+
+</Wix>

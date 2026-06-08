@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    全螢幕鎖定窗 helper（在「使用者 session」執行；由 CoGrowMDMAgent 服務透過
+    CreateProcessAsUser 在 active console session 拉起）。
+    見 [[windows-lock-design]]。WinForms 比 WPF 更輕、全螢幕 + Win32 互通更直接。
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CoGrowMDMAgent.LockUI</RootNamespace>
+    <AssemblyName>CoGrowMDMAgent.LockUI</AssemblyName>
+    <!-- 高 DPI / 多螢幕：WinForms 8 走專案屬性（ApplicationConfiguration.Initialize 讀此值），
+         不再在 app.manifest 配 dpiAware（WFAC010）。 -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>

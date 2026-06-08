@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsCustomizations>
+  <PackageConfig xmlns="urn:schemas-Microsoft-com:Windows-ICD-Package-Config.v1.0">
+    <ID>{a9c4f6f0-1234-5678-9abc-def012345678}</ID>
+    <Name>CoGrow MDM Test PPKG</Name>
+    <Version>1.0</Version>
+    <OwnerType>OEM</OwnerType>
+    <Rank>0</Rank>
+  </PackageConfig>
+  <Settings xmlns="urn:schemas-microsoft-com:windows-provisioning">
+    <Customizations>
+      <Common />
+    </Customizations>
+  </Settings>
+</WindowsCustomizations>

@@ -20,51 +20,60 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 - Jamf Pro API (新版): `https://cogrow.jamfcloud.com/api/`
 - Classic API (舊版): `https://cogrow.jamfcloud.com/JSSResource/`
 - Swagger 文件: `https://cogrow.jamfcloud.com/api/doc/`
-- 詳細整合文件: `docs/jamf-api-integration.md`
+- 詳細整合文件: `docs/archived/jamf-api-integration.md`（單租戶探索期，已歸檔）
 
 ## 檔案結構
 
 - `.env` - API 憑據（Client ID/Secret、api_admin 帳戶密碼）
-- `docs/jamf-api-integration.md` - Jamf API 整合詳細文件
-- `docs/app-api-integration.md` - Agent App ↔ 後端 API 集成文件
-- `docs/self-hosted-mdm-guide.md` - 自建 MDM 註冊、命令、遷移操作指南
-- `src/` - Deno 後端服務（Hono + SQLite）
-  - `src/mdm/` - 自建 MDM 模組（checkin、command、dep、apns、apns-client、crypto、enrollment、profiles）
-  - `src/scripts/` - PoC 與驗證腳本（poc-http2-apns、verify-apns-client）
+- `docs/windows-deployment/` - **正式生產交付文件**（後端部署 / 構建機 / push 自建 / 設備配置運維，7 份）
+- `docs/archived/` - 多租戶重構前的探索 / demo 文件（jamf-api-integration、app-api-integration、self-hosted-mdm-guide、windows-mdm-* 等）
+- `app/` - Deno 後端服務（Hono + PostgreSQL + Drizzle ORM，多租戶）
+  - `app/routes/` - HTTP 路由（v1 API、windows-mdm OMA-DM 協議端點）
+  - `app/services/` - 業務邏輯（jamf、mdm、wns、agent、laps、compliance、rollback 等）
+  - `app/db/` - Drizzle schema、migration、seed
+  - `app/lib/`、`app/middleware/` - 共用工具與中介層
+  - `app/scripts/` - 維運腳本（load-test、auto-rollback 等）
 
-**啟動需 `--unstable-http` flag**（APNS 長連線依賴 `Deno.createHttpClient`），已寫入 `deno.json` 的 `dev` / `start` task，直接 `deno task dev` 即可。
-- `AgentApp/` - iOS 客戶端應用（Tuist + SwiftUI）
-  - `AgentApp/Sources/` - 主應用原始碼（Services、Models、Views）
-  - `Frameworks/` - DeviceGuardKit XCFramework 二進位套件
-  - `DeviceMonitor/` - DeviceActivityMonitor Extension
-  - `Entitlements/` - App Group 等權限設定
-  - `fastlane/` - 建置和簽名自動化
+直接 `deno task dev` 啟動（`-A --watch app/server.ts`）。
+- `ios-agent-app/` - iOS 客戶端應用（Tuist + SwiftUI）
+  - `ios-agent-app/AgentApp/Sources/` - 主應用原始碼（Services、Models、Views）
+  - `ios-agent-app/Frameworks/` - DeviceGuardKit XCFramework 二進位套件
+  - `ios-agent-app/DeviceMonitor/` - DeviceActivityMonitor Extension
+  - `ios-agent-app/Entitlements/` - App Group 等權限設定
+  - `ios-agent-app/fastlane/` - 建置和簽名自動化
+- `win-agent-app/` - Windows 客戶端應用（.NET 8 Windows Service + MDM Agent）
+  - `win-agent-app/src/CoGrowMDMAgent/` - 主服務（Worker 上報、StartupCheckinService）
+  - `win-agent-app/src/CoGrowMDMAgent/BitLocker/` - BitLockerWatcher（Registry 信箱 → 靜默加密 + Recovery Key 捕獲）
+  - `win-agent-app/src/CoGrowMDMAgent/Laps/` - LapsWatcher（密碼輪換）、PpkgRemovalWatcher、SelfUninstallWatcher
+  - `win-agent-app/src/CoGrowMDMAgent/Locking/` - LockWatcher（螢幕鎖定）
+  - `win-agent-app/src/CoGrowMDMAgent/Reporting/` - DeviceFactsCollector、UsageReporter
+  - `win-agent-app/src/CoGrowMDMAgent.Installer/` - WiX 5 MSI 打包
+  - `win-agent-app/src/CoGrowMDMAgent.LockUI/` - 鎖定畫面 WPF 應用
+  - `win-agent-app/build.ps1` - 一鍵構建腳本（dotnet publish → WiX build）
 
 ## DeviceGuardKit 整合
 
 - SDK 來源：閉源 XCFramework 二進位發佈（原始碼倉庫：`https://github.com/x-innovative/DeviceGuardKit`，私有）
-- 整合方式：本地 XCFramework（`AgentApp/Frameworks/DeviceGuardKit.xcframework` + `DeviceGuardKitExtension.xcframework`）
+- 整合方式：本地 XCFramework（`ios-agent-app/Frameworks/DeviceGuardKit.xcframework` + `DeviceGuardKitExtension.xcframework`）
 - 構建方式：Clone 原始碼到本地後執行 `Scripts/build-xcframework.sh`，產出包含真機（arm64）+ 模擬器（arm64_x86_64）架構
-- App Group / Extension Bundle ID：透過 `AgentApp/Project.swift` 頂部常數配置（`appGroupId`、`extensionBundleId`）
+- App Group / Extension Bundle ID：透過 `ios-agent-app/Project.swift` 頂部常數配置（`appGroupId`、`extensionBundleId`）
 - 不需要 FamilyControls 授權，DeviceActivityMonitor 直接可用
 - 使用時長資料透過 `DGKUsageStatsManager.processPendingEvents()` 取得，上報到 `POST /api/agent/usage`
 
 ## 自建 API 端點
 
-### Jamf 代理端點（`/api/devices`、`/api/agent`）
+### Jamf 代理端點（`/api/v1/tenants/{tenantId}/...`）
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| `/api/devices` | GET | 取得 Jamf 管理的裝置列表 |
-| `/api/devices/:id` | GET | 取得裝置詳情（Jamf + Agent 資料，含 `lostMode` 狀態） |
-| `/api/devices/:id/command` | POST | 傳送管理命令（含 Lost Mode） |
-| `/api/devices/:id/app-lock` | POST | 啟用單 App 模式 |
-| `/api/devices/:id/app-lock` | DELETE | 停用單 App 模式 |
-| `/api/agent/report` | POST | Agent App 上報裝置狀態 |
-| `/api/agent/reports/:deviceId` | GET | 查詢裝置上報歷史 |
-| `/api/agent/latest/:deviceId` | GET | 取得裝置最新上報 |
-| `/api/agent/usage` | POST | 上報裝置使用時長 |
-| `/api/agent/usage/:deviceId` | GET | 查詢使用時長（支援 date/startDate/endDate/limit 篩選） |
+| `/api/v1/tenants/{tid}/jamf-instances/{iid}/devices` | GET | 取得 Jamf 管理的裝置列表 |
+| `/api/v1/tenants/{tid}/jamf-instances/{iid}/devices/:id` | GET | 取得裝置詳情 |
+| `/api/v1/tenants/{tid}/agent/reports` | POST | Agent App 上報裝置狀態 |
+| `/api/v1/tenants/{tid}/agent/checkin` | POST | Agent 啟動 checkin（回傳待辦動作列表，如 LAPS 輪換） |
+| `/api/v1/tenants/{tid}/agent/devices/{serial}/reports` | GET | 查詢裝置上報歷史 |
+| `/api/v1/tenants/{tid}/agent/devices/{serial}/reports/latest` | GET | 取得裝置最新上報 |
+| `/api/v1/tenants/{tid}/agent/usage` | POST | 上報裝置使用時長 |
+| `/api/v1/tenants/{tid}/agent/devices/{serial}/usage` | GET | 查詢使用時長（支援 date/startDate/endDate/limit 篩選） |
 
 ### 自建 MDM 端點（`/api/mdm`）
 

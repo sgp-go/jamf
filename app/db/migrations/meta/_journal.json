@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1779763629478,
+      "tag": "0000_neat_typhoid_mary",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779763687003,
+      "tag": "0001_tough_hemingway",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779767826712,
+      "tag": "0002_clever_spectrum",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779788795722,
+      "tag": "0003_eminent_captain_cross",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1779960071344,
+      "tag": "0004_mysterious_tarot",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780627275702,
+      "tag": "0005_white_stark_industries",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780652482469,
+      "tag": "0006_wandering_zaladane",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1780912751795,
+      "tag": "0007_brainy_risque",
+      "breakpoints": true
+    }
+  ]
+}

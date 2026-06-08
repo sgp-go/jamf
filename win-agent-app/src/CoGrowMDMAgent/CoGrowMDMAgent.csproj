@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-CoGrowMDMAgent-5866c75c-57c8-48bb-9389-75682674986e</UserSecretsId>
+    <RootNamespace>CoGrowMDMAgent</RootNamespace>
+    <!-- 上報版本(AssemblyInformationalVersion)必須等於 MSI ProductVersion，否則
+         rollout/health 按版本匹配的 upgraded 桶永遠為空（真機驗證 2026-06-02 抓到）。
+         去掉 SourceLink 的 "+gitsha" 後綴，讓 build.ps1 -p:Version=a.b.c.d 直接成為乾淨的
+         上報版本字串，與 MSI ProductVersion 一致。 -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CoGrowMDMAgent.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="System.Management" Version="8.0.0" />
+  </ItemGroup>
+</Project>

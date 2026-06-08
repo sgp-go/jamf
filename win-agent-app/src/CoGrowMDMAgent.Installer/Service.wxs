@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Service registration + payload files.
+
+  Layout:
+    - ServiceExeComponent  owns CoGrowMDMAgent.exe and its ServiceInstall /
+                           ServiceControl entries. Windows Installer requires
+                           ServiceInstall to live in the same component as the
+                           service binary it manages.
+    - PayloadFiles         catches everything else `dotnet publish` produced
+                           (appsettings.json, native interop dlls, etc) via the
+                           v5+ <Files> harvest element.
+
+  Self-protection (W3 主軸 5b):
+    1. util:ServiceConfig  Service Recovery — 失敗自動重啟（5s / 30s / 60s 三段）
+    2. util:PermissionEx   Registry ACL — Users 只讀，SYSTEM/Admin 全控（防學生改 token）
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Fragment>
+    <ComponentGroup Id="ServiceComponents" Directory="INSTALLFOLDER">
+
+      <!-- Service binary + Windows service registration -->
+      <Component Id="ServiceExeComponent" Bitness="always64">
+        <File
+          Id="CoGrowMDMAgentExe"
+          Source="$(var.PublishDir)\CoGrowMDMAgent.exe"
+          KeyPath="yes" />
+
+        <ServiceInstall
+          Id="CoGrowMDMAgentServiceInstall"
+          Type="ownProcess"
+          Vital="yes"
+          Name="CoGrowMDMAgent"
+          DisplayName="CoGrow MDM Agent"
+          Description="Reports device telemetry to the CoGrow MDM platform."
+          Start="auto"
+          Account="LocalSystem"
+          ErrorControl="normal"
+          Interactive="no" />
+
+        <!--
+          Wait="no"：MSI 安裝時不阻塞等 service 進入 running。
+          self-contained single-file exe 在 LocalSystem 帳戶首次冷啟動需解壓 .NET runtime
+          到 systemprofile TEMP，> MSI 預設 ~30s 等待 → ServiceControl 報 1920（service
+          failed to start）→ 整個升級回滾（真機 2026-06-02 EDA/手動升級皆會撞）。
+          改 Wait="no" 後 MSI 觸發啟動即返回，service（StartType=auto）後台完成冷啟動；
+          「裝成功 ≠ service 健康」由啟動自檢 Event Log + 健康驗證（2c silent 告警）兜底。
+        -->
+        <ServiceControl
+          Id="CoGrowMDMAgentServiceControl"
+          Name="CoGrowMDMAgent"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="no" />
+
+        <!--
+          Service Recovery：兼顧「防學生強制 stop / kill」與「壞 build 崩潰循環安全網」。
+          - First/Second = restart（5s 後）：自愈瞬時故障 + 擋學生手動停服務。
+          - Third = none：連續第三次失敗即停服務、不再重啟。配合啟動自檢
+            Environment.Exit(78)：壞 config / DI-bug build 啟動即失敗時，最多重啟 2 次
+            後停下，不無限循環燒 CPU；明確 Event Log 留診斷，由健康驗證告警捕獲後回滾
+            （[[windows-agent-update-delivery]] §4：壞 build 上量=災難，需安全網）。
+          - ResetPeriodInDays="1"：一天無失敗則重置計數，保留瞬時故障的自愈能力。
+          注意：util:ServiceConfig 只有單一 RestartServiceDelayInSeconds（5s），
+          三段 action 共用此延遲（無 per-action delay）。
+        -->
+        <util:ServiceConfig
+          ServiceName="CoGrowMDMAgent"
+          FirstFailureActionType="restart"
+          SecondFailureActionType="restart"
+          ThirdFailureActionType="none"
+          RestartServiceDelayInSeconds="5"
+          ResetPeriodInDays="1" />
+      </Component>
+
+      <!--
+        Logging / hosting config used by Microsoft.Extensions.Hosting on
+        startup. Dev-only appsettings.Development.json is intentionally not
+        shipped. With PublishSingleFile=true the rest of the .NET 8 runtime
+        is embedded inside CoGrowMDMAgent.exe, so no other payload files
+        need to be enumerated.
+      -->
+      <Component Id="AppSettingsComponent" Bitness="always64">
+        <File
+          Id="AppSettingsJson"
+          Source="$(var.PublishDir)\appsettings.json"
+          KeyPath="yes" />
+      </Component>
+
+      <!--
+        LockUI helper（全螢幕鎖定窗）。裝進服務同目錄（INSTALLFOLDER），LockWatcher
+        以 AppContext.BaseDirectory 定位 CoGrowMDMAgent.LockUI.exe，再用
+        CreateProcessAsUser 在 active console session 拉起。build.ps1 step 1a 把它
+        self-contained single-file publish 後複製進 $(var.PublishDir)。
+        見 [[windows-lock-design]] / [[windows-agent-update-delivery]]。
+      -->
+      <Component Id="LockUiComponent" Bitness="always64">
+        <File
+          Id="CoGrowMDMAgentLockUIExe"
+          Source="$(var.PublishDir)\CoGrowMDMAgent.LockUI.exe"
+          KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>

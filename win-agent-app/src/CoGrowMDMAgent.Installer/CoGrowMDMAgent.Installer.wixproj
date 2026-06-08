@@ -1,0 +1,29 @@
+<Project Sdk="WixToolset.Sdk/4.0.6">
+
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>CoGrowMDMAgent</OutputName>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <SuppressIces>ICE61</SuppressIces>
+    <!--
+      ICE61 = "Same version updates" (we declare MajorUpgrade so ICE61 is noise).
+      InstallerPlatform=x64 keeps Wix in 64-bit Windows Installer mode.
+    -->
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      Inputs from build.ps1 (passed via -p:Property=Value).
+      PublishDir   absolute path to `dotnet publish` output of CoGrowMDMAgent.
+      ProductVersion  semver passed to Package/@Version (e.g. 1.0.0.0).
+    -->
+    <DefineConstants>$(DefineConstants);PublishDir=$(PublishDir);ProductVersion=$(ProductVersion)</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="4.0.6" />
+    <!-- Util ext: util:ServiceConfig (failure recovery) 與 util:PermissionEx (Registry ACL 鎖定) -->
+    <PackageReference Include="WixToolset.Util.wixext" Version="4.0.6" />
+  </ItemGroup>
+
+</Project>
