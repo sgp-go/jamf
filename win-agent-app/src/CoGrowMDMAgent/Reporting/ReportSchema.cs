@@ -74,6 +74,9 @@ public sealed record WindowsFacts
 
     [JsonPropertyName("laps")]
     public LapsFacts? Laps { get; init; }
+
+    [JsonPropertyName("bitlocker")]
+    public BitLockerFacts? BitLocker { get; init; }
 }
 
 public sealed record LapsFacts
@@ -86,6 +89,30 @@ public sealed record LapsFacts
 
     [JsonPropertyName("success")]
     public bool? Success { get; init; }
+}
+
+public sealed record BitLockerFacts
+{
+    [JsonPropertyName("protection_status")]
+    public string? ProtectionStatus { get; init; }
+
+    [JsonPropertyName("encryption_percentage")]
+    public int? EncryptionPercentage { get; init; }
+
+    [JsonPropertyName("encryption_method")]
+    public string? EncryptionMethod { get; init; }
+
+    [JsonPropertyName("volume_status")]
+    public string? VolumeStatus { get; init; }
+
+    [JsonPropertyName("key_protector_types")]
+    public IReadOnlyList<string>? KeyProtectorTypes { get; init; }
+
+    [JsonPropertyName("encryption_id")]
+    public string? EncryptionId { get; init; }
+
+    [JsonPropertyName("recovery_password")]
+    public string? RecoveryPassword { get; init; }
 }
 
 /// <summary>

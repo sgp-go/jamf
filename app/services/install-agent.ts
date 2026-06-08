@@ -20,6 +20,10 @@ import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { encryptSecret } from "~/lib/secrets.ts";
 import { generateLapsPassword } from "~/services/laps.ts";
 import { mdmWindowsLaps } from "~/db/schema/laps.ts";
+import {
+  buildBitLockerAdmxInstall,
+  buildBitLockerEnable,
+} from "~/services/mdm/windows/csp-bitlocker.ts";
 
 /**
  * Agent App 一鍵安裝流程：把「給設備派 Agent App」這個業務動作封裝為單一 API。
@@ -189,6 +193,7 @@ export async function installAgentOnDevice(
     { commandType: "policy_admx_install", cmd: buildLapsAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildPpkgRemovalAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildSelfUninstallAdmxInstall(), commandUuid: crypto.randomUUID() },
+    { commandType: "policy_admx_install", cmd: buildBitLockerAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "msi_install", cmd: msiInstall, commandUuid: crypto.randomUUID() },
     { commandType: "msi_install", cmd: msiInstallExec, commandUuid: crypto.randomUUID() },
     { commandType: "msi_status_query", cmd: msiStatus, commandUuid: crypto.randomUUID() },
@@ -277,10 +282,22 @@ export async function installAgentOnDevice(
     triggeredBy: "auto",
   });
 
+  // BitLocker：同樣在事務後 enqueue，確保 ADMX 已生效
+  const bitlockerEncryptionId = crypto.randomUUID();
+  const bitlockerCmd = buildBitLockerEnable({ encryptionId: bitlockerEncryptionId });
+  const bitlockerCommandUuid = await enqueueWindowsCommand({
+    deviceUdid: device.udid,
+    commandType: "BitLockerEnable",
+    command: bitlockerCmd[0],
+  });
+  console.log(
+    `[Win MDM] BitLocker enable 已排入: encryptionId=${bitlockerEncryptionId} udid=${device.udid}`,
+  );
+
   return {
     deviceId: device.id,
     agentToken,
-    commandIds: [...result.commandIds, lapsCommandUuid],
+    commandIds: [...result.commandIds, lapsCommandUuid, bitlockerCommandUuid],
   };
 }
 

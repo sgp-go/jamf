@@ -206,6 +206,7 @@ public sealed class DeviceFactsCollector
             FirewallEnabled = null,
             PendingUpdates = null,
             Laps = ReadLapsConfirmation(),
+            BitLocker = ReadBitLockerStatus(),
         };
     }
 
@@ -233,6 +234,146 @@ public sealed class DeviceFactsCollector
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "LAPS confirmation read failed");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 透過 WMI Win32_EncryptableVolume 查詢系統碟 BitLocker 狀態。
+    /// 需要 SYSTEM 或管理員權限。失敗靜默返回 null。
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private BitLockerFacts? ReadBitLockerStatus()
+    {
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                @"root\cimv2\Security\MicrosoftVolumeEncryption",
+                "SELECT * FROM Win32_EncryptableVolume WHERE DriveLetter = 'C:'");
+
+            foreach (System.Management.ManagementObject vol in searcher.Get())
+            {
+                var protectionStatus = vol["ProtectionStatus"]?.ToString() switch
+                {
+                    "0" => "Off",
+                    "1" => "On",
+                    "2" => "Unknown",
+                    _ => vol["ProtectionStatus"]?.ToString(),
+                };
+
+                var conversionArgs = vol.GetMethodParameters("GetConversionStatus");
+                var conversionResult = vol.InvokeMethod("GetConversionStatus", conversionArgs, null);
+                var encPercentage = conversionResult?["EncryptionPercentage"] is uint pct
+                    ? (int)pct : (int?)null;
+
+                var encMethodArgs = vol.GetMethodParameters("GetEncryptionMethod");
+                var encMethod = vol.InvokeMethod("GetEncryptionMethod", encMethodArgs, null);
+                var methodValue = encMethod?["EncryptionMethod"]?.ToString() switch
+                {
+                    "0" => "None",
+                    "1" => "AES-CBC-128-Diffuser",
+                    "2" => "AES-CBC-256-Diffuser",
+                    "3" => "AES-CBC-128",
+                    "4" => "AES-CBC-256",
+                    "6" => "XTS-AES-128",
+                    "7" => "XTS-AES-256",
+                    var v => v,
+                };
+
+                var volumeStatus = conversionResult?["ConversionStatus"]?.ToString() switch
+                {
+                    "0" => "FullyDecrypted",
+                    "1" => "FullyEncrypted",
+                    "2" => "EncryptionInProgress",
+                    "3" => "DecryptionInProgress",
+                    "4" => "EncryptionPaused",
+                    "5" => "DecryptionPaused",
+                    var v => v,
+                };
+
+                var kpArgs = vol.GetMethodParameters("GetKeyProtectors");
+                kpArgs["KeyProtectorType"] = (uint)0;
+                var kpResult = vol.InvokeMethod("GetKeyProtectors", kpArgs, null);
+                var kpIds = kpResult?["VolumeKeyProtectorID"] as string[];
+                var kpTypes = new List<string>();
+                if (kpIds != null)
+                {
+                    foreach (var kpId in kpIds)
+                    {
+                        var typeArgs = vol.GetMethodParameters("GetKeyProtectorType");
+                        typeArgs["VolumeKeyProtectorID"] = kpId;
+                        var typeResult = vol.InvokeMethod("GetKeyProtectorType", typeArgs, null);
+                        var kpType = typeResult?["KeyProtectorType"]?.ToString() switch
+                        {
+                            "1" => "TPM",
+                            "2" => "ExternalKey",
+                            "3" => "NumericalPassword",
+                            "4" => "TPMAndPIN",
+                            "5" => "TPMAndStartupKey",
+                            "6" => "TPMAndPINAndStartupKey",
+                            "7" => "PublicKey",
+                            "8" => "Passphrase",
+                            "9" => "TPMCertificate",
+                            "10" => "SID",
+                            var v => v,
+                        };
+                        if (kpType != null) kpTypes.Add(kpType);
+                    }
+                }
+
+                var confirmation = ReadBitLockerConfirmation();
+
+                return new BitLockerFacts
+                {
+                    ProtectionStatus = protectionStatus,
+                    EncryptionPercentage = encPercentage,
+                    EncryptionMethod = methodValue,
+                    VolumeStatus = volumeStatus,
+                    KeyProtectorTypes = kpTypes.Count > 0 ? kpTypes : null,
+                    EncryptionId = confirmation?.EncryptionId,
+                    RecoveryPassword = confirmation?.RecoveryPassword,
+                };
+            }
+            return ReadBitLockerConfirmationAsFacts();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BitLocker status read failed");
+            return ReadBitLockerConfirmationAsFacts();
+        }
+    }
+
+    private BitLockerFacts? ReadBitLockerConfirmationAsFacts()
+    {
+        var c = ReadBitLockerConfirmation();
+        if (c == null) return null;
+        return new BitLockerFacts
+        {
+            EncryptionId = c.EncryptionId,
+            RecoveryPassword = c.RecoveryPassword,
+        };
+    }
+
+    private BitLockerConfirmationFile? ReadBitLockerConfirmation()
+    {
+        try
+        {
+            var path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "CoGrow", "MDM Agent", "bitlocker-confirmation.json");
+            if (!File.Exists(path)) return null;
+
+            var json = File.ReadAllText(path);
+            var data = System.Text.Json.JsonSerializer.Deserialize<BitLockerConfirmationFile>(json);
+            if (data?.EncryptionId is null) return null;
+
+            File.Delete(path);
+            _logger.LogInformation("BitLocker 確認檔已讀取並刪除: encryptionId={EncryptionId}", data.EncryptionId);
+            return data;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BitLocker confirmation read failed");
             return null;
         }
     }
@@ -289,4 +430,19 @@ public sealed record DeviceFacts
     public string? NetworkType { get; init; }
     public string? NetworkSsid { get; init; }
     public WindowsFacts? Windows { get; init; }
+}
+
+internal sealed record BitLockerConfirmationFile
+{
+    [System.Text.Json.Serialization.JsonPropertyName("encryption_id")]
+    public string? EncryptionId { get; init; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("recovery_password")]
+    public string? RecoveryPassword { get; init; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("confirmed_at")]
+    public string? ConfirmedAt { get; init; }
+
+    [System.Text.Json.Serialization.JsonPropertyName("success")]
+    public bool Success { get; init; }
 }

@@ -1,6 +1,7 @@
 using CoGrowMDMAgent;
 using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Diagnostics;
+using CoGrowMDMAgent.BitLocker;
 using CoGrowMDMAgent.Laps;
 using CoGrowMDMAgent.Locking;
 using CoGrowMDMAgent.Queue;
@@ -70,6 +71,7 @@ builder.Services.AddHostedService<Worker>();
 // 與上報 Worker 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<LockWatcher>();
 builder.Services.AddHostedService<LapsWatcher>();
+builder.Services.AddHostedService<BitLockerWatcher>();
 builder.Services.AddHostedService<PpkgRemovalWatcher>();
 builder.Services.AddHostedService<SelfUninstallWatcher>();
 // 使用時長採集：每分鐘探測 active console session 在用狀態，累計並持久化到 usage.db。
