@@ -54,21 +54,18 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 
 ## 自建 API 端點
 
-### Jamf 代理端點（`/api/devices`、`/api/agent`）
+### Jamf 代理端點（`/api/v1/tenants/{tenantId}/...`）
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
-| `/api/devices` | GET | 取得 Jamf 管理的裝置列表 |
-| `/api/devices/:id` | GET | 取得裝置詳情（Jamf + Agent 資料，含 `lostMode` 狀態） |
-| `/api/devices/:id/command` | POST | 傳送管理命令（含 Lost Mode） |
-| `/api/devices/:id/app-lock` | POST | 啟用單 App 模式 |
-| `/api/devices/:id/app-lock` | DELETE | 停用單 App 模式 |
-| `/api/agent/report` | POST | Agent App 上報裝置狀態 |
-| `/api/agent/checkin` | POST | Agent 啟動 checkin（回傳待辦動作列表，如 LAPS 輪換） |
-| `/api/agent/reports/:deviceId` | GET | 查詢裝置上報歷史 |
-| `/api/agent/latest/:deviceId` | GET | 取得裝置最新上報 |
-| `/api/agent/usage` | POST | 上報裝置使用時長 |
-| `/api/agent/usage/:deviceId` | GET | 查詢使用時長（支援 date/startDate/endDate/limit 篩選） |
+| `/api/v1/tenants/{tid}/jamf-instances/{iid}/devices` | GET | 取得 Jamf 管理的裝置列表 |
+| `/api/v1/tenants/{tid}/jamf-instances/{iid}/devices/:id` | GET | 取得裝置詳情 |
+| `/api/v1/tenants/{tid}/agent/reports` | POST | Agent App 上報裝置狀態 |
+| `/api/v1/tenants/{tid}/agent/checkin` | POST | Agent 啟動 checkin（回傳待辦動作列表，如 LAPS 輪換） |
+| `/api/v1/tenants/{tid}/agent/devices/{serial}/reports` | GET | 查詢裝置上報歷史 |
+| `/api/v1/tenants/{tid}/agent/devices/{serial}/reports/latest` | GET | 取得裝置最新上報 |
+| `/api/v1/tenants/{tid}/agent/usage` | POST | 上報裝置使用時長 |
+| `/api/v1/tenants/{tid}/agent/devices/{serial}/usage` | GET | 查詢使用時長（支援 date/startDate/endDate/limit 篩選） |
 
 ### 自建 MDM 端點（`/api/mdm`）
 
