@@ -10,6 +10,7 @@ import {
   saveAgentReport,
   upsertUsageStats,
 } from "~/services/agent.ts";
+import { handleBitLockerOnReport } from "~/services/bitlocker.ts";
 import { handleLapsOnCheckin, handleLapsOnReport } from "~/services/laps.ts";
 import {
   authorizeAgentReport,
@@ -425,14 +426,22 @@ agentApp.openapi(reportRoute, async (c) => {
     reportedAt: body.reportedAt,
   });
 
-  // 非阻塞 LAPS 處理（Windows 設備：自動觸發改密 / 接收確認）
+  // 非阻塞 LAPS + BitLocker 處理（Windows 設備）
   if (body.extraData && (body.extraData as Record<string, unknown>).platform === "windows") {
+    const winExtra = body.extraData as Record<string, unknown>;
     void handleLapsOnReport({
       tenantId,
       deviceId: device.id,
-      extraData: body.extraData as Record<string, unknown>,
+      extraData: winExtra,
     }).catch((err) => {
       console.error("[laps] handleLapsOnReport failed", err);
+    });
+    void handleBitLockerOnReport({
+      tenantId,
+      deviceId: device.id,
+      extraData: winExtra,
+    }).catch((err) => {
+      console.error("[bitlocker] handleBitLockerOnReport failed", err);
     });
   }
 

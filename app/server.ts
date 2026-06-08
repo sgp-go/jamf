@@ -12,6 +12,7 @@ import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
 import { enrollmentPpkgAdminApp } from "~/routes/v1/admin/enrollment-ppkg.ts";
 import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
+import { bitlockerAdminApp } from "~/routes/v1/admin/bitlocker.ts";
 import { lapsAdminApp } from "~/routes/v1/admin/laps.ts";
 import { profilePresetsApp } from "~/routes/v1/admin/profile-presets.ts";
 import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
@@ -59,6 +60,7 @@ app.route("/api/v1", complianceAdminApp);
 app.route("/api/v1", auditAdminApp);
 app.route("/api/v1", webhooksAdminApp);
 app.route("/api/v1", lapsAdminApp);
+app.route("/api/v1", bitlockerAdminApp);
 
 // Windows MDM：含跨前綴端點（/EnrollmentServer/* 協議端點 + /api/mdm/win/*），
 // mount 在 root。非 OpenAPI 文檔化（SOAP / SyncML 設備協議，非 REST JSON）。

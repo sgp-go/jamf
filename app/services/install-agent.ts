@@ -19,6 +19,7 @@ import { publishCommandEvent } from "~/services/mdm/command-events.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { encryptSecret } from "~/lib/secrets.ts";
 import { generateLapsPassword } from "~/services/laps.ts";
+import { mdmWindowsBitlocker } from "~/db/schema/bitlocker.ts";
 import { mdmWindowsLaps } from "~/db/schema/laps.ts";
 import {
   buildBitLockerAdmxInstall,
@@ -289,6 +290,15 @@ export async function installAgentOnDevice(
     deviceUdid: device.udid,
     commandType: "BitLockerEnable",
     command: bitlockerCmd[0],
+  });
+  await db.insert(mdmWindowsBitlocker).values({
+    tenantId,
+    deviceId: device.id,
+    encryptionId: bitlockerEncryptionId,
+    encryptionMethod: "XtsAes256",
+    status: "pending",
+    commandUuid: bitlockerCommandUuid,
+    triggeredBy: "auto",
   });
   console.log(
     `[Win MDM] BitLocker enable 已排入: encryptionId=${bitlockerEncryptionId} udid=${device.udid}`,
