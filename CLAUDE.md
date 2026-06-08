@@ -41,7 +41,15 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
   - `ios-agent-app/DeviceMonitor/` - DeviceActivityMonitor Extension
   - `ios-agent-app/Entitlements/` - App Group 等權限設定
   - `ios-agent-app/fastlane/` - 建置和簽名自動化
-- `win-agent-app/` - Windows 客戶端應用（.NET WinForms + MDM Agent）
+- `win-agent-app/` - Windows 客戶端應用（.NET 8 Windows Service + MDM Agent）
+  - `win-agent-app/src/CoGrowMDMAgent/` - 主服務（Worker 上報、StartupCheckinService）
+  - `win-agent-app/src/CoGrowMDMAgent/BitLocker/` - BitLockerWatcher（Registry 信箱 → 靜默加密 + Recovery Key 捕獲）
+  - `win-agent-app/src/CoGrowMDMAgent/Laps/` - LapsWatcher（密碼輪換）、PpkgRemovalWatcher、SelfUninstallWatcher
+  - `win-agent-app/src/CoGrowMDMAgent/Locking/` - LockWatcher（螢幕鎖定）
+  - `win-agent-app/src/CoGrowMDMAgent/Reporting/` - DeviceFactsCollector、UsageReporter
+  - `win-agent-app/src/CoGrowMDMAgent.Installer/` - WiX 5 MSI 打包
+  - `win-agent-app/src/CoGrowMDMAgent.LockUI/` - 鎖定畫面 WPF 應用
+  - `win-agent-app/build.ps1` - 一鍵構建腳本（dotnet publish → WiX build）
 
 ## DeviceGuardKit 整合
 
