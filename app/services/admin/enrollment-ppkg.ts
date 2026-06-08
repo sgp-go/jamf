@@ -9,7 +9,7 @@ import { AppError } from "~/lib/errors.ts";
  * 生成 Windows Provisioning Package customizations.xml（USB PPKG 用，W3 主軸 4）。
  *
  * Schema 來源：2026-05-28 SSH Win10 跑 ICD GUI 直接吐出的真實樣本（見
- * agent-app/scripts/ppkg/README.md「Schema 查證工作流」節）。MS docs 沒公開
+ * win-agent-app/scripts/ppkg/README.md「Schema 查證工作流」節）。MS docs 沒公開
  * 完整 customizations.xml sample，我們從 GUI 反向工程拿到權威格式。
  *
  * 設計取捨（MVP）：
@@ -35,7 +35,7 @@ export type AuthPolicy = "OnPremise" | "Certificate";
 
 /**
  * SecurityType 真實字面值來自 2026-05-28 Win10 ICD GUI export 的 customizations.xml
- * （見 agent-app/scripts/ppkg/GUI-REVERSE-CHECKLIST.md）。注意 dash 連字符 + 大寫。
+ * （見 win-agent-app/scripts/ppkg/GUI-REVERSE-CHECKLIST.md）。注意 dash 連字符 + 大寫。
  */
 export type WifiSecurityType = "Open" | "WEP" | "WPA2-Personal";
 
@@ -211,7 +211,7 @@ function renderEnrollmentSection(
     throw new AppError(
       501,
       "ppkg_section_not_validated",
-      "authPolicy=Certificate schema 未經 Win10 ICD GUI 反向工程驗證；先在 Win10 ICD GUI 設 Certificate 模式 export customizations.xml，再實作此段（見 agent-app/scripts/ppkg/README.md）",
+      "authPolicy=Certificate schema 未經 Win10 ICD GUI 反向工程驗證；先在 Win10 ICD GUI 設 Certificate 模式 export customizations.xml，再實作此段（見 win-agent-app/scripts/ppkg/README.md）",
     );
   }
 

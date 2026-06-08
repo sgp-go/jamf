@@ -4,7 +4,7 @@
 
 本文件記錄 Aspira Agent App 在 Apple Developer Portal 上所需的全部配置。當使用新的 Apple Developer 賬號時，按照本文件從頭配置即可。
 
-**賬號資訊儲存在 `AgentApp/fastlane/.env` 中**，包括 Apple ID、Team ID、ITC Team ID 等。請參考 `AgentApp/fastlane/.env.example` 了解所需變數。
+**賬號資訊儲存在 `ios-agent-app/fastlane/.env` 中**，包括 Apple ID、Team ID、ITC Team ID 等。請參考 `ios-agent-app/fastlane/.env.example` 了解所需變數。
 
 ---
 
@@ -46,9 +46,9 @@
 
 | 專案 | 值 |
 |------|------|
-| Git 倉庫 | 儲存在 `AgentApp/fastlane/.env` 的 `MATCH_GIT_URL` 中 |
+| Git 倉庫 | 儲存在 `ios-agent-app/fastlane/.env` 的 `MATCH_GIT_URL` 中 |
 | 分支 | `aspira` |
-| 加密密碼 | 儲存在 `AgentApp/fastlane/.env` 的 `MATCH_PASSWORD` 中 |
+| 加密密碼 | 儲存在 `ios-agent-app/fastlane/.env` 的 `MATCH_PASSWORD` 中 |
 
 ### 3.2 需要的證書型別
 
@@ -62,7 +62,7 @@
 配置好 App ID 後，在專案目錄執行：
 
 ```bash
-cd AgentApp
+cd ios-agent-app
 
 # 配置環境變數
 source fastlane/.env
@@ -162,7 +162,7 @@ Fastlane 自動上傳（TestFlight 等）需要 App-Specific Password。
 1. 訪問 [appleid.apple.com](https://appleid.apple.com)
 2. 登入 → Sign-In and Security → App-Specific Passwords
 3. 點選 "+" 生成新密碼，標籤填 "Fastlane"
-4. 將密碼儲存到 `AgentApp/fastlane/.env`：
+4. 將密碼儲存到 `ios-agent-app/fastlane/.env`：
    ```
    FASTLANE_APPLE_APPLICATION_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
    ```
@@ -177,7 +177,7 @@ Fastlane 自動上傳（TestFlight 等）需要 App-Specific Password。
 
 專案已將所有可配置標識符集中定義，替換時只需修改以下 3 個位置：
 
-**位置一：Tuist 構建配置** — `AgentApp/Project.swift`（第 3-10 行）
+**位置一：Tuist 構建配置** — `ios-agent-app/Project.swift`（第 3-10 行）
 
 ```swift
 // ── 專案標識符（甲方請修改此處） ──
@@ -192,7 +192,7 @@ let displayName = "Your App Name"
 
 只需修改 `mainBundleId`、`developmentTeam`、`displayName`、`organizationName`，其餘衍生值自動計算。Entitlements 也由 Tuist inline 生成，無需手動維護 `.entitlements` 檔案。
 
-**位置二：Swift 執行時常數** — `AgentApp/AgentApp/Sources/AppConstants.swift`
+**位置二：Swift 執行時常數** — `ios-agent-app/AgentApp/Sources/AppConstants.swift`
 
 ```swift
 enum AppConstants {
@@ -201,7 +201,7 @@ enum AppConstants {
 }
 ```
 
-**位置三：Extension** — `AgentApp/DeviceMonitor/DeviceActivityMonitorExtension.swift`（第 6 行）
+**位置三：Extension** — `ios-agent-app/DeviceMonitor/DeviceActivityMonitorExtension.swift`（第 6 行）
 
 ```swift
 private let appGroupIdentifier = "group.com.yourorg.your.app"  // 須與 AppConstants.appGroupIdentifier 一致
@@ -211,10 +211,10 @@ private let appGroupIdentifier = "group.com.yourorg.your.app"  // 須與 AppCons
 
 ### 8.2 Fastlane 環境配置
 
-複製 `AgentApp/fastlane/.env.example` → `.env`，填入你的值：
+複製 `ios-agent-app/fastlane/.env.example` → `.env`，填入你的值：
 
 ```bash
-cp AgentApp/fastlane/.env.example AgentApp/fastlane/.env
+cp ios-agent-app/fastlane/.env.example ios-agent-app/fastlane/.env
 ```
 
 | 變數 | 說明 | 取得方式 |
@@ -254,7 +254,7 @@ cp .env.example .env
 
 ```bash
 # 初始化證書
-cd AgentApp
+cd ios-agent-app
 bundle exec fastlane match_init
 
 # 生成 Xcode 專案
@@ -264,7 +264,7 @@ tuist generate
 bundle exec fastlane build_dev
 
 # 確認 Bundle ID 只出現在集中定義的位置
-grep -rn "<your-bundle-id>" AgentApp/ --include="*.swift"
+grep -rn "<your-bundle-id>" ios-agent-app/ --include="*.swift"
 # 預期結果：只出現在 Project.swift、AppConstants.swift、DeviceActivityMonitorExtension.swift
 ```
 

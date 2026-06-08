@@ -28,24 +28,28 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 - `docs/jamf-api-integration.md` - Jamf API 整合詳細文件
 - `docs/app-api-integration.md` - Agent App ↔ 後端 API 集成文件
 - `docs/self-hosted-mdm-guide.md` - 自建 MDM 註冊、命令、遷移操作指南
-- `src/` - Deno 後端服務（Hono + SQLite）
-  - `src/mdm/` - 自建 MDM 模組（checkin、command、dep、apns、apns-client、crypto、enrollment、profiles）
-  - `src/scripts/` - PoC 與驗證腳本（poc-http2-apns、verify-apns-client）
+- `app/` - Deno 後端服務（Hono + PostgreSQL + Drizzle ORM，多租戶）
+  - `app/routes/` - HTTP 路由（v1 API、windows-mdm OMA-DM 協議端點）
+  - `app/services/` - 業務邏輯（jamf、mdm、wns、agent、laps、compliance、rollback 等）
+  - `app/db/` - Drizzle schema、migration、seed
+  - `app/lib/`、`app/middleware/` - 共用工具與中介層
+  - `app/scripts/` - 維運腳本（load-test、auto-rollback 等）
 
-**啟動需 `--unstable-http` flag**（APNS 長連線依賴 `Deno.createHttpClient`），已寫入 `deno.json` 的 `dev` / `start` task，直接 `deno task dev` 即可。
-- `AgentApp/` - iOS 客戶端應用（Tuist + SwiftUI）
-  - `AgentApp/Sources/` - 主應用原始碼（Services、Models、Views）
-  - `Frameworks/` - DeviceGuardKit XCFramework 二進位套件
-  - `DeviceMonitor/` - DeviceActivityMonitor Extension
-  - `Entitlements/` - App Group 等權限設定
-  - `fastlane/` - 建置和簽名自動化
+直接 `deno task dev` 啟動（`-A --watch app/server.ts`）。
+- `ios-agent-app/` - iOS 客戶端應用（Tuist + SwiftUI）
+  - `ios-agent-app/AgentApp/Sources/` - 主應用原始碼（Services、Models、Views）
+  - `ios-agent-app/Frameworks/` - DeviceGuardKit XCFramework 二進位套件
+  - `ios-agent-app/DeviceMonitor/` - DeviceActivityMonitor Extension
+  - `ios-agent-app/Entitlements/` - App Group 等權限設定
+  - `ios-agent-app/fastlane/` - 建置和簽名自動化
+- `win-agent-app/` - Windows 客戶端應用（.NET WinForms + MDM Agent）
 
 ## DeviceGuardKit 整合
 
 - SDK 來源：閉源 XCFramework 二進位發佈（原始碼倉庫：`https://github.com/x-innovative/DeviceGuardKit`，私有）
-- 整合方式：本地 XCFramework（`AgentApp/Frameworks/DeviceGuardKit.xcframework` + `DeviceGuardKitExtension.xcframework`）
+- 整合方式：本地 XCFramework（`ios-agent-app/Frameworks/DeviceGuardKit.xcframework` + `DeviceGuardKitExtension.xcframework`）
 - 構建方式：Clone 原始碼到本地後執行 `Scripts/build-xcframework.sh`，產出包含真機（arm64）+ 模擬器（arm64_x86_64）架構
-- App Group / Extension Bundle ID：透過 `AgentApp/Project.swift` 頂部常數配置（`appGroupId`、`extensionBundleId`）
+- App Group / Extension Bundle ID：透過 `ios-agent-app/Project.swift` 頂部常數配置（`appGroupId`、`extensionBundleId`）
 - 不需要 FamilyControls 授權，DeviceActivityMonitor 直接可用
 - 使用時長資料透過 `DGKUsageStatsManager.processPendingEvents()` 取得，上報到 `POST /api/agent/usage`
 

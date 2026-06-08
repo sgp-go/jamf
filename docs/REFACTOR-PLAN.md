@@ -77,7 +77,7 @@ repo/
 
 ## 4. 不在本次 worktree 範圍
 
-- 不動 `AgentApp/`（iOS 客戶端）
+- 不動 `ios-agent-app/`（iOS 客戶端）
 - 不動 Windows MDM 路由（先把 Apple 側收斂）
 - 不做機密加密（暫時欄位明文，但已預留 schema 欄位 `_enc` 後綴）
 - 不寫前端管理後台

@@ -29,16 +29,16 @@ deno task dev
 
 ```bash
 # 1. 配置 fastlane 環境變數
-cp AgentApp/fastlane/.env.example AgentApp/fastlane/.env
+cp ios-agent-app/fastlane/.env.example ios-agent-app/fastlane/.env
 # 編輯 .env 填入 Apple Developer 帳號資訊
 
 # 2. 修改應用標識符（參考文件：集成指南）
-#    - AgentApp/Project.swift 頂部常數
-#    - AgentApp/AgentApp/Sources/AppConstants.swift
-#    - AgentApp/DeviceMonitor/DeviceActivityMonitorExtension.swift
+#    - ios-agent-app/Project.swift 頂部常數
+#    - ios-agent-app/AgentApp/Sources/AppConstants.swift
+#    - ios-agent-app/DeviceMonitor/DeviceActivityMonitorExtension.swift
 
 # 3. 初始化證書並構建
-cd AgentApp
+cd ios-agent-app
 bundle exec fastlane match_init
 tuist generate
 bundle exec fastlane build_dev
@@ -49,14 +49,15 @@ bundle exec fastlane build_dev
 ```text
 .
 ├── .env.example              # 後端環境變數範本
-├── src/                      # Deno 後端服務
-├── AgentApp/
+├── app/                      # Deno 後端服務（Hono + PostgreSQL + Drizzle，多租戶）
+├── ios-agent-app/            # iOS 客戶端（Tuist + SwiftUI）
 │   ├── Project.swift         # Tuist 專案配置（標識符集中定義處）
-│   ├── AgentApp/Sources/     # 主應用原始碼
+│   ├── AgentApp/Sources/     # 主應用原始碼（Xcode target 子目錄）
 │   ├── DeviceMonitor/        # DeviceActivityMonitor Extension
 │   ├── Frameworks/           # DeviceGuardKit XCFramework
 │   └── fastlane/             # 簽名與分發自動化
 │       └── .env.example      # Fastlane 環境變數範本
+├── win-agent-app/            # Windows 客戶端（.NET WinForms + MDM Agent）
 └── docs/                     # 專案文件
 ```
 

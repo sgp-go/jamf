@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: A4 portrait; margin: 9mm 10mm; }
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  :root {
+    --ink: #1a2332;
+    --muted: #5b6678;
+    --line: #d9dee7;
+    --accent: #1f5f8b;
+    --accent-soft: #eaf2f8;
+    --ok: #2e8b57;
+    --wip: #b8860b;
+    --zebra: #f5f7fa;
+  }
+  html { font-family: "PingFang TC", "PingFang SC", "Heiti TC", sans-serif; color: var(--ink); }
+  body { font-size: 8.6pt; line-height: 1.34; }
+
+  /* 頁首 */
+  .hdr { display: flex; justify-content: space-between; align-items: flex-end;
+         border-bottom: 2.5px solid var(--accent); padding-bottom: 5px; margin-bottom: 9px; }
+  .hdr h1 { font-size: 16pt; letter-spacing: .5px; }
+  .hdr .sub { font-size: 8pt; color: var(--muted); margin-top: 2px; }
+  .hdr .meta { text-align: right; font-size: 7.6pt; color: var(--muted); line-height: 1.5; }
+  .hdr .meta b { color: var(--accent); font-size: 9pt; }
+
+  .axis { background: var(--accent-soft); border-left: 3px solid var(--accent);
+          padding: 4px 9px; font-size: 8.4pt; margin-bottom: 9px; border-radius: 0 3px 3px 0; }
+  .axis b { color: var(--accent); }
+
+  /* 進度卡片區 */
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 8px; }
+  .card { border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px; }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 { font-size: 9.4pt; margin-bottom: 4px; display: flex; align-items: center; gap: 5px; }
+  .tag { font-size: 6.8pt; font-weight: 700; padding: 1px 6px; border-radius: 8px; color: #fff; letter-spacing: .3px; }
+  .tag.ok { background: var(--ok); }
+  .tag.wip { background: var(--wip); }
+  .tag.next { background: var(--accent); }
+  .card ul { list-style: none; }
+  .card li { padding-left: 11px; position: relative; margin: 2.5px 0; }
+  .card li::before { content: "▸"; position: absolute; left: 0; color: var(--accent); font-size: 7.5pt; }
+  .card li b { color: var(--ink); }
+  .em { color: var(--accent); font-weight: 700; }
+
+  /* 名詞解釋 */
+  .glossary-title { font-size: 10pt; font-weight: 700; color: var(--accent);
+                    border-bottom: 1px solid var(--line); padding-bottom: 3px; margin: 10px 0 6px; }
+  .gcols { column-count: 2; column-gap: 12px; }
+  .gblock { break-inside: avoid; margin-bottom: 7px; }
+  .gblock h3 { font-size: 8pt; color: var(--muted); text-transform: none;
+               border-left: 3px solid var(--accent); padding-left: 6px; margin-bottom: 3px; font-weight: 700; }
+  table.g { width: 100%; border-collapse: collapse; font-size: 7.2pt; line-height: 1.28; }
+  table.g td { padding: 2px 4px; vertical-align: top; border-bottom: .5px solid var(--line); }
+  table.g tr:nth-child(even) { background: var(--zebra); }
+  table.g td.term { font-weight: 700; white-space: nowrap; width: 30%; color: var(--ink); }
+  table.g td.desc { color: var(--muted); }
+
+  .foot { margin-top: 8px; padding-top: 5px; border-top: 1px solid var(--line);
+          font-size: 7pt; color: var(--muted); display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+  <div class="hdr">
+    <div>
+      <h1>Windows MDM 週進度匯報</h1>
+      <div class="sub">自建 MDM Service API ＋ Agent App · 對台灣團隊同步</div>
+    </div>
+    <div class="meta">
+      <div><b>W1</b>　5/26 – 5/31</div>
+      <div>交付期限　2026-06-30</div>
+      <div>報告日　2026-06-01</div>
+    </div>
+  </div>
+
+  <div class="axis"><b>本週主軸：</b>基礎設施 ＋ 協議層補齊 ＋ 規格制定</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>1. 基礎設施就緒 <span class="tag ok">已完成</span></h2>
+      <ul>
+        <li>DB schema：tenant / device_group / device ＋ profiles / apps / webhooks / audit 表結構完成</li>
+        <li>Webhook 推送框架：<b>HMAC 簽名 ＋ 三段退避重試 ＋ 死信佇列</b></li>
+        <li>Registry CSP / EDA-CSP helper（.msi 派發），單元測試覆蓋</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>2. Agent App 與派發鏈路 <span class="tag ok">已完成</span></h2>
+      <ul>
+        <li>Windows Agent（.NET 8 Service）腳手架完成，WiX 打包出 .msi 並簽名</li>
+        <li>install-agent 一鍵派發：enrollment → MSI → 配置注入 → Service → 上報，<span class="em">真機端到端跑通</span></li>
+        <li>Win10 Pro 真機 Reboot 命令驗證通過</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>3. 規格文檔 <span class="tag wip">進行中</span></h2>
+      <ul>
+        <li>ID Design Spec、API Specification、Webhook Spec、Agent API Spec、Data Model &amp; State Machine 已成稿，<b>正在收尾打磨</b></li>
+        <li>為確保一次到位、減少後續變更成本，規格與 OpenAPI 3.0 完整版預計<span class="em">下週統一交付</span></li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>4. 下週計畫 <span class="tag next">W2 · 6/1–6/7</span></h2>
+      <ul>
+        <li>規格文檔 v1 ＋ OpenAPI 3.0 框架交付</li>
+        <li>MDM Control API CRUD · Profile 引擎骨架</li>
+        <li>配置 CSP（WiFi / 密碼 / USB）</li>
+        <li>OMA-DM 命令 ack → Webhook 事件串接</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="glossary-title">附：名詞解釋</div>
+  <div class="gcols">
+
+    <div class="gblock">
+      <h3>整體背景</h3>
+      <table class="g">
+        <tr><td class="term">MDM</td><td class="desc">Mobile Device Management，行動裝置管理，遠端納管與管控設備的系統</td></tr>
+        <tr><td class="term">W1 / W2</td><td class="desc">五週開發計畫的第 1 / 第 2 週</td></tr>
+        <tr><td class="term">協議層</td><td class="desc">設備與伺服器通信協議的實作層</td></tr>
+      </table>
+    </div>
+
+    <div class="gblock">
+      <h3>後端與資料</h3>
+      <table class="g">
+        <tr><td class="term">DB schema</td><td class="desc">資料庫的資料表結構設計</td></tr>
+        <tr><td class="term">tenant</td><td class="desc">租戶；多租戶架構中的一個客戶／機構，資料彼此隔離</td></tr>
+        <tr><td class="term">device_group / device</td><td class="desc">「設備分組」與「設備」資料表</td></tr>
+        <tr><td class="term">profiles / apps / webhooks / audit</td><td class="desc">配置檔／應用／事件回呼／稽核日誌等資料表</td></tr>
+        <tr><td class="term">API</td><td class="desc">應用程式介面，系統間溝通的接口</td></tr>
+        <tr><td class="term">CRUD</td><td class="desc">建立 / 讀取 / 更新 / 刪除四種基本操作</td></tr>
+        <tr><td class="term">鑑權</td><td class="desc">身分驗證與權限授權</td></tr>
+      </table>
+    </div>
+
+    <div class="gblock">
+      <h3>事件推送（Webhook）</h3>
+      <table class="g">
+        <tr><td class="term">Webhook</td><td class="desc">事件回呼；系統發生事件時主動 HTTP 推送通知對方</td></tr>
+        <tr><td class="term">HMAC 簽名</td><td class="desc">用密鑰對訊息算出簽名，防偽造與竄改</td></tr>
+        <tr><td class="term">三段退避重試</td><td class="desc">推送失敗後按 30 秒 → 5 分 → 30 分 遞增間隔重試</td></tr>
+        <tr><td class="term">死信佇列</td><td class="desc">Dead Letter Queue；重試都失敗後留底的訊息佇列，可日後補推</td></tr>
+      </table>
+    </div>
+
+    <div class="gblock">
+      <h3>Windows MDM 協議與配置</h3>
+      <table class="g">
+        <tr><td class="term">CSP</td><td class="desc">Configuration Service Provider；Windows 內建的配置介面，每個 CSP 管一類設定</td></tr>
+        <tr><td class="term">Registry CSP</td><td class="desc">操作 Windows 登錄檔（Registry）的 CSP</td></tr>
+        <tr><td class="term">EDA-CSP</td><td class="desc">EnterpriseDesktopAppManagement CSP；遠端派發 .msi 桌面應用</td></tr>
+        <tr><td class="term">OMA-DM</td><td class="desc">Open Mobile Alliance Device Management；標準設備管理協議，命令下發的基礎</td></tr>
+        <tr><td class="term">ack</td><td class="desc">acknowledge；設備回傳的「命令已執行」確認回執</td></tr>
+        <tr><td class="term">Profile 引擎</td><td class="desc">把配置（Profile）下發到設備並追蹤套用狀態的模組</td></tr>
+      </table>
+    </div>
+
+    <div class="gblock">
+      <h3>Agent App 與打包</h3>
+      <table class="g">
+        <tr><td class="term">Agent App</td><td class="desc">安裝在設備上的客戶端代理程式</td></tr>
+        <tr><td class="term">.NET 8 Service</td><td class="desc">用微軟 .NET 8 框架寫的 Windows 背景服務</td></tr>
+        <tr><td class="term">腳手架</td><td class="desc">scaffold；專案的初始骨架／框架</td></tr>
+        <tr><td class="term">WiX</td><td class="desc">把程式打包成 Windows 安裝包（.msi）的工具</td></tr>
+        <tr><td class="term">.msi</td><td class="desc">Windows 標準安裝包格式</td></tr>
+        <tr><td class="term">簽名</td><td class="desc">code signing；用憑證數位簽署，證明來源可信、未被竄改</td></tr>
+        <tr><td class="term">install-agent</td><td class="desc">一鍵把 Agent 派發到設備的 API</td></tr>
+        <tr><td class="term">enrollment</td><td class="desc">設備納管／註冊進 MDM 接受管理</td></tr>
+        <tr><td class="term">配置注入</td><td class="desc">把 MDM 位址等設定寫入設備（HKLM 登錄檔）</td></tr>
+        <tr><td class="term">Reboot 命令</td><td class="desc">遠端重啟設備的命令</td></tr>
+        <tr><td class="term">單元測試</td><td class="desc">針對單一函式／模組的自動化測試</td></tr>
+      </table>
+    </div>
+
+    <div class="gblock">
+      <h3>規格文檔</h3>
+      <table class="g">
+        <tr><td class="term">ID Design Spec</td><td class="desc">各類 ID（租戶／設備／命令…）的格式與生命週期規範</td></tr>
+        <tr><td class="term">API Specification</td><td class="desc">API 規格：鑑權、錯誤格式、分頁、限流</td></tr>
+        <tr><td class="term">Webhook Spec</td><td class="desc">Webhook 事件清單、payload、簽名、重試規格</td></tr>
+        <tr><td class="term">Agent API Spec</td><td class="desc">iOS ＋ Windows Agent 共用的上報 API 規格</td></tr>
+        <tr><td class="term">Data Model &amp; State Machine</td><td class="desc">資料模型與狀態機（設備／命令／配置的狀態流轉）</td></tr>
+        <tr><td class="term">OpenAPI 3.0</td><td class="desc">描述 REST API 的業界標準格式，可自動產生文件與 client SDK</td></tr>
+      </table>
+    </div>
+
+  </div>
+
+  <div class="foot">
+    <span>CoGrow MDM · Windows MDM 開發計畫（5/26 – 6/30）</span>
+    <span>機密 · 僅供內部與台灣團隊對接使用</span>
+  </div>
+
+</body>
+</html>

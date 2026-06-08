@@ -53,7 +53,7 @@ DGKUsageStatsManager.processPendingEvents()
 
 **`POST /api/agent/report`**
 
-App 端程式碼：`AgentApp/Sources/Services/ReportService.swift`
+App 端程式碼：`ios-agent-app/AgentApp/Sources/Services/ReportService.swift`
 後端處理：`src/routes/agent.ts`
 
 #### 請求
@@ -185,7 +185,7 @@ Content-Type: application/json
 
 **`POST /api/agent/usage`**
 
-App 端程式碼：`AgentApp/Sources/Services/UsageService.swift`
+App 端程式碼：`ios-agent-app/AgentApp/Sources/Services/UsageService.swift`
 後端處理：`src/routes/agent.ts`
 資料來源：`DeviceGuardKit` 的 `DGKUsageStatsManager`
 
@@ -342,7 +342,7 @@ App 透過 `UserDefaults` 儲存以下配置項（可由 MDM Configuration Profi
 | `deviceId` | `UIDevice.identifierForVendor` | 裝置識別碼 |
 | `serialNumber` | `"unknown"` | 裝置序列號（需手動設定或 MDM 注入） |
 
-配置程式碼位於 `AgentApp/Sources/Services/ReportService.swift`。
+配置程式碼位於 `ios-agent-app/AgentApp/Sources/Services/ReportService.swift`。
 
 ---
 
@@ -385,9 +385,9 @@ private func networkType() -> String {
 | 後端路由 | `src/routes/agent.ts` | Agent API 端點定義 |
 | 後端儲存 | `src/db/sqlite.ts` | 資料庫 schema 與 CRUD |
 | 後端型別 | `src/jamf/types.ts` | Jamf API 型別定義 |
-| App 上報 | `AgentApp/Sources/Services/ReportService.swift` | 裝置狀態上報 |
-| App 使用時長 | `AgentApp/Sources/Services/UsageService.swift` | 使用時長上報 |
-| App 狀態採集 | `AgentApp/Sources/Services/StatusCollector.swift` | 裝置資訊採集 |
-| App 模型 | `AgentApp/Sources/Models/DeviceStatus.swift` | 狀態與 Payload 模型 |
-| App 模型 | `AgentApp/Sources/Models/UsageStats.swift` | 使用時長模型 |
-| App ViewModel | `AgentApp/Sources/Services/StatusManager.swift` | 定時回報與 UI 狀態管理 |
+| App 上報 | `ios-agent-app/AgentApp/Sources/Services/ReportService.swift` | 裝置狀態上報 |
+| App 使用時長 | `ios-agent-app/AgentApp/Sources/Services/UsageService.swift` | 使用時長上報 |
+| App 狀態採集 | `ios-agent-app/AgentApp/Sources/Services/StatusCollector.swift` | 裝置資訊採集 |
+| App 模型 | `ios-agent-app/AgentApp/Sources/Models/DeviceStatus.swift` | 狀態與 Payload 模型 |
+| App 模型 | `ios-agent-app/AgentApp/Sources/Models/UsageStats.swift` | 使用時長模型 |
+| App ViewModel | `ios-agent-app/AgentApp/Sources/Services/StatusManager.swift` | 定時回報與 UI 狀態管理 |

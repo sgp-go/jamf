@@ -10,10 +10,7 @@
     "db:seed": "deno run -A --env-file=.env app/db/seed.ts",
     "load-test": "deno run -A --env-file=.env app/scripts/load-test.ts",
     "auto-rollback": "deno run -A --env-file=.env app/scripts/auto-rollback.ts",
-    "verify-auto-rollback": "deno run -A --env-file=.env app/scripts/verify-auto-rollback.ts",
-    "src:dev": "deno run --unstable-http --allow-env --allow-read --allow-write --allow-net --allow-ffi --watch src/server.ts",
-    "src:start": "deno run --unstable-http --allow-env --allow-read --allow-write --allow-net --allow-ffi src/server.ts",
-    "src:test-api": "deno run --allow-env --allow-read --allow-net src/scripts/test-api.ts"
+    "verify-auto-rollback": "deno run -A --env-file=.env app/scripts/verify-auto-rollback.ts"
   },
   "imports": {
     "~/": "./app/",

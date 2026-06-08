@@ -39,7 +39,7 @@ jobs:
       # 通常無 OV 證書；正式簽名走自託管 runner 或下游簽名流程，產出未簽名包亦可歸檔）。
       - name: Build MSI
         shell: pwsh
-        working-directory: agent-app
+        working-directory: win-agent-app
         env:
           SIGNING_CERT_THUMBPRINT: ${{ secrets.SIGNING_CERT_THUMBPRINT }}
         run: |
@@ -51,7 +51,7 @@ jobs:
         id: hash
         shell: pwsh
         run: |
-          $msi = Get-ChildItem agent-app/build/msi/*.msi | Select-Object -First 1
+          $msi = Get-ChildItem win-agent-app/build/msi/*.msi | Select-Object -First 1
           if (-not $msi) { throw "no .msi produced" }
           $h = (Get-FileHash $msi.FullName -Algorithm SHA256).Hash.ToLower()
           "sha256=$h" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
@@ -60,17 +60,17 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CoGrowMDMAgent-${{ steps.ver.outputs.version }}-msi
-          path: agent-app/build/msi/*.msi
+          path: win-agent-app/build/msi/*.msi
           retention-days: 90
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: agent-app/build/msi/*.msi
+          files: win-agent-app/build/msi/*.msi
           body: |
             Agent ${{ steps.ver.outputs.version }}
             SHA256: ${{ steps.hash.outputs.sha256 }}
 
             回滾：MSI 擋 downgrade，回滾用 roll-forward —
-            `pwsh -File agent-app/build-rollforward.ps1 -SourceRef <已知好版本 tag> -Version <更高版本號>`
+            `pwsh -File win-agent-app/build-rollforward.ps1 -SourceRef <已知好版本 tag> -Version <更高版本號>`
             然後用灰度端點 POST /agent-rollout 派發。

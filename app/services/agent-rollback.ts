@@ -311,14 +311,14 @@ export function buildFromManifest(manifestPath: string) {
 }
 
 /**
- * build dep：spawn `pwsh agent-app/build-rollforward.ps1` 本地構建並讀 manifest。
+ * build dep：spawn `pwsh win-agent-app/build-rollforward.ps1` 本地構建並讀 manifest。
  * ⚠️ 僅在有 git + pwsh + WiX 的環境可用（首選 CI；見 buildFromManifest 的死結說明）。
  */
 export async function buildRollforwardViaPwsh(
   req: BuildRollforwardRequest,
   opts?: { scriptPath?: string; certThumbprint?: string },
 ): Promise<RollforwardArtifact> {
-  const scriptPath = opts?.scriptPath ?? "agent-app/build-rollforward.ps1";
+  const scriptPath = opts?.scriptPath ?? "win-agent-app/build-rollforward.ps1";
   const args = [
     "-File",
     scriptPath,

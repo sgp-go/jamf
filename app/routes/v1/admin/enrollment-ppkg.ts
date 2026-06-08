@@ -10,7 +10,7 @@ import { generatePpkgCustomizations } from "~/services/admin/enrollment-ppkg.ts"
  *
  * 生成 USB PPKG 用 customizations.xml（填本 tenant 的 publicBaseUrl + slug；
  * admin 自帶 enrollment 凭据 + 可選 WiFi / 本機帳號）。返回 XML 文本，admin 拿到後
- * SCP 到有 ADK 的 Win10 工具機跑 ICD build 出 .ppkg（見 agent-app/scripts/ppkg/）。
+ * SCP 到有 ADK 的 Win10 工具機跑 ICD build 出 .ppkg（見 win-agent-app/scripts/ppkg/）。
  *
  * 改 POST（原 GET）：要傳 wifi[] / localAccounts[] 陣列，且 secret/password 不該進 URL query。
  *

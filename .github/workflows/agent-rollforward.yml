@@ -58,7 +58,7 @@ jobs:
       - name: Build roll-forward MSI + manifest
         id: build
         shell: pwsh
-        working-directory: agent-app
+        working-directory: win-agent-app
         env:
           SIGNING_CERT_THUMBPRINT: ${{ secrets.SIGNING_CERT_THUMBPRINT }}
         run: |
@@ -85,6 +85,6 @@ jobs:
         with:
           name: rollforward-${{ inputs.version }}
           path: |
-            agent-app/build/rollforward/*.msi
-            agent-app/build/rollforward/*.manifest.json
+            win-agent-app/build/rollforward/*.msi
+            win-agent-app/build/rollforward/*.manifest.json
           retention-days: 90

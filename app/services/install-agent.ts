@@ -124,7 +124,7 @@ export async function installAgentOnDevice(
 
   // 配置注入：Registry CSP 在 Win10 22H2 不可用（所有 LocURI 不分 verb 都回 404），
   // 改由 msiexec public property 帶進 MsiInstallJob 的 CommandLine，MSI 安裝時寫入
-  // HKLM\SOFTWARE\Policies\CoGrowMDM\Agent（見 agent-app Product.wxs RegistryValue
+  // HKLM\SOFTWARE\Policies\CoGrowMDM\Agent（見 win-agent-app Product.wxs RegistryValue
   // 與 RegistryConfig.cs KeyPath）。值皆 UUID/hex/URL（無空格），不需引號。
   const configProps = [
     `DEVICE_ID=${device.id}`,
