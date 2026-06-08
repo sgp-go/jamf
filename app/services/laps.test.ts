@@ -121,3 +121,34 @@ Deno.test("buildLapsClear: 產出 disabled 片段", () => {
   assertEquals(cmds[0].verb, "Replace");
   assertEquals(cmds[0].data, "<disabled/>");
 });
+
+// ── buildLapsPendingActions（純函數，需 env-file 跑因 laps.ts 頂層 import db）──
+
+Deno.test({
+  name: "buildLapsPendingActions: 無 pending → 空陣列",
+  ignore: !hasDb,
+  fn: async () => {
+    const { buildLapsPendingActions } = await importLaps();
+    assertEquals(buildLapsPendingActions(null), []);
+  },
+});
+
+Deno.test({
+  name: "buildLapsPendingActions: pending → laps_rotation_pending 告知 action（不含密碼）",
+  ignore: !hasDb,
+  fn: async () => {
+    const { buildLapsPendingActions } = await importLaps();
+    const actions = buildLapsPendingActions({
+      rotationId: "aaaabbbb-cccc-dddd-eeee-ffffffffffff",
+      adminAccount: "Administrator",
+    });
+    assertEquals(actions.length, 1);
+    assertEquals(actions[0].type, "laps_rotation_pending");
+    assertEquals(actions[0].priority, 100);
+    assertEquals(actions[0].data.rotationId, "aaaabbbb-cccc-dddd-eeee-ffffffffffff");
+    assertEquals(actions[0].data.adminAccount, "Administrator");
+    // 安全：action 不得攜帶密碼（密碼僅走 MDM CSP 通道）
+    assertEquals("password" in actions[0].data, false);
+    assertEquals("passwordEnc" in actions[0].data, false);
+  },
+});

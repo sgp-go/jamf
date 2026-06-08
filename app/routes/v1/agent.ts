@@ -10,7 +10,7 @@ import {
   saveAgentReport,
   upsertUsageStats,
 } from "~/services/agent.ts";
-import { handleLapsOnReport } from "~/services/laps.ts";
+import { handleLapsOnCheckin, handleLapsOnReport } from "~/services/laps.ts";
 import {
   authorizeAgentReport,
   extractBearerToken,
@@ -60,6 +60,35 @@ const reportBody = z
     }),
   })
   .openapi("AgentReportInput");
+
+const checkinBody = z
+  .object({
+    serialNumber: z.string().min(1).openapi({ example: "F2L1234567" }),
+    udid: z.string().optional(),
+    osVersion: z.string().optional().openapi({ example: "10.0.19045.4170" }),
+    appVersion: z.string().optional().openapi({ example: "1.3.12.0" }),
+    lapsRotationId: z.string().optional().openapi({
+      description: "Agent 啟動時若已完成上次改密，帶上 rotationId 作確認（等同 report 的 windows.laps.rotation_id）",
+    }),
+  })
+  .openapi("AgentCheckinInput");
+
+const checkinActionSchema = z
+  .object({
+    type: z.string().openapi({ example: "laps_rotation_pending", description: "待辦動作類型" }),
+    priority: z.number().int().openapi({ example: 100, description: "優先級（數字越大越先處理）" }),
+    data: z.record(z.unknown()).openapi({ description: "動作參數（不含任何密碼）" }),
+  })
+  .openapi("AgentCheckinAction");
+
+const checkinResponseSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    actions: z.array(checkinActionSchema).openapi({
+      description: "後端回應的待辦動作列表；Agent 依 type 分別處理",
+    }),
+  })
+  .openapi("AgentCheckinResponse");
 
 const reportItem = z
   .object({
@@ -211,6 +240,41 @@ const reportRoute = createRoute({
       content: {
         "application/json": {
           schema: successSchema(agentReportSavedSchema),
+        },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const checkinRoute = createRoute({
+  method: "post",
+  path: "/tenants/{tenantId}/agent/checkin",
+  tags: ["Agent 上報"],
+  summary: "Agent 啟動 checkin（取得待辦動作列表）",
+  description: [
+    "Agent App **啟動時**呼叫一次（區別於每日定時 `report`）。後端據此讓「上線即執行」的待辦",
+    "立即觸發 —— 目前是 LAPS 密碼輪換：不必等每日 report 週期，Agent 一上線就觸發 / 確認輪換。",
+    "",
+    "**鑑權**：同 `/agent/reports`，若 device 已簽發 token 則必須帶 `Authorization: Bearer <agent_token>`。",
+    "",
+    "**LAPS 確認**：若 Agent 啟動時已完成上次改密，帶 `lapsRotationId` 作確認。",
+    "",
+    "**回應 actions**：待辦動作列表。`laps_rotation_pending` 僅**告知**有進行中的輪換，",
+    "**不攜帶密碼**（密碼經 MDM CSP 通道下發到 registry，由 Agent LapsWatcher 取用）。",
+    "",
+    "**事件**：成功後觸發 webhook `agent.checkin`。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: { content: { "application/json": { schema: checkinBody } } },
+  },
+  responses: {
+    200: {
+      description: "Checkin accepted，回傳待辦動作列表",
+      content: {
+        "application/json": {
+          schema: successSchema(checkinResponseSchema),
         },
       },
     },
@@ -394,6 +458,50 @@ agentApp.openapi(reportRoute, async (c) => {
   return c.json(
     { ok: true as const, data: { reportId: saved.id, deviceId: device.id } },
     201,
+  );
+});
+
+agentApp.openapi(checkinRoute, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+
+  const device = await resolveAgentDevice({
+    tenantId,
+    serialNumber: body.serialNumber,
+    udid: body.udid ?? null,
+  });
+
+  await authorizeAgentReport({
+    device,
+    token: extractBearerToken(c.req.header("authorization")),
+  });
+
+  // 上線即觸發 / 確認 LAPS 輪換（不等每日 report 週期），回傳待辦動作。
+  // 內部容錯：觸發失敗不影響 checkin 上線信號成立。
+  const actions = await handleLapsOnCheckin({
+    tenantId,
+    deviceId: device.id,
+    lapsRotationId: body.lapsRotationId,
+  });
+
+  void publishEvent({
+    tenantId,
+    eventType: "agent.checkin",
+    data: {
+      device_id: device.id,
+      serial_number: body.serialNumber,
+      os_version: body.osVersion ?? null,
+      app_version: body.appVersion ?? null,
+      action_count: actions.length,
+      checked_in_at: new Date().toISOString(),
+    },
+  }).catch((err) => {
+    console.error("[agent.checkin] publishEvent failed", err);
+  });
+
+  return c.json(
+    { ok: true as const, data: { deviceId: device.id, actions } },
+    200,
   );
 });
 

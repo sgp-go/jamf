@@ -34,6 +34,8 @@ export const WEBHOOK_EVENT_TYPES = [
 
   // ─ Agent App ─
   "agent.installed",
+  // Agent 啟動時的 checkin（區別於定時 report）：上線即觸發待辦（如 LAPS 輪換）。
+  "agent.checkin",
   "agent.reported",
   "agent.usage_reported",
   // 使用統計回退異常：同設備同日累計值較既有值變小（疑似本地 db 被篡改）。

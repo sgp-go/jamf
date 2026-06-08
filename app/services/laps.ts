@@ -227,6 +227,34 @@ export async function shouldTriggerLaps(deviceId: string): Promise<boolean> {
   return true;
 }
 
+// ── 確認 + 清 registry（report / checkin 共用）────────────────────────────────
+
+/**
+ * 確認某次輪換成功，成功則排 buildLapsClear 清 registry 殘留。
+ * 回傳 confirmLapsRotation 的結果。
+ */
+async function confirmAndClearLaps(opts: {
+  deviceId: string;
+  rotationId: string;
+}): Promise<boolean> {
+  const confirmed = await confirmLapsRotation(opts);
+  if (!confirmed) return false;
+
+  const device = await db.query.mdmDevices.findFirst({
+    where: eq(mdmDevices.id, opts.deviceId),
+    columns: { udid: true },
+  });
+  if (device?.udid) {
+    const cmds = buildLapsClear();
+    await enqueueWindowsCommand({
+      deviceUdid: device.udid,
+      commandType: "LapsClearPolicy",
+      command: cmds[0],
+    });
+  }
+  return true;
+}
+
 // ── Report Hook ─────────────────────────────────────────────────────────────
 
 /**
@@ -246,24 +274,10 @@ export async function handleLapsOnReport(opts: {
     | undefined;
 
   if (windows?.laps?.rotation_id) {
-    const confirmed = await confirmLapsRotation({
+    await confirmAndClearLaps({
       deviceId: opts.deviceId,
       rotationId: windows.laps.rotation_id,
     });
-    if (confirmed) {
-      const device = await db.query.mdmDevices.findFirst({
-        where: eq(mdmDevices.id, opts.deviceId),
-        columns: { udid: true },
-      });
-      if (device?.udid) {
-        const cmds = buildLapsClear();
-        await enqueueWindowsCommand({
-          deviceUdid: device.udid,
-          commandType: "LapsClearPolicy",
-          command: cmds[0],
-        });
-      }
-    }
     return;
   }
 
@@ -275,4 +289,81 @@ export async function handleLapsOnReport(opts: {
       triggeredBy: "auto",
     });
   }
+}
+
+// ── Checkin Hook ──────────────────────────────────────────────────────────────
+
+/**
+ * Agent 啟動 checkin 回傳的待辦動作。
+ * 注意：密碼僅經 MDM CSP 通道下發，action 不攜帶任何密碼，只告知 Agent
+ * 有進行中的輪換（Agent 的 LapsWatcher 從 registry 取密碼執行）。
+ */
+export interface CheckinAction {
+  type: string;
+  priority: number;
+  data: Record<string, unknown>;
+}
+
+/**
+ * 純函數：把「最新 pending 輪換」映射成 checkin 告知動作。
+ * pending 為 null 時回傳空陣列。
+ */
+export function buildLapsPendingActions(
+  pending: { rotationId: string; adminAccount: string } | null,
+): CheckinAction[] {
+  if (!pending) return [];
+  return [
+    {
+      type: "laps_rotation_pending",
+      priority: 100,
+      data: {
+        rotationId: pending.rotationId,
+        adminAccount: pending.adminAccount,
+      },
+    },
+  ];
+}
+
+/**
+ * Agent 啟動 checkin 的 LAPS 處理 —— 讓輪換在 Agent 上線即觸發 / 確認，
+ * 不必等每日 report 週期。
+ *
+ *   1. 帶 lapsRotationId → 確認上次改密 + 清 registry
+ *   2. 否則 shouldTriggerLaps → 需要則 rotateLapsPassword（上線即觸發）
+ *
+ * 觸發 / 確認失敗不拋（容錯）：checkin 的上線信號仍須成立。最後查最新
+ * pending 輪換，回傳告知動作（密碼走 CSP，此處僅告知）。
+ */
+export async function handleLapsOnCheckin(opts: {
+  tenantId: string;
+  deviceId: string;
+  lapsRotationId?: string;
+}): Promise<CheckinAction[]> {
+  try {
+    if (opts.lapsRotationId) {
+      await confirmAndClearLaps({
+        deviceId: opts.deviceId,
+        rotationId: opts.lapsRotationId,
+      });
+    } else if (await shouldTriggerLaps(opts.deviceId)) {
+      await rotateLapsPassword({
+        tenantId: opts.tenantId,
+        deviceId: opts.deviceId,
+        triggeredBy: "auto",
+      });
+    }
+  } catch (err) {
+    console.error("[LAPS] handleLapsOnCheckin 處理失敗（不影響 checkin）", err);
+  }
+
+  const pending = await db.query.mdmWindowsLaps.findFirst({
+    where: and(
+      eq(mdmWindowsLaps.deviceId, opts.deviceId),
+      eq(mdmWindowsLaps.status, "pending"),
+    ),
+    orderBy: [desc(mdmWindowsLaps.createdAt)],
+    columns: { rotationId: true, adminAccount: true },
+  });
+
+  return buildLapsPendingActions(pending ?? null);
 }

@@ -16,4 +16,7 @@ public sealed record AgentConfig
 
     public string UsageUrl =>
         $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/usage";
+
+    public string CheckinUrl =>
+        $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/checkin";
 }

@@ -109,6 +109,53 @@ public sealed record AgentReportResponseData
     public string? DeviceId { get; init; }
 }
 
+// ---- Checkin payload ----
+
+public sealed record AgentCheckinPayload
+{
+    [JsonPropertyName("serialNumber")]
+    public required string SerialNumber { get; init; }
+
+    [JsonPropertyName("osVersion")]
+    public string? OsVersion { get; init; }
+
+    [JsonPropertyName("appVersion")]
+    public string? AppVersion { get; init; }
+
+    [JsonPropertyName("lapsRotationId")]
+    public string? LapsRotationId { get; init; }
+}
+
+public sealed record AgentCheckinAction
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "";
+
+    [JsonPropertyName("priority")]
+    public int Priority { get; init; }
+
+    [JsonPropertyName("data")]
+    public Dictionary<string, object>? Data { get; init; }
+}
+
+public sealed record AgentCheckinResponse
+{
+    [JsonPropertyName("ok")]
+    public bool Ok { get; init; }
+
+    [JsonPropertyName("data")]
+    public AgentCheckinResponseData? Data { get; init; }
+}
+
+public sealed record AgentCheckinResponseData
+{
+    [JsonPropertyName("deviceId")]
+    public string? DeviceId { get; init; }
+
+    [JsonPropertyName("actions")]
+    public IReadOnlyList<AgentCheckinAction>? Actions { get; init; }
+}
+
 // ---- Usage payload ----
 
 public sealed record UsageStatsPayload
