@@ -20,6 +20,8 @@
 | [device-provisioning-guide.md](device-provisioning-guide.md) | 設備初始化配置指南：新租戶初始化 → PPKG 生成 → OOBE 套用 → 驗證納管 → 帳戶與密碼策略 → 故障排除 |
 | [agent-app-build-and-deploy.md](agent-app-build-and-deploy.md) | Agent App 構建與部署：MSI 構建 → 上傳 → EDA-CSP 自動下發 → 文件下載 URL 配置（publicBaseUrl / appDownloadBaseUrl） |
 | [laps-password-management.md](laps-password-management.md) | LAPS 密碼託管：自動改密流程 → IT 查詢密碼 → 手動輪換 → 安全須知 |
+| [bitlocker-management.md](bitlocker-management.md) | BitLocker 磁碟加密：ADMX 信箱靜默加密 → Recovery Key 捕獲 → 加密狀態查詢 → 故障排除 |
+| [agent-upgrade-rollback-strategy.md](agent-upgrade-rollback-strategy.md) | Agent 升級與回滾：灰度分階段推送 → 健康驗證指標 → 回滾操作 → 自我保護注意事項 |
 | [device-lifecycle.md](device-lifecycle.md) | 設備生命週期：納管自動鏈路（全 10+ 步） → 移除納管（10 步清理） → 遠端鎖屏 / 抹機 / 重啟 |
 
 ### C. 技術參考（排錯 / 原理，自探索期遷入）
@@ -61,6 +63,8 @@
 ① backend-deployment → ② build-machine-setup → ③ push-infrastructure-setup
 
 **接著設備配置**：
-④ device-provisioning-guide → ⑤ agent-app-build-and-deploy → ⑥ laps-password-management → ⑦ device-lifecycle
+④ device-provisioning-guide → ⑤ agent-app-build-and-deploy → ⑥ laps-password-management → ⑦ bitlocker-management → ⑧ device-lifecycle
 
-**日常運維**：直接查 ⑦ device-lifecycle + ⑥ laps-password-management
+**日常運維**：直接查 ⑧ device-lifecycle + ⑥ laps-password-management + ⑦ bitlocker-management
+
+**升級維護**：⑨ agent-upgrade-rollback-strategy

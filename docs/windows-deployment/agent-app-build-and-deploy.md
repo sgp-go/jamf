@@ -164,4 +164,4 @@ curl -X PATCH /api/v1/admin/tenants/{tid}/mdm-config \
 
 Agent 升級透過 MDM 重新觸發 `install-agent`（上傳新版 MSI → 對設備下發）。MSI 的 WiX MajorUpgrade 配置會自動卸舊裝新，服務自動重啟。
 
-升級建議走灰度（見 Agent 灰度/回滾體系文件），避免壞 build 推到全量設備。
+升級建議走灰度，詳見 [agent-upgrade-rollback-strategy.md](agent-upgrade-rollback-strategy.md)，避免壞 build 推到全量設備。
