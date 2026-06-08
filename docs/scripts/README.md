@@ -2,7 +2,9 @@
 
 這些腳本在 Win10/11 上跑（透過 SSH `powershell -EncodedCommand`），生成簽名 MSIX 與計算 PFN。
 
-> 💡 **演示 / 接手不需要跑這些腳本**——git 倉庫 [`data/test/`](../../data/test/) 已附 3 個簽好的 demo MSIX，[`quick-start.md` 第 5 步](../windows-mdm-quick-start.md#第-5-步派送-demo-msix-安裝)直接拿來派送即可。
+> 💡 **演示 / 接手不需要跑這些腳本**——git 倉庫 [`data/test/`](../../data/test/) 已附 3 個簽好的 demo MSIX，[`quick-start.md` 第 5 步](../archived/windows-mdm-quick-start.md#第-5-步派送-demo-msix-安裝)直接拿來派送即可。
+>
+> 🏭 **生產 push 自建**見 [`windows-deployment/push-infrastructure-setup.md`](../windows-deployment/push-infrastructure-setup.md)（本目錄的 `build-push-msix-v2.ps1` / `get-pfn.ps1` 即該流程使用的腳本）。
 >
 > **何時才需要來這裡重 build**：
 > - 改了源碼（如 `hello.cs` 加新功能）
@@ -55,7 +57,7 @@ scp -i ~/.ssh/win10_mdm_test AHS@192.168.50.68:/Temp/AspiraMdmDemo-1.0.msix data
 
 ### Step 1：完成 Microsoft Store + Azure AD 應用註冊
 
-跟著 [`windows-mdm-account-setup.md`](../windows-mdm-account-setup.md) 5 個步驟做完，拿到：
+跟著 [`windows-mdm-account-setup.md`](../archived/windows-mdm-account-setup.md) 5 個步驟做完，拿到：
 - `WNS_PACKAGE_SID`（`ms-app://S-1-15-2-...`）
 - `WNS_CLIENT_SECRET`（Azure 一次性顯示）
 - `WNS_PFN`（`<YourPublisherDisplayName>.<YourAppName>_<13-char-hash>`）

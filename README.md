@@ -68,16 +68,18 @@ bundle exec fastlane build_dev
 | 文件 | 說明 |
 |------|------|
 | [Apple Developer 配置指南](docs/apple-developer-setup.md) | Apple Developer Portal 設定、證書管理、**專案集成 Checklist** |
-| [Jamf API 整合](docs/jamf-api-integration.md) | Jamf Pro API 認證方式、端點分類、自建管理 API |
-| [App API 集成](docs/app-api-integration.md) | iOS Agent App 與後端的 API 對接規格、資料模型 |
-| [裝置註冊指南](docs/device-enrollment-guide.md) | ABM + Jamf Pro 裝置註冊完整流程 |
-| [裝置繫結步驟](docs/device-binding-steps.md) | iPad 實際繫結操作記錄與故障排除 |
+| [Jamf API 整合](docs/archived/jamf-api-integration.md) | Jamf Pro API 認證方式、端點分類、自建管理 API（單租戶探索期，已歸檔） |
+| [App API 集成](docs/archived/app-api-integration.md) | iOS Agent App 與後端的 API 對接規格、資料模型（已歸檔） |
+| [裝置註冊指南](docs/archived/device-enrollment-guide.md) | ABM + Jamf Pro 裝置註冊完整流程（已歸檔） |
+| [裝置繫結步驟](docs/archived/device-binding-steps.md) | iPad 實際繫結操作記錄與故障排除（已歸檔） |
+
+> 上述 Jamf/iOS 文件為多租戶重構前的探索期版本，已移至 `docs/archived/`。
 
 ### Windows MDM 子系統（自建）
 
+> **正式生產交付文件**見下表入口；多租戶重構前的 demo / 探索文件已歸檔至 [`docs/archived/`](docs/archived/)。
+
 | 文件 | 說明 |
 |------|------|
-| [📚 Windows MDM 文件總目錄](docs/windows-mdm-INDEX.md) | **入口**：4 種角色閱讀路徑、已驗證範圍、11 份詳細文檔導航 |
-| [🚀 30 分鐘快速上手](docs/windows-mdm-quick-start.md) | 從 0 跑通 enrollment + 4 大功能演示 + 秒級推送 |
-| [🏭 生產部署](docs/windows-mdm-production-deployment.md) | 服務端部署 SOP + 設備端生產化 + 待實現項清單 |
+| [🏭 Windows 生產部署交付（入口）](docs/windows-deployment/README.md) | **入口**：基礎設施部署（後端 / 構建機 / push）+ 設備配置運維，共 7 份生產文件 |
 | [📦 Demo MSIX 接手即用](data/test/README.md) | 已簽 demo MSIX + cert 公鑰、客戶端首次準備腳本 |

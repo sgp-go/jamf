@@ -20,14 +20,13 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 - Jamf Pro API (新版): `https://cogrow.jamfcloud.com/api/`
 - Classic API (舊版): `https://cogrow.jamfcloud.com/JSSResource/`
 - Swagger 文件: `https://cogrow.jamfcloud.com/api/doc/`
-- 詳細整合文件: `docs/jamf-api-integration.md`
+- 詳細整合文件: `docs/archived/jamf-api-integration.md`（單租戶探索期，已歸檔）
 
 ## 檔案結構
 
 - `.env` - API 憑據（Client ID/Secret、api_admin 帳戶密碼）
-- `docs/jamf-api-integration.md` - Jamf API 整合詳細文件
-- `docs/app-api-integration.md` - Agent App ↔ 後端 API 集成文件
-- `docs/self-hosted-mdm-guide.md` - 自建 MDM 註冊、命令、遷移操作指南
+- `docs/windows-deployment/` - **正式生產交付文件**（後端部署 / 構建機 / push 自建 / 設備配置運維，7 份）
+- `docs/archived/` - 多租戶重構前的探索 / demo 文件（jamf-api-integration、app-api-integration、self-hosted-mdm-guide、windows-mdm-* 等）
 - `app/` - Deno 後端服務（Hono + PostgreSQL + Drizzle ORM，多租戶）
   - `app/routes/` - HTTP 路由（v1 API、windows-mdm OMA-DM 協議端點）
   - `app/services/` - 業務邏輯（jamf、mdm、wns、agent、laps、compliance、rollback 等）
@@ -65,6 +64,7 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 | `/api/devices/:id/app-lock` | POST | 啟用單 App 模式 |
 | `/api/devices/:id/app-lock` | DELETE | 停用單 App 模式 |
 | `/api/agent/report` | POST | Agent App 上報裝置狀態 |
+| `/api/agent/checkin` | POST | Agent 啟動 checkin（回傳待辦動作列表，如 LAPS 輪換） |
 | `/api/agent/reports/:deviceId` | GET | 查詢裝置上報歷史 |
 | `/api/agent/latest/:deviceId` | GET | 取得裝置最新上報 |
 | `/api/agent/usage` | POST | 上報裝置使用時長 |
