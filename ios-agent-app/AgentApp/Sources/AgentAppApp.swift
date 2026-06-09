@@ -63,6 +63,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        _ = NetworkMonitor.shared // 提前啟動網路類型追蹤，確保首次上報前已就緒
         setupDeviceGuardKit()
         return true
     }

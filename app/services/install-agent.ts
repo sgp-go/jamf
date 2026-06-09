@@ -311,6 +311,52 @@ export async function installAgentOnDevice(
   };
 }
 
+export interface IssueAgentTokenResult {
+  deviceId: string;
+  /** 一次性返回給呼叫端的 raw token；DB 只保存 hash。後續無法復原。 */
+  agentToken: string;
+  issuedAt: string;
+}
+
+/**
+ * 為設備簽發（或重新簽發）Agent Token，不派發 App。
+ *
+ * 用途：
+ *   - **iOS**：走 ABM Custom App + Managed App Configuration 分發，沒有 Windows
+ *     install-agent 的 MSI 注入鏈路，token 需單獨簽發後由管理員注入 Jamf managed
+ *     config 的 `agentToken` 鍵。
+ *   - **任何平台**：「不重派 App 只換 token」（撤銷疑似洩漏的 token）。
+ *
+ * 簽發後設備的 agent_token_hash 非 null → 後續上報強制驗 Bearer
+ * （見 {@link authorizeAgentReport}）。raw token 僅此回傳一次，DB 只存 sha256 hash；
+ * 舊 token 立即失效（hash 被覆蓋）。
+ */
+export async function issueAgentTokenForDevice(opts: {
+  tenantId: string;
+  deviceId: string;
+}): Promise<IssueAgentTokenResult> {
+  const device = await db.query.mdmDevices.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.id, opts.deviceId), eqOp(t.tenantId, opts.tenantId)),
+    columns: { id: true },
+  });
+  if (!device) {
+    throw new AppError(404, "device_not_found", "Device not found");
+  }
+
+  // 與 install-agent 同款：32 bytes random hex（256 bit 熵），SHA-256 存 DB
+  const agentToken = randomBytes(32).toString("hex");
+  const agentTokenHash = createHash("sha256").update(agentToken).digest("hex");
+  const issuedAt = new Date();
+
+  await db
+    .update(mdmDevices)
+    .set({ agentTokenHash, agentTokenIssuedAt: issuedAt })
+    .where(eq(mdmDevices.id, device.id));
+
+  return { deviceId: device.id, agentToken, issuedAt: issuedAt.toISOString() };
+}
+
 /**
  * 驗證 Agent 上報時帶的 token 是否匹配該 device 的 hash。
  *

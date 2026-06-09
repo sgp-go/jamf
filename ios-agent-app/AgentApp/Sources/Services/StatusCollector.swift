@@ -21,7 +21,7 @@ final class StatusCollector {
             storageAvailableMb: availableMb,
             storageTotalMb: totalMb,
             networkType: networkType(),
-            networkSsid: nil, // 需要 NEHotspotNetwork entitlement（許可權）
+            networkSsid: nil, // SSID 需「Access WiFi Information」entitlement + 定位授權，預設不採（見 docs/ios-managed-app-config.md）
             screenBrightness: Double(UIScreen.main.brightness),
             osVersion: UIDevice.current.systemVersion,
             deviceModel: modelIdentifier(),
@@ -54,9 +54,8 @@ final class StatusCollector {
     }
 
     private func networkType() -> String {
-        // 簡化實現：透過檢查是否能存取網路判斷
-        // 更精確的實現需要 NWPathMonitor
-        return "WiFi"
+        // 由 NWPathMonitor 持續追蹤對外介面類型（WiFi / Cellular / Ethernet / None）。
+        NetworkMonitor.shared.currentType
     }
 
     private func modelIdentifier() -> String {

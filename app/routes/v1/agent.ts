@@ -212,8 +212,8 @@ const reportRoute = createRoute({
   tags: ["Agent 上報"],
   summary: "Agent App 上報設備狀態（iOS + Windows 共用）",
   description: [
-    "**鑑權**：若 device 已透過 `install-agent` 簽發 token，必須帶 `Authorization: Bearer <agent_token>`",
-    "（未簽發 token 的 device 維持 anonymous，相容 iOS 既有 Agent App）。",
+    "**鑑權**：若 device 已簽發 token（Windows 經 `install-agent`、iOS 經 `agent-token` 端點），",
+    "必須帶 `Authorization: Bearer <agent_token>`；未簽發 token 的 device 相容不帶（過渡期）。",
     "",
     "**Windows extraData 建議結構**：",
     "```json",

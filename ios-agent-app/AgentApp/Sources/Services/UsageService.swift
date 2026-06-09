@@ -40,11 +40,10 @@ final class UsageService {
             throw ReportError.missingTenant
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-        request.timeoutInterval = 30
+        let request = ReportService.shared.makeAgentRequest(
+            url: url,
+            body: try JSONEncoder().encode(payload)
+        )
 
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,

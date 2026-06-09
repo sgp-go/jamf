@@ -34,6 +34,12 @@ final class ReportService {
         set { UserDefaults.standard.set(newValue, forKey: "tenantId") }
     }
 
+    /// Agent 上報 token（由 MDM 透過 Managed App Configuration 注入；dev 環境可從 UserDefaults 取）。
+    /// 後端對「已簽發 token」的設備強制驗 `Authorization: Bearer`；空字串視為尚未配置（兼容降級）。
+    var agentToken: String {
+        managedValue(forKey: "agentToken") ?? UserDefaults.standard.string(forKey: "agentToken") ?? ""
+    }
+
     private init() {}
 
     /// 構建多租戶 Agent API 端點：`{serverURL}/api/v1/tenants/{tenantId}/agent/{suffix}`。
@@ -42,6 +48,22 @@ final class ReportService {
         let tid = tenantId
         guard !tid.isEmpty else { return nil }
         return URL(string: "\(serverURL)/api/v1/tenants/\(tid)/agent/\(suffix)")
+    }
+
+    /// 構建 Agent 上報的 POST 請求：統一注入 JSON header、30s 逾時，
+    /// 並在 `agentToken` 非空時帶上 `Authorization: Bearer <token>`。
+    /// 兩個上報服務（reports / usage）共用，避免鑑權邏輯重複。
+    func makeAgentRequest(url: URL, body: Data) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let token = agentToken
+        if !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+        request.timeoutInterval = 30
+        return request
     }
 
     /// 收集狀態併發送到伺服器
@@ -66,11 +88,7 @@ final class ReportService {
             throw ReportError.missingTenant
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(payload)
-        request.timeoutInterval = 30
+        let request = makeAgentRequest(url: url, body: try JSONEncoder().encode(payload))
 
         let (_, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,

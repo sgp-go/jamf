@@ -3,7 +3,7 @@ import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
-import { installAgentOnDevice } from "~/services/install-agent.ts";
+import { installAgentOnDevice, issueAgentTokenForDevice } from "~/services/install-agent.ts";
 import { getRolloutHealth, rolloutAgentVersion } from "~/services/agent-rollout.ts";
 
 /**
@@ -124,6 +124,75 @@ installAgentAdminApp.openapi(installAgentSpec, async (c) => {
     },
   });
   return c.json({ ok: true as const, data: result }, 202);
+});
+
+// ============================================================
+// 簽發 Agent Token（不派 App）：iOS 走 managed config 注入；亦用於撤銷換 token
+// ============================================================
+
+const issueTokenResponse = z
+  .object({
+    deviceId: z.string().uuid().openapi({
+      example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c",
+    }),
+    agentToken: z.string().openapi({
+      example:
+        "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      description:
+        "為此 device 簽發的 raw token（hex 64 chars）。**僅此 API 回傳一次**，DB 只存 sha256 hash。",
+    }),
+    issuedAt: z.string().datetime().openapi({ example: "2026-06-09T10:00:00.000Z" }),
+  })
+  .openapi("IssueAgentTokenResult");
+
+const issueTokenSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/agent-token",
+  tags: ["Agent 派發"],
+  security: [{ BearerAuth: [] }],
+  summary: "簽發 Agent Token（不派 App）",
+  description: [
+    "為指定設備簽發（或重新簽發）Agent 上報 token，**不派發 App**。",
+    "",
+    "主要用途：",
+    "",
+    "- **iOS**：iOS Agent 走 ABM Custom App + Managed App Configuration 分發，",
+    "  無 Windows install-agent 的 MSI 注入鏈路。呼叫此 API 取得 token 後，",
+    "  將其作為 `agentToken` 鍵注入該設備的 Jamf Managed App Configuration，",
+    "  App 啟動讀取後即帶 `Authorization: Bearer <token>` 上報。",
+    "- **撤銷換發**：任何平台「不重派 App 只換 token」（疑似洩漏時撤銷舊 token）。",
+    "",
+    "簽發後該設備上報強制驗 token（不帶 / 不符 → 401）。**舊 token 立即失效**。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**⚠️ agentToken 僅此 API 回傳一次**，後續無法從 DB 復原明文。",
+  ].join("\n"),
+  request: {
+    params: paramsSchema,
+  },
+  responses: {
+    200: {
+      description: "token 已簽發；一次性返回，後續無法復原",
+      content: { "application/json": { schema: successSchema(issueTokenResponse) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+installAgentAdminApp.openapi(issueTokenSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const result = await issueAgentTokenForDevice({ tenantId, deviceId });
+  // 不記 agentToken（一次性 raw 值，audit 落表會洩漏）；只記發了 token 給哪台 + 時間
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.issue_agent_token",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { issuedAt: result.issuedAt },
+  });
+  return c.json({ ok: true as const, data: result }, 200);
 });
 
 // ============================================================
