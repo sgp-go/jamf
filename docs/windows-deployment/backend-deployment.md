@@ -223,6 +223,50 @@ server {
 
 > ⚠️ **BITS Range 請求**：Agent MSI 透過設備 BITS 以 HEAD + Range GET 下載。若 MSI 走此域名（而非 `appDownloadBaseUrl` 局域網），反代必須透傳 Range（Caddy 預設透傳；Nginx 預設亦支援，勿關 `proxy_buffering` 以外的怪設定）。大規模建議走 `appDownloadBaseUrl` 局域網分流，見 [agent-app-build-and-deploy.md](agent-app-build-and-deploy.md) §5。
 
+### 可選：Agent / Control 雙服務部署
+
+> 此為**進階可選**方案。上方單體（`deno task start`）已能完整運行全部功能，**多數場景不需要拆**。
+> 當 Agent 上報量顯著影響 MDM 控制面延遲、或有獨立 scale / SLA 隔離需求時再啟用。
+
+後端支援將 Agent 上報服務與 MDM 控制服務拆為兩個獨立進程（共用同一個 PostgreSQL）：
+
+| 進程 | 啟動命令 | 預設端口 | 範圍 |
+|---|---|---|---|
+| **Control** | `deno task start:control` | `PORT=3000` | MDM Control API + MDM 協議層 + Webhook 排程 |
+| **Agent** | `deno task start:agent` | `AGENT_PORT=3100` | Agent 上報端點（`/api/v1/tenants/{tid}/agent/*`） |
+
+開發模式：`deno task dev:control` / `deno task dev:agent`（帶 `--watch`）。
+
+**反代按路徑分流**（Caddy 範例）：
+
+```
+mdm.your-domain.edu {
+    handle /api/v1/*/agent/* {
+        reverse_proxy 127.0.0.1:3100
+    }
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+Nginx 等效：
+
+```nginx
+location ~ ^/api/v1/.*/agent {
+    proxy_pass http://127.0.0.1:3100;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For $remote_addr;
+}
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    # ... 同上
+}
+```
+
+**對 Agent App（iOS / Windows）與台灣後端零改動**：公網域名不變，路徑不變，反代透明分流。
+
 ---
 
 ## 6. 區分「本地測試」與「生產」（核心觀念）
