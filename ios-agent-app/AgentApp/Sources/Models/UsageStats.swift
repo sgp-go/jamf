@@ -1,8 +1,8 @@
 import Foundation
 
-/// 使用時長上報 Payload
+/// 使用時長上報 Payload（serialNumber 為後端設備標識，必填）
 struct UsageUploadPayload: Codable {
-    let deviceId: String
+    let serialNumber: String
     let sessionId: String?
     let stats: [UsageStatItem]
 }
@@ -14,17 +14,11 @@ struct UsageStatItem: Codable, Identifiable {
     let totalMinutes: Int
     let pickup: Int
     let maxContinuous: Int
-    let timeStats: [TimeStatItem]?
-}
-
-/// 每小時統計
-struct TimeStatItem: Codable {
-    let hour: Int
-    let minutes: Int
+    /// 時段分佈：key=時段標籤（如小時），value=分鐘數（對齊後端 Record<string, number>）
+    let timeStats: [String: Int]?
 }
 
 /// 查詢響應
 struct UsageQueryResponse: Codable {
-    let deviceId: String
     let stats: [UsageStatItem]
 }

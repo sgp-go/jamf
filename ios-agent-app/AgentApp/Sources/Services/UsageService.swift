@@ -5,12 +5,8 @@ import DeviceGuardKit
 final class UsageService {
     static let shared = UsageService()
 
-    private var serverURL: String {
-        ReportService.shared.serverURL
-    }
-
-    private var deviceId: String {
-        ReportService.shared.deviceId
+    private var serialNumber: String {
+        ReportService.shared.serialNumber
     }
 
     private init() {}
@@ -24,7 +20,7 @@ final class UsageService {
         }
 
         let payload = UsageUploadPayload(
-            deviceId: deviceId,
+            serialNumber: serialNumber,
             sessionId: statsRequest.sessionId,
             stats: statsRequest.stats.map { item in
                 UsageStatItem(
@@ -32,15 +28,16 @@ final class UsageService {
                     totalMinutes: item.totalMinutes,
                     pickup: item.pickup,
                     maxContinuous: item.maxContinuous,
-                    timeStats: item.timeStats?.map { ts in
-                        TimeStatItem(hour: Int(ts.tag) ?? 0, minutes: ts.minutes)
+                    // 對齊後端 Record<string, number>：時段標籤 → 分鐘數
+                    timeStats: item.timeStats.map { tsList in
+                        Dictionary(tsList.map { (String($0.tag), $0.minutes) }, uniquingKeysWith: { _, last in last })
                     }
                 )
             }
         )
 
-        guard let url = URL(string: "\(serverURL)/api/agent/usage") else {
-            throw ReportError.invalidURL
+        guard let url = ReportService.shared.agentEndpoint("usage") else {
+            throw ReportError.missingTenant
         }
 
         var request = URLRequest(url: url)

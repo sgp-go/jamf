@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var serverURL: String = ""
+    @State private var tenantId: String = ""
     @State private var deviceId: String = ""
     @State private var serialNumber: String = ""
 
@@ -20,6 +21,8 @@ struct SettingsView: View {
                         .textContentType(.URL)
                         .autocapitalization(.none)
                         .keyboardType(.URL)
+                    TextField("Tenant ID", text: $tenantId)
+                        .autocapitalization(.none)
                 }
 
                 Section("Device") {
@@ -67,6 +70,7 @@ struct SettingsView: View {
             }
             .onAppear {
                 serverURL = manager.serverURL
+                tenantId = manager.tenantId
                 deviceId = manager.deviceId
                 serialNumber = manager.serialNumber
             }
@@ -75,6 +79,7 @@ struct SettingsView: View {
 
     private func save() {
         manager.serverURL = serverURL
+        manager.tenantId = tenantId
         manager.deviceId = deviceId
         manager.serialNumber = serialNumber
     }

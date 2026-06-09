@@ -28,7 +28,21 @@ final class ReportService {
         set { UserDefaults.standard.set(newValue, forKey: "serialNumber") }
     }
 
+    /// 租戶 ID（多租戶 API 路徑必需，由 MDM 透過 Managed App Configuration 注入）
+    var tenantId: String {
+        get { managedValue(forKey: "tenantId") ?? UserDefaults.standard.string(forKey: "tenantId") ?? "" }
+        set { UserDefaults.standard.set(newValue, forKey: "tenantId") }
+    }
+
     private init() {}
+
+    /// 構建多租戶 Agent API 端點：`{serverURL}/api/v1/tenants/{tenantId}/agent/{suffix}`。
+    /// tenantId 缺失時回 nil，呼叫端應拋 `ReportError.missingTenant`。
+    func agentEndpoint(_ suffix: String) -> URL? {
+        let tid = tenantId
+        guard !tid.isEmpty else { return nil }
+        return URL(string: "\(serverURL)/api/v1/tenants/\(tid)/agent/\(suffix)")
+    }
 
     /// 收集狀態併發送到伺服器
     func sendReport() async throws {
@@ -48,8 +62,8 @@ final class ReportService {
             reportedAt: ISO8601DateFormatter().string(from: Date())
         )
 
-        guard let url = URL(string: "\(serverURL)/api/agent/report") else {
-            throw ReportError.invalidURL
+        guard let url = agentEndpoint("reports") else {
+            throw ReportError.missingTenant
         }
 
         var request = URLRequest(url: url)
@@ -68,11 +82,13 @@ final class ReportService {
 
 enum ReportError: LocalizedError {
     case invalidURL
+    case missingTenant
     case serverError
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid server URL"
+        case .missingTenant: return "tenantId 未配置（需 MDM 透過 Managed App Configuration 注入）"
         case .serverError: return "Server returned an error"
         }
     }

@@ -72,6 +72,11 @@ final class StatusManager: ObservableObject {
         set { reporter.serialNumber = newValue }
     }
 
+    var tenantId: String {
+        get { reporter.tenantId }
+        set { reporter.tenantId = newValue }
+    }
+
     /// 重新整理今日使用時長統計
     func refreshUsageStats() async {
         // 先處理 Extension 待處理事件，將其轉換為歷史統計
