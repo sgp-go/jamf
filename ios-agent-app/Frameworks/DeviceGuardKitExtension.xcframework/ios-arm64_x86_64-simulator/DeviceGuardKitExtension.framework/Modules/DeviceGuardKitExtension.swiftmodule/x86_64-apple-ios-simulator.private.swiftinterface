@@ -1,7 +1,7 @@
 // swift-interface-format-version: 1.0
-// swift-compiler-version: Apple Swift version 6.2.4 effective-5.10 (swiftlang-6.2.4.1.4 clang-1700.6.4.2)
-// swift-module-flags: -target x86_64-apple-ios17.0-simulator -enable-objc-interop -enable-library-evolution -swift-version 5 -enforce-exclusivity=checked -O -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -module-name DeviceGuardKitExtension
-// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.4
+// swift-compiler-version: Apple Swift version 6.3.2 effective-5.10 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
+// swift-module-flags: -target x86_64-apple-ios17.0-simulator -enable-objc-interop -enable-library-evolution -swift-version 5 -O -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -module-name DeviceGuardKitExtension
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.3.2
 import DeviceActivity
 import DeviceGuardKit
 import FamilyControls
@@ -46,21 +46,11 @@ public enum DGKShieldScenario {
   case defaultGuarding
 }
 public struct DGKShieldConfigurationBuilder {
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func buildSmart(for application: ManagedSettings.Application, appName: Swift.String, primaryColor: UIKit.UIColor, logoImage: UIKit.UIImage?, sharedDefaults: Foundation.UserDefaults?) -> ManagedSettingsUI.ShieldConfiguration
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func buildDefault(appName: Swift.String, primaryColor: UIKit.UIColor, logoImage: UIKit.UIImage?, sharedDefaults: Foundation.UserDefaults?) -> ManagedSettingsUI.ShieldConfiguration
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func build(scenario: DeviceGuardKitExtension.DGKShieldScenario, appName: Swift.String, primaryColor: UIKit.UIColor, logoImage: UIKit.UIImage?) -> ManagedSettingsUI.ShieldConfiguration
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func build(for application: ManagedSettings.Application, appName: Swift.String, primaryColor: UIKit.UIColor, logoImage: UIKit.UIImage?) -> ManagedSettingsUI.ShieldConfiguration
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func buildDefault(appName: Swift.String, primaryColor: UIKit.UIColor, logoImage: UIKit.UIImage?) -> ManagedSettingsUI.ShieldConfiguration
-  #endif
 }
 extension ManagedSettingsUI.ShieldConfiguration {
   public static func simple(title: Swift.String, subtitle: Swift.String, primaryColor: UIKit.UIColor) -> ManagedSettingsUI.ShieldConfiguration

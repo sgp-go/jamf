@@ -1,11 +1,11 @@
 // swift-interface-format-version: 1.0
-// swift-compiler-version: Apple Swift version 6.2.4 effective-5.10 (swiftlang-6.2.4.1.4 clang-1700.6.4.2)
-// swift-module-flags: -target arm64-apple-ios17.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -enforce-exclusivity=checked -O -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -module-name DeviceGuardKit
-// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.2.4
+// swift-compiler-version: Apple Swift version 6.3.2 effective-5.10 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
+// swift-module-flags: -target arm64-apple-ios17.0 -enable-objc-interop -enable-library-evolution -swift-version 5 -O -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -module-name DeviceGuardKit
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=off -interface-compiler-version 6.3.2
 import DeviceActivity
 import FamilyControls
 import Foundation
-import ManagedSettings
+@preconcurrency import ManagedSettings
 import OSLog
 import Swift
 import _Concurrency
@@ -17,11 +17,9 @@ import _SwiftConcurrencyShims
     get
     set
   }
-  #if compiler(>=5.3) && $NonescapableTypes
   final public var sharedDefaults: Foundation.UserDefaults? {
     get
   }
-  #endif
   final public var monitoringConfig: DeviceGuardKit.DGKMonitoringConfig
   final public var logSubsystem: Swift.String
   final public var enableDebugLogging: Swift.Bool
@@ -31,9 +29,7 @@ import _SwiftConcurrencyShims
   final public var onAppGroupLimitReached: ((_ groupId: Swift.String, _ groupName: Swift.String) -> Swift.Void)?
   final public var onStatsReadyForUpload: ((_ stats: DeviceGuardKit.DGKDeviceStatsRequest) async -> Swift.Bool)?
   final public var onScheduleMonitorsUpdated: ((_ type: DeviceGuardKit.DGKScheduleType, _ monitorsCreated: Swift.Int) -> Swift.Void)?
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func configure(appGroupIdentifier: Swift.String, logSubsystem: Swift.String? = nil)
-  #endif
   final public func clearAllSharedData()
   final public var isValid: Swift.Bool {
     get
@@ -72,9 +68,7 @@ public enum DGKShieldState : Swift.String, Swift.Sendable {
   case clear
   case normal
   case blocked
-  #if compiler(>=5.3) && $NonescapableTypes
   public init?(rawValue: Swift.String)
-  #endif
   public typealias RawValue = Swift.String
   public var rawValue: Swift.String {
     get
@@ -103,20 +97,14 @@ extension os.Logger {
   public func errorPrint(_ message: Swift.String)
 }
 @_hasMissingDesignatedInitializers public actor DGKAppGroupManager {
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getSelection() -> FamilyControls.FamilyActivitySelection?
-  #endif
   public static func getBlockedActivities() -> [Swift.String]
   public static func addBlockedActivities(_ value: [Swift.String])
   public static func removeBlockedActivities(_ value: [Swift.String])
   public static func clearAll()
   public static func cleanupExpiredBlockedActivities()
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getAppGroup(for application: ManagedSettings.ApplicationToken) -> DeviceGuardKit.DGKAppGroup?
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getAppGroup(fromActivityName activityName: DeviceActivity.DeviceActivityName) -> DeviceGuardKit.DGKAppGroup?
-  #endif
   @objc deinit
   @available(iOS 13.0, tvOS 13.0, watchOS 6.0, macOS 10.15, *)
   @_semantics("defaultActor") nonisolated final public var unownedExecutor: _Concurrency.UnownedSerialExecutor {
@@ -124,12 +112,8 @@ extension os.Logger {
   }
 }
 @_hasMissingDesignatedInitializers public actor DGKBlackListManager {
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getSelection() -> FamilyControls.FamilyActivitySelection?
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func save(_ selection: FamilyControls.FamilyActivitySelection?)
-  #endif
   public static func invalidateCache()
   public static func clear()
   public static func contains(_ token: ManagedSettings.ApplicationToken) -> Swift.Bool
@@ -145,6 +129,7 @@ extension os.Logger {
   final public func applyTodayMonitorForGroup(_ group: DeviceGuardKit.DGKAppGroup)
   final public func cleanupGroupMonitors(groupId: Swift.String)
   final public func cleanupAllAppGroupMonitors()
+  final public func cleanupExpiredWeekdayMonitors()
   final public func cleanupObsoleteMonitors(activeGroupIds: Swift.Set<Swift.String>)
   final public func stopAppGroupActivities(_ activities: [DeviceActivity.DeviceActivityName])
   final public func checkAndUpdateIfNeeded()
@@ -152,6 +137,25 @@ extension os.Logger {
   final public func getCurrentMonitorCount() -> Swift.Int
   final public func getAppGroupMonitorCount() -> Swift.Int
   @objc deinit
+}
+@_hasMissingDesignatedInitializers public actor DGKDailyResetCoordinator {
+  public static let shared: DeviceGuardKit.DGKDailyResetCoordinator
+  public enum ResetTrigger : Swift.String, Swift.Sendable {
+    case deviceUnlock
+    case sceneActive
+    case bgTaskDaily
+    public init?(rawValue: Swift.String)
+    public typealias RawValue = Swift.String
+    public var rawValue: Swift.String {
+      get
+    }
+  }
+  public func performDailyResetIfNeeded(trigger: DeviceGuardKit.DGKDailyResetCoordinator.ResetTrigger) async
+  @objc deinit
+  @available(iOS 13.0, tvOS 13.0, watchOS 6.0, macOS 10.15, *)
+  @_semantics("defaultActor") nonisolated final public var unownedExecutor: _Concurrency.UnownedSerialExecutor {
+    get
+  }
 }
 @_hasMissingDesignatedInitializers final public class DGKDailyScheduleMonitor : Swift.Sendable {
   public static let shared: DeviceGuardKit.DGKDailyScheduleMonitor
@@ -161,6 +165,7 @@ extension os.Logger {
   final public func forceUpdate(type: DeviceGuardKit.DGKScheduleType)
   final public func getCurrentMonitorCount() -> Swift.Int
   final public func getScheduleMonitorCount() -> Swift.Int
+  final public func cleanupExpiredWeekdayMonitors(type: DeviceGuardKit.DGKScheduleType)
   @objc deinit
 }
 @_hasMissingDesignatedInitializers final public class DGKDeviceControlManager : Swift.Sendable {
@@ -188,13 +193,9 @@ extension os.Logger {
   public static func refresh()
   public static func isNowBlockedSchedule() -> Swift.Bool
   public static func isBlackList(_ token: ManagedSettings.ApplicationToken) -> Swift.Bool
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getTodayTimeSpans() -> Swift.String?
-  #endif
   public static func isAlldayDisable() -> Swift.Bool
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getCurrentMode() -> DeviceGuardKit.DGKShieldState?
-  #endif
   @objc deinit
   @available(iOS 13.0, tvOS 13.0, watchOS 6.0, macOS 10.15, *)
   @_semantics("defaultActor") nonisolated final public var unownedExecutor: _Concurrency.UnownedSerialExecutor {
@@ -206,16 +207,12 @@ extension os.Logger {
   final public func clearDeviceUnlock()
   final public func recordDeviceUnlock()
   final public func getUnlockCount(for date: Swift.String) -> Swift.Int
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func processPendingEvents() async -> DeviceGuardKit.DGKDeviceStatsRequest?
-  #endif
   final public func getAllHistoricalStats() -> [DeviceGuardKit.DGKDailyUsageStats]
   final public func clearHistoricalData(beforeDate: Swift.String)
   final public func clearAllData()
   final public func recordSuccessfulUpload()
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getLastUploadTime() -> Foundation.Date?
-  #endif
   final public func hasPendingEvents() -> Swift.Bool
   final public func getRetryCount() -> Swift.Int
   final public func incrementRetryCount()
@@ -224,12 +221,8 @@ extension os.Logger {
   @objc deinit
 }
 @_hasMissingDesignatedInitializers public actor DGKWhiteListManager {
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func getSelection() -> FamilyControls.FamilyActivitySelection?
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public static func save(_ selection: FamilyControls.FamilyActivitySelection?)
-  #endif
   public static func invalidateCache()
   public static func clear()
   public static func contains(_ token: ManagedSettings.ApplicationToken) -> Swift.Bool
@@ -243,9 +236,7 @@ public struct DGKiOSAppSelection : Swift.Codable, Swift.Equatable, Swift.Sendabl
   public let appTokens: [Swift.String]?
   public let categoryTokens: [Swift.String]?
   public let domainTokens: [Swift.String]?
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(appTokens: [Swift.String]? = nil, categoryTokens: [Swift.String]? = nil, domainTokens: [Swift.String]? = nil)
-  #endif
   public var selection: FamilyControls.FamilyActivitySelection {
     get
   }
@@ -258,9 +249,7 @@ public struct DGKAppGroupScheduleDay : Swift.Codable, Swift.Equatable, Swift.Sen
   public let weekDay: DeviceGuardKit.DGKWeekDay?
   public let enable: Swift.Bool?
   public let limitMinutes: Swift.Int?
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(weekDay: DeviceGuardKit.DGKWeekDay? = nil, enable: Swift.Bool? = nil, limitMinutes: Swift.Int? = nil)
-  #endif
   public var hasValidLimit: Swift.Bool {
     get
   }
@@ -271,14 +260,10 @@ public struct DGKAppGroupScheduleDay : Swift.Codable, Swift.Equatable, Swift.Sen
 public struct DGKAppGroupSchedule : Swift.Codable, Swift.Equatable, Swift.Sendable {
   public let enable: Swift.Bool?
   public let scheduleDays: [DeviceGuardKit.DGKAppGroupScheduleDay]?
-  #if compiler(>=5.3) && $NonescapableTypes
   public var todaySchedule: DeviceGuardKit.DGKAppGroupScheduleDay? {
     get
   }
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(enable: Swift.Bool? = nil, scheduleDays: [DeviceGuardKit.DGKAppGroupScheduleDay]? = nil)
-  #endif
   public static func == (a: DeviceGuardKit.DGKAppGroupSchedule, b: DeviceGuardKit.DGKAppGroupSchedule) -> Swift.Bool
   public func encode(to encoder: any Swift.Encoder) throws
   public init(from decoder: any Swift.Decoder) throws
@@ -288,14 +273,10 @@ public struct DGKAppGroup : Swift.Codable, Swift.Equatable, Swift.Sendable {
   public let name: Swift.String
   public let iosApps: DeviceGuardKit.DGKiOSAppSelection?
   public let schedule: DeviceGuardKit.DGKAppGroupSchedule?
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(id: Swift.String, name: Swift.String, iosApps: DeviceGuardKit.DGKiOSAppSelection? = nil, schedule: DeviceGuardKit.DGKAppGroupSchedule? = nil)
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public var todayLimitMinutes: Swift.Int? {
     get
   }
-  #endif
   public var isTodayEnabled: Swift.Bool {
     get
   }
@@ -309,9 +290,7 @@ public enum DGKScheduleType : Swift.String, Swift.Codable, Swift.CaseIterable, S
   case legalHoliday
   case unknown
   public init(from decoder: any Swift.Decoder) throws
-  #if compiler(>=5.3) && $NonescapableTypes
   public init?(rawValue: Swift.String)
-  #endif
   public typealias AllCases = [DeviceGuardKit.DGKScheduleType]
   public typealias RawValue = Swift.String
   nonisolated public static var allCases: [DeviceGuardKit.DGKScheduleType] {
@@ -328,9 +307,7 @@ public struct DGKScheduleDay : Swift.Codable, Swift.Equatable, Swift.Sendable {
   public let enable: Swift.Bool
   public let limitMinutes: Swift.Int?
   public let timeSpans: [DeviceGuardKit.DGKTimeSpan]
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(weekDay: DeviceGuardKit.DGKWeekDay? = nil, date: Swift.Int? = nil, type: DeviceGuardKit.DGKScheduleType? = nil, enable: Swift.Bool = true, limitMinutes: Swift.Int? = nil, timeSpans: [DeviceGuardKit.DGKTimeSpan] = [])
-  #endif
   public var hasValidLimit: Swift.Bool {
     get
   }
@@ -344,19 +321,13 @@ public struct DGKScheduleDay : Swift.Codable, Swift.Equatable, Swift.Sendable {
 public struct DGKSchedule : Swift.Codable, Swift.Equatable, Swift.Sendable {
   public let enable: Swift.Bool?
   public let scheduleDays: [DeviceGuardKit.DGKScheduleDay]?
-  #if compiler(>=5.3) && $NonescapableTypes
   public var todaySchedule: DeviceGuardKit.DGKScheduleDay? {
     get
   }
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public var tomorrowSchedule: DeviceGuardKit.DGKScheduleDay? {
     get
   }
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(enable: Swift.Bool? = nil, scheduleDays: [DeviceGuardKit.DGKScheduleDay]? = nil)
-  #endif
   public static func == (a: DeviceGuardKit.DGKSchedule, b: DeviceGuardKit.DGKSchedule) -> Swift.Bool
   public func encode(to encoder: any Swift.Encoder) throws
   public init(from decoder: any Swift.Decoder) throws
@@ -367,9 +338,7 @@ public struct DGKTimeSpan : Swift.Codable, Swift.Equatable, Swift.Sendable {
   public var description: Swift.String {
     get
   }
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(startTime: Swift.String? = nil, endTime: Swift.String? = nil)
-  #endif
   public func contains(time: Swift.String) -> Swift.Bool
   public var isCurrentTimeInRange: Swift.Bool {
     get
@@ -416,9 +385,7 @@ public struct DGKDeviceStatsItem : Swift.Codable, Swift.Equatable, Swift.Sendabl
   public let pickup: Swift.Int
   public let maxContinuous: Swift.Int
   public let timeStats: [DeviceGuardKit.DGKTimeStatsItem]?
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(date: Swift.String, totalMinutes: Swift.Int, pickup: Swift.Int, maxContinuous: Swift.Int, timeStats: [DeviceGuardKit.DGKTimeStatsItem]? = nil)
-  #endif
   public static func == (a: DeviceGuardKit.DGKDeviceStatsItem, b: DeviceGuardKit.DGKDeviceStatsItem) -> Swift.Bool
   public func encode(to encoder: any Swift.Encoder) throws
   public init(from decoder: any Swift.Decoder) throws
@@ -426,9 +393,7 @@ public struct DGKDeviceStatsItem : Swift.Codable, Swift.Equatable, Swift.Sendabl
 public struct DGKDeviceStatsRequest : Swift.Codable, Swift.Equatable, Swift.Sendable {
   public let sessionId: Swift.String?
   public let stats: [DeviceGuardKit.DGKDeviceStatsItem]
-  #if compiler(>=5.3) && $NonescapableTypes
   public init(sessionId: Swift.String? = nil, stats: [DeviceGuardKit.DGKDeviceStatsItem])
-  #endif
   public static func == (a: DeviceGuardKit.DGKDeviceStatsRequest, b: DeviceGuardKit.DGKDeviceStatsRequest) -> Swift.Bool
   public func encode(to encoder: any Swift.Encoder) throws
   public init(from decoder: any Swift.Decoder) throws
@@ -447,21 +412,15 @@ public enum DGKWeekDay : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.
   public var calendarWeekdayValue: Swift.Int {
     get
   }
-  #if compiler(>=5.3) && $NonescapableTypes
   public init?(calendarWeekday: Swift.Int)
-  #endif
   public var sortOrder: Swift.Int {
     get
   }
   public static func < (lhs: DeviceGuardKit.DGKWeekDay, rhs: DeviceGuardKit.DGKWeekDay) -> Swift.Bool
-  #if compiler(>=5.3) && $NonescapableTypes
   public static var today: DeviceGuardKit.DGKWeekDay? {
     get
   }
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   public init?(rawValue: Swift.String)
-  #endif
   public typealias AllCases = [DeviceGuardKit.DGKWeekDay]
   public typealias RawValue = Swift.String
   nonisolated public static var allCases: [DeviceGuardKit.DGKWeekDay] {
@@ -475,18 +434,12 @@ public enum DGKWeekDay : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.
   public static let shared: DeviceGuardKit.DGKAppGroupStorageManager
   final public func saveAppGroups(_ groups: [DeviceGuardKit.DGKAppGroup])
   final public func loadAppGroups() -> [DeviceGuardKit.DGKAppGroup]
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getLastUpdateTime() -> Foundation.Date?
-  #endif
   final public func setLastAppliedDate(_ date: Foundation.Date, groupId: Swift.String)
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getLastAppliedDate(groupId: Swift.String) -> Foundation.Date?
-  #endif
   final public func needsUpdateForToday(groupId: Swift.String) -> Swift.Bool
   final public func getTodayAppGroups() -> [DeviceGuardKit.DGKAppGroup]
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getTodaySchedule(groupId: Swift.String) -> DeviceGuardKit.DGKAppGroupScheduleDay?
-  #endif
   final public func clearAllCache()
   final public func getAppGroupsSummary() -> Swift.String
   final public func printAllGroupsStatus()
@@ -495,23 +448,13 @@ public enum DGKWeekDay : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.
 @_hasMissingDesignatedInitializers final public class DGKScheduleStorageManager : Swift.Sendable {
   public static let shared: DeviceGuardKit.DGKScheduleStorageManager
   final public func saveSchedule(_ schedule: DeviceGuardKit.DGKSchedule, type: DeviceGuardKit.DGKScheduleType)
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func loadSchedule(type: DeviceGuardKit.DGKScheduleType) -> DeviceGuardKit.DGKSchedule?
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getLastUpdateTime(type: DeviceGuardKit.DGKScheduleType) -> Foundation.Date?
-  #endif
   final public func setLastAppliedDate(_ date: Foundation.Date, type: DeviceGuardKit.DGKScheduleType)
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getLastAppliedDate(type: DeviceGuardKit.DGKScheduleType) -> Foundation.Date?
-  #endif
   final public func needsUpdateForToday(type: DeviceGuardKit.DGKScheduleType) -> Swift.Bool
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getTodaySchedule(type: DeviceGuardKit.DGKScheduleType) -> DeviceGuardKit.DGKScheduleDay?
-  #endif
-  #if compiler(>=5.3) && $NonescapableTypes
   final public func getTomorrowSchedule(type: DeviceGuardKit.DGKScheduleType) -> DeviceGuardKit.DGKScheduleDay?
-  #endif
   final public func clearScheduleCache(type: DeviceGuardKit.DGKScheduleType)
   final public func clearAllScheduleCache()
   final public func saveSchedules(_ schedules: [(schedule: DeviceGuardKit.DGKSchedule, type: DeviceGuardKit.DGKScheduleType)])
@@ -523,6 +466,9 @@ public enum DGKWeekDay : Swift.String, Swift.Codable, Swift.CaseIterable, Swift.
 extension DeviceGuardKit.DGKShieldState : Swift.Equatable {}
 extension DeviceGuardKit.DGKShieldState : Swift.Hashable {}
 extension DeviceGuardKit.DGKShieldState : Swift.RawRepresentable {}
+extension DeviceGuardKit.DGKDailyResetCoordinator.ResetTrigger : Swift.Equatable {}
+extension DeviceGuardKit.DGKDailyResetCoordinator.ResetTrigger : Swift.Hashable {}
+extension DeviceGuardKit.DGKDailyResetCoordinator.ResetTrigger : Swift.RawRepresentable {}
 extension DeviceGuardKit.DGKScheduleType : Swift.Equatable {}
 extension DeviceGuardKit.DGKScheduleType : Swift.Hashable {}
 extension DeviceGuardKit.DGKScheduleType : Swift.RawRepresentable {}

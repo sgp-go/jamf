@@ -1,4 +1,3 @@
 framework module DeviceGuardKit {
   header "DeviceGuardKit-Swift.h"
-  requires objc
 }

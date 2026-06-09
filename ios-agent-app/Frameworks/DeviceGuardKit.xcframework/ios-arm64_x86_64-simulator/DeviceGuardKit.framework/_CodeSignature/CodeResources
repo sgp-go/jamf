@@ -6,55 +6,55 @@
 	<dict>
 		<key>Headers/DeviceGuardKit-Swift.h</key>
 		<data>
-		jEk69veGvlizKouuSPjwqmQZwlg=
+		ONXyYx9IE1knCUgnc2WNqb4yzmM=
 		</data>
 		<key>Info.plist</key>
 		<data>
-		XFy3ETiKi5nSFDzy9kooJdzZxLw=
+		BgRklf3Q0E3k/784Y+t2EVccz20=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.abi.json</key>
 		<data>
-		pgPGrRdTW12inU/OV+RMWchHcAY=
+		lmre4KJ5jhvXW8OzfOprLzd1bU8=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.private.swiftinterface</key>
 		<data>
-		kgEsuA1FFpmWGojl0iv5+43K/BM=
+		8Wb1PUUmD9L0tbgbMz3OenTcG+o=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.swiftdoc</key>
 		<data>
-		swIJUpwg3gTjgb5Im4/kEBa+0qs=
+		cOjAxaz5nDEtGXqyWaK+w2pDSjY=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface</key>
 		<data>
-		kgEsuA1FFpmWGojl0iv5+43K/BM=
+		8Wb1PUUmD9L0tbgbMz3OenTcG+o=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.swiftmodule</key>
 		<data>
-		j0cbkdonp/SsvKeLH+aZWoJ6PRs=
+		6JP0Pnu252V6b+2DE/P3AYXOe70=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.abi.json</key>
 		<data>
-		pgPGrRdTW12inU/OV+RMWchHcAY=
+		lmre4KJ5jhvXW8OzfOprLzd1bU8=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.private.swiftinterface</key>
 		<data>
-		8vJf4TVoQfP+wiQbDJAdO05mSeE=
+		EWYJGiIC8FUQx5cmo1GW2pc1N8I=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.swiftdoc</key>
 		<data>
-		SnOARHHe98zS9uTk0HIleolGE2s=
+		TVm/nCOrwsw7KpTiMNfA3ytGi4E=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.swiftinterface</key>
 		<data>
-		8vJf4TVoQfP+wiQbDJAdO05mSeE=
+		EWYJGiIC8FUQx5cmo1GW2pc1N8I=
 		</data>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.swiftmodule</key>
 		<data>
-		EOyuDanO8IHt1xoFaOO5c6DedyM=
+		V9PhHsZjMiWsv3/xXG1xMZuXU6s=
 		</data>
 		<key>Modules/module.modulemap</key>
 		<data>
-		QU8FOr9H4sUHfZzWcyXGbivSoLw=
+		JrCnMwwpwobZPsWhuGPfQFNK5q0=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -63,84 +63,84 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			jBuKN5Bc/t4GVos+oMZrhbczWQvIdOUDbGqTXyI41vQ=
+			6OX/nxEbnSmvswqPP8X931Rxp1U6giM41YGrEqvk950=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.abi.json</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			+LYvU0/ui90Jp/MZJVbEBhJB3UNSwF5Jt83WPnVE1KQ=
+			WE2IkOesdjq1nnwVe4fRpwQwbcCjqY7d7EYJxFfMQFo=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.private.swiftinterface</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			yh4Y+7VU37UTT26Gp5j5wJucYiNOlXnQcHBQ0VNTfVE=
+			Dgp2NEopan7FCR0zN7EO+JNjvkaxGglawbys9dTj2Ys=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.swiftdoc</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			++c7OMJj5JLdVLzKa4Tnq2id42AMagYlT0n8SyS8dMo=
+			foj2iHcojXXG26Us7JAH5JoJlzAy9zCLpE3lL4QDWvk=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.swiftinterface</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			yh4Y+7VU37UTT26Gp5j5wJucYiNOlXnQcHBQ0VNTfVE=
+			Dgp2NEopan7FCR0zN7EO+JNjvkaxGglawbys9dTj2Ys=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/arm64-apple-ios-simulator.swiftmodule</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			ciWrzr7be4CidrhdCEG/0+Hm4H45QwE8VICdaDpB6UE=
+			jovwuMjgrlZquH8l03C7UffYZLC81RtdszpzU/CF/kM=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.abi.json</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			+LYvU0/ui90Jp/MZJVbEBhJB3UNSwF5Jt83WPnVE1KQ=
+			WE2IkOesdjq1nnwVe4fRpwQwbcCjqY7d7EYJxFfMQFo=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.private.swiftinterface</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			wTzD6ZnixCITOWHBGY9Om4qkjYqsVmBcsBdmq2whV/0=
+			FuWsDmEAgh/K6BsEMF+ZiyFUL0todC3ZZt1dcosCoE8=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.swiftdoc</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			1iYsdttNVBA1MTPHBEguI2DwpTNirDA2jccj09f1vtw=
+			vJINnVbEZ4bvZ+FiBkoSPBNYRUcFlXA4YzfNr1En4/8=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.swiftinterface</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			wTzD6ZnixCITOWHBGY9Om4qkjYqsVmBcsBdmq2whV/0=
+			FuWsDmEAgh/K6BsEMF+ZiyFUL0todC3ZZt1dcosCoE8=
 			</data>
 		</dict>
 		<key>Modules/DeviceGuardKit.swiftmodule/x86_64-apple-ios-simulator.swiftmodule</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			hxw4I7Yj0E2/PzD1FumDI3q7vmgoxMTmWXKRnUW8C2c=
+			S0VB9Ju7/NoxEJnuIimDeFzFl+4MIkFP+9a/eZp6i58=
 			</data>
 		</dict>
 		<key>Modules/module.modulemap</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			fj26bwBun/Qirx//5yUTXl3WqBo3cf0uNpasPdIXCv4=
+			eJRtBi1ZwfYe8ctRLNF+4k/cI2Kf5Spza2O9+1+Sihk=
 			</data>
 		</dict>
 	</dict>

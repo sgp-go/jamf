@@ -53,9 +53,9 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 
 ## DeviceGuardKit 整合
 
-- SDK 來源：閉源 XCFramework 二進位發佈（原始碼倉庫：`https://github.com/x-innovative/DeviceGuardKit`，私有）
+- SDK 來源：原始碼現位於金色花 iOS monorepo `~/Innovative/jinsehua/ios/Packages/DeviceGuardKit`（舊倉庫 `github.com/x-innovative/DeviceGuardKit` 已 archived，停在 2026-02-27，勿再使用）
 - 整合方式：本地 XCFramework（`ios-agent-app/Frameworks/DeviceGuardKit.xcframework` + `DeviceGuardKitExtension.xcframework`）
-- 構建方式：Clone 原始碼到本地後執行 `Scripts/build-xcframework.sh`，產出包含真機（arm64）+ 模擬器（arm64_x86_64）架構
+- 構建方式：以 jinsehua 那份原始碼打包，產出需含真機（arm64）+ 模擬器（arm64_x86_64）雙架構。⚠️ 注意 jinsehua 自帶的 `Scripts/build-xcframework.sh` **僅打真機**，重打雙架構時需用真機 + 模擬器各 archive 一次再 `-create-xcframework` 合併
 - App Group / Extension Bundle ID：透過 `ios-agent-app/Project.swift` 頂部常數配置（`appGroupId`、`extensionBundleId`）
 - 不需要 FamilyControls 授權，DeviceActivityMonitor 直接可用
 - 使用時長資料透過 `DGKUsageStatsManager.processPendingEvents()` 取得，上報到 `POST /api/agent/usage`
