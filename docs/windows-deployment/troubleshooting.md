@@ -2,7 +2,7 @@
 
 > 📌 **本文自 `docs/archived/windows-mdm-troubleshooting.md` 遷入**——錯誤碼 / OMA-DM / MSIX / WNS / enrollment 各類症狀的排查仍**高度適用**，是運維必備。
 >
-> ⚠️ 開發期視角的工具表述以生產文檔為準：① SQL 範例為 SQLite，生產是 PostgreSQL（語法略異）；② `ngrok inspector` 為開發期抓包，生產走反向代理日誌；③ 舊 API 路徑 `/api/mdm/...`（無 `win`）在多租戶版為 `/api/mdm/win/...`。整體部署見 [backend-deployment.md](backend-deployment.md)，設備運維見 [device-lifecycle.md](device-lifecycle.md)。
+> ⚠️ 開發期視角的工具表述以生產文檔為準：① SQL 範例為 SQLite，生產是 PostgreSQL（語法略異）；② `ngrok inspector` 為開發期抓包，生產走反向代理日誌；③ 舊 API 路徑 `/api/mdm/...`（無 `win`）在多租戶版為 `/api/mdm/win/...`。整體部署見 [backend-deployment.md](../backend-deployment.md)，設備運維見 [device-lifecycle.md](device-lifecycle.md)。
 
 > 本案開發過程踩過的 12 個坑 + 排查工具。新接手遇問題優先查此頁。
 

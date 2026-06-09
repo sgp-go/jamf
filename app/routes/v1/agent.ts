@@ -10,12 +10,14 @@ import {
   saveAgentReport,
   upsertUsageStats,
 } from "~/services/agent.ts";
-import { handleBitLockerOnReport } from "~/services/bitlocker.ts";
-import { handleLapsOnCheckin, handleLapsOnReport } from "~/services/laps.ts";
+import {
+  type AgentReportHooks,
+  directAgentReportHooks,
+} from "~/services/agent-report-hooks.ts";
 import {
   authorizeAgentReport,
   extractBearerToken,
-} from "~/services/install-agent.ts";
+} from "~/services/agent-auth.ts";
 import { verifyUsageSignature } from "~/services/usage-signature.ts";
 import { publishEvent } from "~/services/webhooks/index.ts";
 
@@ -379,6 +381,15 @@ const listUsageRoute = createRoute({
 
 export const agentApp = new OpenAPIHono({ defaultHook: validationFailedHook });
 
+/**
+ * 上報副作用接縫：預設直連（LAPS / BitLocker）。拆為獨立部署且無共用 DB 時，
+ * entry point 可 setAgentReportHooks 注入事件版實現，route 零改動。
+ */
+let reportHooks: AgentReportHooks = directAgentReportHooks;
+export function setAgentReportHooks(hooks: AgentReportHooks): void {
+  reportHooks = hooks;
+}
+
 async function resolveDeviceBySerial(opts: {
   tenantId: string;
   serialNumber: string;
@@ -426,24 +437,17 @@ agentApp.openapi(reportRoute, async (c) => {
     reportedAt: body.reportedAt,
   });
 
-  // 非阻塞 LAPS + BitLocker 處理（Windows 設備）
-  if (body.extraData && (body.extraData as Record<string, unknown>).platform === "windows") {
-    const winExtra = body.extraData as Record<string, unknown>;
-    void handleLapsOnReport({
+  // 非阻塞上報副作用（Windows LAPS + BitLocker），經接縫注入；
+  // 平台判斷收斂到 hook 實現內，route 保持平台無關
+  void reportHooks
+    .onReport({
       tenantId,
       deviceId: device.id,
-      extraData: winExtra,
-    }).catch((err) => {
-      console.error("[laps] handleLapsOnReport failed", err);
+      extraData: (body.extraData ?? {}) as Record<string, unknown>,
+    })
+    .catch((err) => {
+      console.error("[agent.report] side-effect hook failed", err);
     });
-    void handleBitLockerOnReport({
-      tenantId,
-      deviceId: device.id,
-      extraData: winExtra,
-    }).catch((err) => {
-      console.error("[bitlocker] handleBitLockerOnReport failed", err);
-    });
-  }
 
   // 非阻塞觸發 webhook：失敗不影響 Agent 上報成功，但會在 webhook_deliveries
   // 留 pending row 由 scheduler 重試
@@ -487,7 +491,7 @@ agentApp.openapi(checkinRoute, async (c) => {
 
   // 上線即觸發 / 確認 LAPS 輪換（不等每日 report 週期），回傳待辦動作。
   // 內部容錯：觸發失敗不影響 checkin 上線信號成立。
-  const actions = await handleLapsOnCheckin({
+  const actions = await reportHooks.onCheckin({
     tenantId,
     deviceId: device.id,
     lapsRotationId: body.lapsRotationId,

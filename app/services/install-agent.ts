@@ -377,44 +377,5 @@ export async function verifyAgentToken(opts: {
   return presented === row.agentTokenHash;
 }
 
-/**
- * Agent endpoint 鑑權門檻：
- *
- * - 若 device 已透過 install-agent 簽發 token（agent_token_hash 非 null）→
- *   要求必須帶 Authorization: Bearer <token>，且匹配；不過拋 401
- * - 若 device 尚未簽發 token（agent_token_hash=null）→ 視為「opt-out」尚未啟用
- *   token 機制，允許不帶 token 上報（兼容 iOS 既有 Agent App 行為）
- *
- * 這個設計讓 Windows install-agent 流程跑完後自動進入「強制 token」模式，
- * iOS 暫不變；後續 iOS 走 Managed App Configuration 注入 token 後同樣升級為強制。
- *
- * @param device device row（必須含 agent_token_hash 欄位）
- * @param token  從 Authorization: Bearer 取出的 raw token（無則為 null）
- */
-export async function authorizeAgentReport(opts: {
-  device: { id: string; agentTokenHash: string | null };
-  token: string | null;
-}): Promise<void> {
-  const { device, token } = opts;
-  // 未簽發 token → 兼容模式（iOS 既有）
-  if (!device.agentTokenHash) return;
-
-  if (!token) {
-    throw new AppError(
-      401,
-      "agent_token_required",
-      "Device has agent token issued; request must include Authorization: Bearer <token>",
-    );
-  }
-  const presented = createHash("sha256").update(token).digest("hex");
-  if (presented !== device.agentTokenHash) {
-    throw new AppError(401, "agent_token_invalid", "Invalid agent token");
-  }
-}
-
-/** 從 Authorization header 解出 Bearer token 值；無則 null。 */
-export function extractBearerToken(authorizationHeader: string | undefined): string | null {
-  if (!authorizationHeader) return null;
-  const match = /^Bearer\s+(.+)$/i.exec(authorizationHeader.trim());
-  return match?.[1] ?? null;
-}
+// authorizeAgentReport / extractBearerToken 已抽到 ~/services/agent-auth.ts
+// （Agent telemetry 服務需要它們，但不應依賴本模組的 Windows MSI 派發邏輯）。

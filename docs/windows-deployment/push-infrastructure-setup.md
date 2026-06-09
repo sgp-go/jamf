@@ -2,7 +2,7 @@
 
 > **適用對象**：台灣團隊後端工程師。
 > **目的**：獨立部署環境從零自建 WNS 秒級推送整套資產。**這是生產部署的硬前提之一**——不自建則只能降級到 polling（分鐘級）下發命令。
-> **前提**：已有一台 Windows 構建機（見 [build-machine-setup.md](build-machine-setup.md)）+ 後端已部署（見 [backend-deployment.md](backend-deployment.md)）。
+> **前提**：已有一台 Windows 構建機（見 [build-machine-setup.md](build-machine-setup.md)）+ 後端已部署（見 [backend-deployment.md](../backend-deployment.md)）。
 
 ---
 
