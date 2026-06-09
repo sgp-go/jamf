@@ -77,9 +77,15 @@ public sealed class StartupCheckinService : BackgroundService
             var parsed = await response.Content
                 .ReadFromJsonAsync<AgentCheckinResponse>(JsonOptions, stoppingToken);
 
+            // checkin 回傳的 actions 為「告知式（observational）」，非命令式：
+            // 後端 handleLapsOnCheckin 已說明「密碼走 CSP，此處僅告知」。LAPS / BitLocker
+            // 等實際執行一律走 Registry 信箱 → 各自 Watcher（LapsWatcher / BitLockerWatcher，
+            // 已真機驗證）。此處刻意不依 actions 執行任何動作，避免與 Watcher 雙重執行 /
+            // 邏輯分叉；僅記錄數量供診斷。後端若未來新增需 agent 主動執行的 action 類型，
+            // 屆時才在此實作對應 handler。
             var actions = parsed?.Data?.Actions;
             _logger.LogInformation(
-                "Startup checkin accepted: deviceId={DeviceId} actions={Count}",
+                "Startup checkin accepted: deviceId={DeviceId} actions={Count} (observational; execution via Registry watchers)",
                 parsed?.Data?.DeviceId, actions?.Count ?? 0);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

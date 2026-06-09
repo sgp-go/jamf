@@ -1,6 +1,6 @@
 # CoGrow MDM 對接指南（給台灣後端團隊）
 
-> **版本**：v0.3（2026-06-09）
+> **版本**：v0.4（2026-06-09）
 > **受眾**：台灣後端對接 CoGrow MDM Service API 的開發人員
 > **Source of Truth**：OpenAPI 互動式文件 `https://<host>/docs`（Scalar UI），本文補充設計慣例與整合流程
 
@@ -68,7 +68,7 @@ tenant (買單方／教育局／合約主體)
 | **device** | 端點設備（iPad / Windows 學生機），platform=`apple` 或 `windows` |
 | **command** | MDM 命令（LOCK / WIPE / REBOOT / ENABLE_LOST_MODE 等） |
 | **profile** | 配置描述檔（CSP payload 的集合） |
-| **agent token** | install-agent API 為單一 device 簽發的 Bearer token |
+| **agent token** | 為單一 device 簽發的 Bearer token（Windows 經 install-agent；iOS 經 agent-token 端點） |
 
 ### device_group 不存學校資料
 
@@ -160,13 +160,21 @@ timestamp 為 Unix 秒，伺服器容忍 ±5 分鐘（NTP 同步即可）。
 
 ### 4.2 Agent API（設備 → 我方）
 
-設備使用 `install-agent` 簽發的 token：
+設備上報帶 Bearer token：
 ```
 Authorization: Bearer <agent_token>
 ```
 
-- iOS 設備：未派 token 時可不帶（anonymous 相容）
-- Windows 設備：強制要求 token，否則 401
+token 簽發來源依平台不同，但**鑑權機制一致**：一旦某設備被簽發過 token（`agent_token_hash` 非 null），其後所有上報強制帶匹配 token，否則 401（`agent_token_required` / `agent_token_invalid`）。
+
+| 平台 | token 來源 | 注入方式 |
+|---|---|---|
+| **Windows** | `install-agent` API 簽發 | MSI public property 自動寫入 HKLM，Agent 啟動讀取 |
+| **iOS** | `POST .../devices/{deviceId}/agent-token` 簽發 | 你方取得 raw token 後，作為 `agentToken` 鍵注入該設備的 Jamf Managed App Configuration |
+
+> **iOS 已不再走匿名上報**。部署 iOS Agent 時須先為設備簽發 token 並注入 managed config，
+> 詳見 [`ios-deployment/managed-app-config.md`](./ios-deployment/managed-app-config.md)。
+> 尚未簽發 token 的設備（過渡期）仍相容不帶 token 上報，但生產環境應一律簽發。
 
 ### 4.3 Webhook 接收（我方 → 你方）
 
@@ -238,6 +246,7 @@ Authorization: Bearer <agent_token>
 |---|---|---|
 | `POST` | `/admin/tenants/{tid}/devices/{did}/transfer` | 跨校轉移（改分組 + 觸發 Wipe） |
 | `POST` | `/admin/tenants/{tid}/devices/{did}/install-agent` | 一鍵派 Agent MSI + 注入配置（Windows） |
+| `POST` | `/admin/tenants/{tid}/devices/{did}/agent-token` | 簽發 Agent token（不派 App；iOS 注入 managed config / 撤銷換發） |
 | `POST` | `/admin/tenants/{tid}/agent-rollout` | 灰度推送 Agent（by deviceIds / count / percentage） |
 | `GET` | `/admin/tenants/{tid}/agent-rollout/health` | 灰度健康驗證（偵測靜默失敗） |
 
@@ -330,24 +339,30 @@ Authorization: Bearer <agent_token>
    POST /admin/tenants/{tid}/jamf-instances/{iid}/sync-devices
    ← 我方 upsert 到 mdm_devices（platform="apple"）
 
-5. iOS Agent App 部署
+5. 為設備簽發 Agent token（iOS 無 install-agent，需單獨簽發）
+   POST /admin/tenants/{tid}/devices/{deviceId}/agent-token
+   ← { deviceId, agentToken, issuedAt }   // agentToken 僅此回傳一次
+
+6. iOS Agent App 部署
    我方 ABM 派發 Custom App → 你方 MDM 透過 InstallApplication
    + ManagedConfiguration 注入以下鍵（App 讀 UserDefaults "com.apple.configuration.managed"）：
      - serverURL    : "https://api.cogrow.com"   // 基礎 host（App 自行拼多租戶路徑）
      - tenantId     : "<tenant uuid>"            // 必填，缺則 App 不上報
      - serialNumber : "<設備序號>"                // 必填，iOS 讀不到硬體序號 → 必須 MDM 注入
+     - agentToken   : "<步驟 5 的 agentToken>"    // 必填，上報鑑權；缺則被後端 401（已簽發後）
      - deviceId     : "<可選，預設用 Vendor UUID>"
-   注意：iOS 走匿名上報，**不需** agent_token
 
-6. Agent 每日錯峰上報（App 用 serverURL + tenantId 拼出下列路徑）
+7. Agent 每日錯峰上報（App 用 serverURL + tenantId 拼路徑，帶 Bearer agentToken）
    POST {serverURL}/api/v1/tenants/{tenantId}/agent/reports
    POST {serverURL}/api/v1/tenants/{tenantId}/agent/usage
 
-7. 你方收到 webhook agent.reported → 更新你方設備狀態
+8. 你方收到 webhook agent.reported → 更新你方設備狀態
 ```
 
-> ⚠️ **iOS Agent App 自 v? 起改用多租戶路徑**。舊版打的是單租戶 `/api/agent/report`（已不存在），
-> 升級後必須由 MDM 注入 `tenantId`，否則 App 拋 `missingTenant` 不上報。`serialNumber` 是後端設備標識（非 deviceId）。
+> ⚠️ **iOS Agent App 多租戶 + token 契約**：必須由 MDM 注入 `tenantId`（缺則拋 `missingTenant` 不上報）
+> 與 `agentToken`（簽發後缺則被後端 401）。`serialNumber` 是後端設備標識（非 deviceId）。
+> 完整鍵契約、token 簽發流程、SSID/entitlement 說明見
+> [`ios-deployment/managed-app-config.md`](./ios-deployment/managed-app-config.md)。
 
 ### iOS 命令路由
 
@@ -638,3 +653,4 @@ function verifyCoGrowWebhook(opts: {
 | 2026-05-26 | v0.1 | 首版（W1 完成版，Windows 為主） |
 | 2026-05-28 | v0.2 | W2 全部完成：OMA-DM webhook / CRUD / 跨平台命令 / Profile 引擎 / OpenAPI |
 | 2026-06-09 | **v0.3** | **W3-W5 全落地**：+iOS Jamf 整合全流程 / +LAPS 密碼託管 / +BitLocker 靜默加密 / +Agent checkin / +灰度推送+健康驗證 / +HMAC 簽名 / +配置描述檔+策略預設 / +合規評估 / +審計日誌 / 端點清單從 ~20 擴充至 ~70 |
+| 2026-06-09 | **v0.4** | **iOS 對接補完**：iOS 上報改強制 token（新增 `POST .../devices/{did}/agent-token` 簽發端點 + `agentToken` managed config 鍵）/ 新增 `docs/ios-deployment/`（managed config 鍵契約、ABM Custom App 分發、APNs 憑證管理、iOS App 更新策略）/ §4.2 §6 同步更新 |
