@@ -50,6 +50,10 @@ const deviceItemSchema = z
   .object({
     id: z.string().uuid().openapi({ example: "9d4c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c" }),
     tenantId: z.string().uuid().openapi({ example: "6f9c2b8a-3e4d-4f5b-9c1a-7d8e9f0a1b2c" }),
+    platform: z.enum(["apple", "windows"]).openapi({
+      description: "設備平台（決定命令路由與可用功能集）",
+      example: "apple",
+    }),
     deviceGroupId: z.string().uuid().nullable().openapi({
       description: "設備分組 ID；null = 未分組",
     }),
@@ -234,6 +238,7 @@ function toCommandHistoryItem(row: {
 function toItem(row: {
   id: string;
   tenantId: string;
+  platform: "apple" | "windows";
   deviceGroupId: string | null;
   jamfInstanceId: string | null;
   serialNumber: string | null;
@@ -249,6 +254,7 @@ function toItem(row: {
   return {
     id: row.id,
     tenantId: row.tenantId,
+    platform: row.platform,
     deviceGroupId: row.deviceGroupId,
     jamfInstanceId: row.jamfInstanceId,
     serialNumber: row.serialNumber,
