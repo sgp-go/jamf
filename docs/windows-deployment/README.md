@@ -9,7 +9,7 @@
 
 | 文件 | 說明 |
 |---|---|
-| [backend-deployment.md](backend-deployment.md) | 後端服務生產部署：Deno 服務常駐（systemd/docker）→ PostgreSQL + migration → 反向代理公網 HTTPS → 完整 env 清單 → 本地/生產區分 |
+| [../backend-deployment.md](../backend-deployment.md) | 後端服務生產部署（**跨平台，已移至 `docs/` 頂層**）：Deno 服務常駐（systemd/docker）→ PostgreSQL + migration → 反向代理公網 HTTPS → 完整 env 清單 → 本地/生產區分 → 可選雙服務部署 |
 | [build-machine-setup.md](build-machine-setup.md) | 構建機環境：一台 Windows 機承擔三類構建（Agent MSI / push MSIX / `.ppkg`）的工具鏈準備 + 規避大檔下載策略 |
 | [push-infrastructure-setup.md](push-infrastructure-setup.md) | Push 推送自建 playbook：Microsoft Store 註冊 → WNS 憑據 → build push MSIX → cert 生成 → 寫 env 驗證（全域一套，秒級推送的硬前提） |
 
@@ -43,7 +43,7 @@
 
 | 前提 | 對應文檔 |
 |------|---------|
-| MDM 後端部署 + 公網 HTTPS（有效 CA，Windows 拒絕自簽 TLS）+ PostgreSQL + `.env` | [backend-deployment.md](backend-deployment.md) |
+| MDM 後端部署 + 公網 HTTPS（有效 CA，Windows 拒絕自簽 TLS）+ PostgreSQL + `.env` | [../backend-deployment.md](../backend-deployment.md) |
 | 一台 Windows 構建機（Agent MSI + push MSIX + ICD 編譯 `.ppkg`） | [build-machine-setup.md](build-machine-setup.md) |
 | Push 推送整套自建（Store 註冊 → WNS 憑據 → push MSIX → cert） | [push-infrastructure-setup.md](push-infrastructure-setup.md) |
 
