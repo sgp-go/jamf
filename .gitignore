@@ -48,3 +48,8 @@ dist/
 .tsbuildinfo
 *.tsbuildinfo
 app/db/migrations/meta/_journal.json.bak
+
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+xcuserdata/
