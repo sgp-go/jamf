@@ -98,21 +98,23 @@ fi
 ### 流程（需停機窗口或只讀窗口）
 
 ```
-1. 生成新金鑰 NEW_KEY（§3），與舊金鑰 OLD_KEY 同時在手。
+1. 生成新金鑰 NEW_KEY（§3），與舊金鑰 OLD_KEY 同時在手（皆 base64 字串）。
 2. 進維護窗口：暫停所有會寫 *_enc 欄位的操作
    （install-agent / laps-rotate / mdm-config / jamf-instances 寫入 / DEP token 上傳）。
-3. 跑一次性 re-encrypt 腳本：
-   對每張含 *_enc 的表逐行：
-     plain = decryptSecret_with(OLD_KEY, row.xxx_enc)
-     row.xxx_enc = encryptSecret_with(NEW_KEY, plain)
-   涵蓋表：mdm_config / laps_* / bitlocker_* / jamf_instances / asm_instances
-4. 全表重寫完成後，將進程 env 的 DATA_ENCRYPTION_KEY 切為 NEW_KEY，重啟。
-5. 抽樣驗證：GET laps-password / bitlocker-recovery 能正常解密明文。
-6. 安全銷毀 OLD_KEY（KMS 標記停用 + 移除離線副本），保留審計記錄。
+3. 先 dry-run 預檢（不寫庫，確認全部密文都能用 OLD_KEY 解開）：
+     deno task reencrypt-secrets --old-key <OLD_KEY> --new-key <NEW_KEY>
+4. 確認 dry-run 通過後，正式輪換（單事務，中途失敗整體 rollback）：
+     deno task reencrypt-secrets --old-key <OLD_KEY> --new-key <NEW_KEY> --execute
+   涵蓋表：jamf_instances / mdm_windows_laps / mdm_windows_bitlocker /
+           self_mdm_configs / dep_tokens（含所有 *_enc 欄位）
+5. 將進程 env 的 DATA_ENCRYPTION_KEY 切為 NEW_KEY，重啟服務。
+6. 抽樣驗證：GET laps-password / bitlocker-recovery 能正常解密明文。
+7. 安全銷毀 OLD_KEY（KMS 標記停用 + 移除離線副本），保留審計記錄。
 ```
 
-> **re-encrypt 腳本尚未實作**（backlog）。輪換前需先寫該維運腳本（建議放 `app/scripts/`，複用 `secrets.ts` 的 encrypt/decrypt，但參數化金鑰來源）。**不要**在 drizzle migration 鏈做這件事 —— 它依賴運行期 env，不是 schema 變更。
-> **回滾**：步驟 4 切換前，舊密文+OLD_KEY 仍完全可用；切換後若發現問題，需用 OLD_KEY 反向再跑一次步驟 3。故 OLD_KEY 在驗證通過（步驟 5）前**不可銷毀**。
+> **腳本**：[`app/scripts/reencrypt-secrets.ts`](../app/scripts/reencrypt-secrets.ts)（`deno task reencrypt-secrets`）。顯式傳新舊兩把金鑰，**不從 env 讀**（避免靠切換 env 製造併發污染）；底層用 `secrets.ts` 的 `encryptWith` / `decryptWith`。legacy 明文行會在輪換時順帶升級為密文。**不要**放進 drizzle migration 鏈 —— 它依賴運行期金鑰，不是 schema 變更。
+> **重跑保護**：腳本逐行用 OLD_KEY 解密，若某行已是 NEW_KEY 密文（誤重跑）→ GCM 認證失敗、整體中止不寫入。先跑 dry-run（步驟 3）即可暴露。
+> **回滾**：步驟 5 切換前，舊密文 + OLD_KEY 仍完全可用；切換後若發現問題，把 `--old-key` / `--new-key` 對調再 `--execute` 一次即反向還原。故 OLD_KEY 在驗證通過（步驟 6）前**不可銷毀**。
 
 ---
 

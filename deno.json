@@ -14,7 +14,8 @@
     "db:seed": "deno run -A --env-file=.env app/db/seed.ts",
     "load-test": "deno run -A --env-file=.env app/scripts/load-test.ts",
     "auto-rollback": "deno run -A --env-file=.env app/scripts/auto-rollback.ts",
-    "verify-auto-rollback": "deno run -A --env-file=.env app/scripts/verify-auto-rollback.ts"
+    "verify-auto-rollback": "deno run -A --env-file=.env app/scripts/verify-auto-rollback.ts",
+    "reencrypt-secrets": "deno run -A --env-file=.env app/scripts/reencrypt-secrets.ts"
   },
   "imports": {
     "~/": "./app/",
