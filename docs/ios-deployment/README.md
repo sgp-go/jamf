@@ -15,6 +15,9 @@ Managed App Configuration 注入配置、帶 token 上報。不參與 MDM 命令
 | [abm-distribution.md](./abm-distribution.md) | ABM Custom App 上傳、Jamf 關聯、版本管理 | 我方 ops + 後端 |
 | [apns-certificate.md](./apns-certificate.md) | Apple Push 憑證申請、續期、多租戶隔離 | 後端 ops |
 | [app-rollout.md](./app-rollout.md) | iOS App 更新與灰度策略（對比 Windows agent-rollout）| 後端 + ops |
+| [../apple-developer-setup.md](../apple-developer-setup.md) | **換 Apple 開發者賬號 / 簽名憑據交接 Checklist**（Bundle ID、Team ID、Fastlane `.env`、Match 憑證倉庫替換）| 自行構建簽名方（必讀）|
+
+> **構建簽名歸屬**：若由台灣團隊自行構建並用自家 Apple 賬號分發 Agent App，必須先按 [apple-developer-setup.md §8](../apple-developer-setup.md) 把 `Project.swift` 標識符、`fastlane/.env`（複製自 `.env.example`）、Match 憑證倉庫全部替換為台灣團隊自己的值——勿沿用我方倉庫中的開發憑據。若由我方統一以 ABM Custom App 分發（見 [abm-distribution.md](./abm-distribution.md)），則台灣團隊不碰簽名，此步跳過。
 
 ## 與 Windows 的能力差異（重要）
 

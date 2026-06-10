@@ -223,12 +223,12 @@ server {
 
 > ⚠️ **BITS Range 請求**：Agent MSI 透過設備 BITS 以 HEAD + Range GET 下載。若 MSI 走此域名（而非 `appDownloadBaseUrl` 局域網），反代必須透傳 Range（Caddy 預設透傳；Nginx 預設亦支援，勿關 `proxy_buffering` 以外的怪設定）。大規模建議走 `appDownloadBaseUrl` 局域網分流，見 [agent-app-build-and-deploy.md](agent-app-build-and-deploy.md) §5。
 
-### 可選：Agent / Control 雙服務部署
+### 可選：Agent / Control 雙服務部署（階段一：僅拆進程）
 
 > 此為**進階可選**方案。上方單體（`deno task start`）已能完整運行全部功能，**多數場景不需要拆**。
 > 當 Agent 上報量顯著影響 MDM 控制面延遲、或有獨立 scale / SLA 隔離需求時再啟用。
 
-後端支援將 Agent 上報服務與 MDM 控制服務拆為兩個獨立進程（共用同一個 PostgreSQL）：
+後端支援將 Agent 上報服務與 MDM 控制服務拆為兩個獨立**進程**：
 
 | 進程 | 啟動命令 | 預設端口 | 範圍 |
 |---|---|---|---|
@@ -237,7 +237,21 @@ server {
 
 開發模式：`deno task dev:control` / `deno task dev:agent`（帶 `--watch`）。
 
-**反代按路徑分流**（Caddy 範例）：
+#### ⚠️ 現狀與限制：Agent 服務目前是 MDM 功能的一部分，**不可獨立存在**
+
+目前的拆分是**階段一：只拆 server 進程，兩者仍共用同一個 PostgreSQL**。
+Agent 服務**在功能與資料上仍依賴 Control 服務**，不是能脫離 Control 獨活的微服務。三條硬依賴：
+
+1. **共用同一個 PostgreSQL** —— Agent 服務沒有自己的資料庫，所有讀寫都打 Control 用的同一個 PG。換言之 Agent 進程不能脫離這個 DB 部署。
+2. **Webhook 投遞排程器只在 Control 跑** —— Agent 進程上報時只把事件寫進 `webhook_deliveries` 表，**真正推送的排程器（`startWebhookScheduler`）只在 Control 進程啟動**。→ **只部署 Agent 不部署 Control，Agent 觸發的 webhook 永遠不會被投遞。**
+3. **LAPS / BitLocker 下發依賴 Control 的協議層** —— Agent 上報觸發的 LAPS 輪換 / BitLocker 加密，只是把命令寫進 `mdm_commands` 隊列；**真正拉走命令、走 OMA-DM 下發到設備的是 Control 的 MDM 協議層**。→ 只部署 Agent，LAPS / BitLocker 鏈路會斷（命令入隊但無人執行）。
+
+**因此本階段拆分能拿到的，只有「把 Agent 上報流量分到獨立進程 / 獨立機器，隔離上報洪峰對控制面的 CPU / 連接壓力」**——這對 8000 台設備每日錯峰上報的場景有意義。
+**但它不等於「Agent 可獨立伸縮 / 獨立部署 / 互不拖累」**：Agent 服務必須與 Control 服務 + 共用 DB 一起存在，Control 不在則 Agent 的副作用（webhook、LAPS、BitLocker）全部失效。
+
+> **真正的獨立部署（獨立 DB、獨立伸縮、故障隔離）屬於階段二**，需要：把上報副作用接縫（`AgentReportHooks`）從「直連」改注入「發內部事件」實現、Agent 走獨立 DB 或事件總線。階段二**尚未實作**（`setAgentReportHooks` 目前無調用點，預設即直連版）。在此之前，**請勿將兩者當作可分別獨立擴容的微服務看待**。
+
+**反代按路徑分流**（Caddy 範例；前提是 Control 與 Agent 兩個進程都已部署且連同一 DB）：
 
 ```
 mdm.your-domain.edu {
@@ -406,6 +420,6 @@ curl -X "$METHOD" "https://mdm.your-domain.edu${PATH_URL}" \
 
 | 風險 | 說明 | 緩解 |
 |------|------|------|
-| `ADMIN_API_TOKEN` 為共享單 token | 目前所有 admin 操作共用一個 token，無 per-tenant 權限隔離 | 生產多客戶前應上 per-tenant RBAC（規劃中） |
+| `ADMIN_API_TOKEN` 為共享單 token | 所有 admin 操作共用一個 token，無 per-tenant 權限隔離 | **架構模式 B 下為設計內可接受**：Admin API 只與台灣後端服務交互，租戶 / 用戶層級的認證與授權由台灣團隊自行負責。本 token 屬服務間（service-to-service）憑據，不直接暴露給終端用戶。**僅當未來有第三方直接調用本 API（多客戶直連）時，才需升級 per-tenant API Key / RBAC**。妥善保管 token、限制持有方、操作全程寫 audit_log。 |
 | 機密金鑰遺失 | `DATA_ENCRYPTION_KEY` 遺失則加密的 LAPS 密碼 / Jamf secret 無法解密 | 金鑰納入密鑰管理 / 備份，與 DB 備份分離保管 |
 | 大檔下載壓公網 | 76MB Agent MSI × 大量設備走公網 | 配 `appDownloadBaseUrl` 走校內 LAN（見 agent-app-build §5） |
