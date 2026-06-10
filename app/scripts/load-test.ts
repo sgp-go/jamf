@@ -387,4 +387,6 @@ async function main() {
 
 if (import.meta.main) {
   await main();
+  // DB 連線池的 socket 會掛住事件循環，跑完必須顯式退出
+  Deno.exit(0);
 }

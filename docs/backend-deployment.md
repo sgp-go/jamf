@@ -387,6 +387,25 @@ curl -s https://mdm.your-domain.edu/api/v1/admin/tenants \
 curl -sI https://mdm.your-domain.edu/ | head -1   # 不報憑證錯誤即可
 ```
 
+### 7.1 容量基線（1000 台壓測，2026-06-10）
+
+服務層直驅壓測（`deno task load-test`，`LOAD_DEVICES=1000`）實測基線，
+環境：單進程 + 本機 Docker PostgreSQL + 連線池 10 + 並發 32。
+設計目標為 1000 台同時 enrolled、分批 onboard（會議決議 Q10）。
+
+| 階段 | 成功 / 總數 | P99 | 吞吐 |
+|---|---|---|---|
+| enrollment 風暴 | 1000 / 1000 | 73 ms | 1796 /s |
+| 命令排入（×3000） | 3000 / 3000 | **49 ms**（目標 < 500 ms） | 860 /s |
+| 設備 poll 消化 | 1000 / 1000（拉取 3000/3000 命令） | 153 ms | 255 /s |
+| usage 上報風暴 | 1000 / 1000 | 32 ms | 1338 /s |
+| webhook publish | 1000 / 1000 | 23 ms | 1652 /s |
+| webhook dispatch | 1000 / 1000（sink 實收 100%） | — | 319 /s |
+
+零錯誤；RSS 75 → 219 MB。全部指標大幅優於目標，1000 台規模下
+單實例 + 預設連線池即足夠；8000 台分批 onboard 時建議調大
+`DATABASE_POOL_MAX`（如 20）並用 §7 驗證步驟複測。
+
 ---
 
 ## 8. 上線檢查清單
