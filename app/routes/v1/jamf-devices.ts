@@ -327,14 +327,17 @@ jamfDevicesApp.openapi(commandRoute, async (c) => {
   const client = await JamfClient.forInstance({ tenantId, instanceId });
   const svc = new DeviceService(client);
 
-  const detail = await svc.getMobileDevice(id);
-
-  const payload: CommandPayload = { commandType: body.command };
-  if (body.lostModeMessage) payload.lostModeMessage = body.lostModeMessage;
-  if (body.lostModePhone) payload.lostModePhone = body.lostModePhone;
-  if (body.lostModeFootnote) payload.lostModeFootnote = body.lostModeFootnote;
-
-  const result = await svc.sendCommand(detail.managementId, payload);
+  let result: unknown;
+  if (body.command === "DEVICE_INFORMATION") {
+    result = await svc.updateInventory(id);
+  } else {
+    const detail = await svc.getMobileDevice(id);
+    const payload: CommandPayload = { commandType: body.command };
+    if (body.lostModeMessage) payload.lostModeMessage = body.lostModeMessage;
+    if (body.lostModePhone) payload.lostModePhone = body.lostModePhone;
+    if (body.lostModeFootnote) payload.lostModeFootnote = body.lostModeFootnote;
+    result = await svc.sendCommand(detail.managementId, payload);
+  }
 
   return c.json(
     {

@@ -47,6 +47,19 @@ export class DeviceService {
   }
 
   /**
+   * 觸發設備回報最新庫存資訊（非同步：命令入列後設備上線時執行）。
+   *
+   * v2 API 的 DEVICE_INFORMATION 對 mobile device 會返回 500（Jamf 已知問題），
+   * 改走 Classic API `UpdateInventory`，實測穩定 201。
+   */
+  updateInventory(deviceId: string): Promise<string> {
+    return this.client.putXml(
+      `/JSSResource/mobiledevices/id/${deviceId}`,
+      "<mobile_device><command>UpdateInventory</command></mobile_device>",
+    );
+  }
+
+  /**
    * App Lock 開啟：把裝置加入指定 Static Group，scope 綁定的 Profile 自動派送。
    * groupId 由 jamf_instances.app_lock_group_id 提供，沒設則拒絕。
    */
