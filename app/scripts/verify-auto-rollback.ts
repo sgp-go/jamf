@@ -158,7 +158,7 @@ try {
     {
       tenantId,
       appId: badApp.id,
-      apiEndpoint: "https://api.cogrow.com/api/agent/v1",
+      apiEndpoint: "https://api.cogrow.com/api/v1",
       windowMinutes: 30,
       policy: { silentRatioThreshold: 0.2, minCohortSize: 10 },
       sourceRef: `agent-v${GOOD_VERSION}`,

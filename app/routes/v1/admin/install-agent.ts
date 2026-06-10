@@ -36,8 +36,8 @@ const requestBody = z
     }),
     apiEndpoint: z.string().url().openapi({
       description:
-        "Agent App 上報用的 API base URL，注入到設備註冊表。例：https://api.cogrow.com/api/agent/v1",
-      example: "https://api.cogrow.com/api/agent/v1",
+        "Agent App 上報用的 API base URL，注入到設備註冊表。例：https://api.cogrow.com/api/v1（Agent 自行拼 /tenants/{tid}/agent/*）",
+      example: "https://api.cogrow.com/api/v1",
     }),
     registryPath: z.string().optional().openapi({
       description:
@@ -213,7 +213,7 @@ const rolloutBody = z
       description: "目標 agent .msi App ID（目標版本來自 app.version）",
     }),
     apiEndpoint: z.string().url().openapi({
-      example: "https://api.cogrow.com/api/agent/v1",
+      example: "https://api.cogrow.com/api/v1",
     }),
     selection: z
       .discriminatedUnion("mode", [

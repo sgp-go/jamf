@@ -48,7 +48,7 @@ export interface InstallAgentInput {
   deviceId: string;
   appId: string;
   /**
-   * Agent App 上報用的 base URL（如 https://api.cogrow.com/api/agent/v1）。
+   * Agent App 上報用的 base URL（如 https://api.cogrow.com/api/v1）。
    * 注入到 HKLM 給 Agent Service 啟動讀取。
    */
   apiEndpoint: string;

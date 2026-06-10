@@ -7,7 +7,7 @@
  * 兩種跑法：
  *   1. dry-run（預設安全檔，純本地可跑）：只查健康 + 出決策 + 印計畫，不構建不派發。
  *      deno task auto-rollback --tenant <id> --app <id> --source-ref agent-v1.2.0.0 \
- *        --rollforward-version 1.3.1.1 --endpoint https://api.cogrow.com/api/agent/v1 --dry-run
+ *        --rollforward-version 1.3.1.1 --endpoint https://api.cogrow.com/api/v1 --dry-run
  *   2. --execute：實構建 + 註冊 + 派發。構建來源二選一：
  *      - --manifest <path>（首選）：用 CI（agent-rollforward.yml workflow）產出的 manifest，
  *        不依賴本地 pwsh/git。CI 構建 → 下載 manifest（+ 上傳 MSI 託管回填 fileUrl）→ 此處派發。
