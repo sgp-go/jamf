@@ -458,5 +458,5 @@ curl -X "$METHOD" "https://mdm.your-domain.edu${PATH_URL}" \
 | 風險 | 說明 | 緩解 |
 |------|------|------|
 | `ADMIN_API_TOKEN` 為共享單 token | 所有 admin 操作共用一個 token，無 per-tenant 權限隔離 | **架構模式 B 下為設計內可接受**：Admin API 只與台灣後端服務交互，租戶 / 用戶層級的認證與授權由台灣團隊自行負責。本 token 屬服務間（service-to-service）憑據，不直接暴露給終端用戶。**僅當未來有第三方直接調用本 API（多客戶直連）時，才需升級 per-tenant API Key / RBAC**。妥善保管 token、限制持有方、操作全程寫 audit_log。 |
-| 機密金鑰遺失 | `DATA_ENCRYPTION_KEY` 遺失則加密的 LAPS 密碼 / Jamf secret 無法解密 | 金鑰納入密鑰管理 / 備份，與 DB 備份分離保管 |
+| 機密金鑰遺失 | `DATA_ENCRYPTION_KEY` 遺失則加密的 LAPS 密碼 / BitLocker Recovery Key / CA·APNS 私鑰 / Jamf secret 無法解密（部分不可恢復） | 完整生成 / 存儲 / 備份 / 輪換 / 應急 SOP 見 [`encryption-key-management.md`](./encryption-key-management.md)（P0，上線前必讀） |
 | 大檔下載壓公網 | 76MB Agent MSI × 大量設備走公網 | 配 `appDownloadBaseUrl` 走校內 LAN（見 agent-app-build §5） |
