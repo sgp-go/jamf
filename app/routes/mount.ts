@@ -12,6 +12,7 @@ import { profilePresetsApp } from "~/routes/v1/admin/profile-presets.ts";
 import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { webhooksAdminApp } from "~/routes/v1/admin/webhooks.ts";
+import { webhookEndpointsAdminApp } from "~/routes/v1/admin/webhook-endpoints.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
 import { appsApp } from "~/routes/v1/apps.ts";
 import { devicesApp } from "~/routes/v1/devices.ts";
@@ -46,6 +47,7 @@ export const controlApiMounts: Mount[] = [
   { basePath: "/api/v1", app: complianceAdminApp },
   { basePath: "/api/v1", app: auditAdminApp },
   { basePath: "/api/v1", app: webhooksAdminApp },
+  { basePath: "/api/v1", app: webhookEndpointsAdminApp },
   { basePath: "/api/v1", app: lapsAdminApp },
   { basePath: "/api/v1", app: bitlockerAdminApp },
 ];

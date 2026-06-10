@@ -40,6 +40,7 @@ export const ALL_TAGS: OpenApiTag[] = [
   // ── 平台營運 ──
   { name: "應用套件管理", description: "App 安裝包上傳與管理（MSI / MSIX 二進位 + metadata）" },
   { name: "審計日誌", description: "審計日誌查詢（唯讀；寫入由各端點自動記錄）" },
+  { name: "Webhook 端點", description: "Webhook 接收端自助註冊：CRUD + 軟刪 + 輪換 secret（secret 僅建立 / 輪換時回傳一次）" },
   { name: "Webhook 監控", description: "Webhook 可觀測性（唯讀）：事件日誌 + 投遞記錄（含重試 / 死信狀態）" },
 
   // ── 已棄用 ──
@@ -51,7 +52,7 @@ export const ALL_TAG_GROUPS: OpenApiTagGroup[] = [
   { name: "租戶初始化", tags: ["租戶管理", "設備分組", "Jamf 整合"] },
   { name: "設備管理", tags: ["設備操作", "批次註冊", "Agent 派發", "密碼託管（LAPS）"] },
   { name: "策略與合規", tags: ["配置描述檔", "策略預設", "合規評估"] },
-  { name: "平台營運", tags: ["應用套件管理", "審計日誌", "Webhook 監控"] },
+  { name: "平台營運", tags: ["應用套件管理", "審計日誌", "Webhook 端點", "Webhook 監控"] },
   { name: "已棄用", tags: ["Jamf 原始視圖（已棄用）"] },
 ];
 

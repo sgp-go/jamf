@@ -33,6 +33,9 @@ export const webhookDeliveryStatusEnum = pgEnum("webhook_delivery_status", [
  * 一個 tenant 可有多筆（按事件類型分流，或多副本）。
  *
  * secret: 用於計算 HMAC-SHA256(timestamp + "." + body) 簽名，避免偽造。
+ *   **內容經 secrets.ts encryptSecret 加密儲存**（`v1:` 密文）；dispatcher 簽名前 decryptSecret
+ *   還原。欄位名沿用 `secret`（非 `*_enc`）以避免 rename 遷移；legacy 明文行（無 v1: 前綴）
+ *   由 decryptSecret 透傳，向後相容。
  * event_types: jsonb 陣列；空陣列代表訂閱全部事件。
  */
 export const webhookEndpoints = pgTable(

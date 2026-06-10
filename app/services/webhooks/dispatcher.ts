@@ -1,6 +1,7 @@
 import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import { webhookDeliveries, webhookEndpoints } from "~/db/schema/webhooks.ts";
+import { decryptSecret } from "~/lib/secrets.ts";
 import { signWebhookPayload } from "./signature.ts";
 
 /**
@@ -67,7 +68,7 @@ export async function dispatchDelivery(deliveryId: string): Promise<DispatchResu
   const body = JSON.stringify(delivery.payload);
   const timestamp = Math.floor(Date.now() / 1000);
   const signature = signWebhookPayload({
-    secret: endpoint.secret,
+    secret: decryptSecret(endpoint.secret),
     timestamp,
     body,
   });
