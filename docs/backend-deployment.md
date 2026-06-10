@@ -34,7 +34,7 @@
 
 | 依賴 | 版本 | 安裝 |
 |------|------|------|
-| Deno | 2.x | `curl -fsSL https://deno.land/install.sh \| sh`（或包管理器） |
+| Deno | 2.x（用到 2.8 系列時須 **2.8.1+**；⚠️ 勿用 2.8.0：Drizzle 查詢延遲巨大，2.8.1 已修復） | `curl -fsSL https://deno.land/install.sh \| sh`（或包管理器） |
 | PostgreSQL | 14+ | 系統包 / Docker / 雲託管（RDS、Cloud SQL 等） |
 | 反向代理 | Caddy 2 或 Nginx | Caddy 自動申請 Let's Encrypt，最省事 |
 
