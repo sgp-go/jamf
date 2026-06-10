@@ -125,6 +125,43 @@ deno task db:generate
 >
 > ⚠️ migration 是前滾式：升級後端版本時，先 `git pull` 再 `deno task db:migrate`，再重啟服務。
 
+### 3.1 資料保留清理（pg_cron，生產一次性配置）
+
+審計與 webhook 記錄會無限增長，需定期清理以落實保留週期：
+
+| 表 | 保留週期 | 理由 |
+|---|---|---|
+| `audit_logs` | 365 天 | 合規（操作審計留存一年） |
+| `webhook_deliveries` | 90 天 | 運維記錄；90 天後皆為終態 |
+| `event_log` | 90 天 | 與 webhook_deliveries 同 |
+
+清理由 **pg_cron** 執行（不走 drizzle migration——`CREATE EXTENSION pg_cron` 需
+`shared_preload_libraries` 預載，放進自動遷移鏈會在未預載的環境弄壞 `db:migrate`）。
+
+**配置步驟**（生產一次性）：
+
+1. `postgresql.conf` 設 `shared_preload_libraries = 'pg_cron'`，重啟 PostgreSQL。
+2. 確認 pg_cron 排程運行在**應用庫**：自建 PG 設 `cron.database_name = '<你的應用庫>'`；
+   受管 PG（RDS/Cloud SQL）pg_cron 多固定在 `postgres` 庫，改用腳本末尾的
+   `cron.schedule_in_database` 版本指向應用庫。
+3. 對應用庫執行排程腳本：
+
+   ```bash
+   psql "$DATABASE_URL" -f app/db/ops/retention-pg-cron.sql
+   ```
+
+   腳本以 jobname 為鍵 upsert，可重複執行；調整保留天數改腳本內 `interval` 後重跑即可。
+
+**驗證**：
+
+```sql
+SELECT jobname, schedule, active FROM cron.job;                          -- 已排程的清理
+SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 20;     -- 最近執行結果
+```
+
+> 未配置 pg_cron 時資料**只增不減**（對「留滿 1 年」的承諾仍滿足，但不會到期清理）。
+> 若環境無法用 pg_cron，可改用外部 cron 定時跑同樣的 `DELETE`（腳本內 SQL 可直接複用）。
+
 ---
 
 ## 4. 服務常駐

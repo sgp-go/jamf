@@ -12,7 +12,8 @@ import { tenants } from "./tenants.ts";
 /**
  * 審計日誌：所有 admin / service-to-service API 操作的完整記錄。
  *
- * 保留期限 1 年（透過定期任務清除 created_at < now() - 365 days）。
+ * 保留期限 1 年：由 pg_cron 每日清除 created_at < now() - 365 days
+ * （排程腳本 app/db/ops/retention-pg-cron.sql，生產 ops 執行；非自動 migration）。
  * 支援 CSV 匯出（指定 tenant + 時間範圍）。
  *
  * actor:

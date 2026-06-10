@@ -117,7 +117,8 @@ export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
  * 與 webhook_deliveries 透過 event_id 對齊；同 event_id 可有 N 行 deliveries
  *（每個 endpoint 一行）+ 1 行 event_log。
  *
- * 保留週期：跟 webhook_deliveries 同（後續 W4/W5 加 retention job 時統一處理）。
+ * 保留週期：90 天，跟 webhook_deliveries 同。由 pg_cron 每日清理
+ *（排程腳本 app/db/ops/retention-pg-cron.sql，生產 ops 執行；非自動 migration）。
  */
 export const eventLog = pgTable(
   "event_log",
