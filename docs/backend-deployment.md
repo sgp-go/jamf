@@ -52,7 +52,7 @@
 |------|------|------|
 | `DATABASE_URL` | Postgres 連線字串。**這是區分環境的主軸**——換 DB 即換整套環境。 | `postgres://user:pass@db-host:5432/jamf_prod` |
 | `ADMIN_API_TOKEN` | Admin API（`/api/v1/admin/*`）的 Bearer token。**未設則 admin 端點全部回 503**（安全預設，不裸奔）。 | `openssl rand -hex 32` |
-| `DATA_ENCRYPTION_KEY` | 機密欄位加密金鑰（base64 的 32 bytes）。**生產必填**——未設則機密明文落 DB（啟動 warn）。涵蓋 Jamf secret / DEP token / APNS·CA·Vendor 私鑰 / **LAPS 密碼**。 | `openssl rand -base64 32` |
+| `DATA_ENCRYPTION_KEY` | 機密欄位加密金鑰（base64 的 32 bytes）。**生產必填**——未設則機密明文落 DB（啟動 warn）。涵蓋 Jamf secret / DEP token / APNS·CA·Vendor 私鑰 / **LAPS 密碼** / BitLocker Recovery Key / Webhook secret。完整 SOP 見 [`encryption-key-management.md`](./encryption-key-management.md)。 | `openssl rand -base64 32` |
 
 ### 2.2 Push 推送（Windows WNS，配齊才有秒級推送）
 

@@ -18,6 +18,7 @@
 | **LAPS 管理員密碼** | `laps_*.passwordEnc` | 設備本機管理員密碼取不回 → 失去本機管理權 |
 | **BitLocker Recovery Key** | `bitlocker_*.recoveryPasswordEnc` | 🔴 硬碟解不開 → 設備資料可能永久鎖死 |
 | **Jamf OAuth secret** | `jamf_instances.clientSecretEnc` | Jamf 整合斷，需在 Jamf 重新生成憑據（可恢復） |
+| **Webhook 簽名 secret** | `webhook_endpoints.secret`（欄位名非 `*_enc`，內容加密） | webhook 推送驗簽密鑰失效，`rotate-secret` 重發即可（可恢復） |
 | **ASM/DEP token secret** | `asm_instances.consumerSecretEnc` / `accessSecretEnc` | ABM/ASM 同步斷，需重新上傳 DEP token（可恢復） |
 
 > **判斷原則**：上表「可恢復」項是去上游（Jamf / Apple）重新生成憑據；**CA 私鑰、BitLocker Recovery Key 是不可恢復的** —— 它們只存在我方 DB，金鑰一丟就沒了。所以 `DATA_ENCRYPTION_KEY` 的備份等級 = **與 CA 私鑰、設備資料同級的最高機密**。
@@ -99,14 +100,16 @@ fi
 
 ```
 1. 生成新金鑰 NEW_KEY（§3），與舊金鑰 OLD_KEY 同時在手（皆 base64 字串）。
-2. 進維護窗口：暫停所有會寫 *_enc 欄位的操作
-   （install-agent / laps-rotate / mdm-config / jamf-instances 寫入 / DEP token 上傳）。
+2. 進維護窗口：暫停所有會寫加密欄位的操作
+   （install-agent / laps-rotate / mdm-config / jamf-instances 寫入 / DEP token 上傳 /
+    webhook-endpoints 建立 / rotate-secret）。
 3. 先 dry-run 預檢（不寫庫，確認全部密文都能用 OLD_KEY 解開）：
      deno task reencrypt-secrets --old-key <OLD_KEY> --new-key <NEW_KEY>
 4. 確認 dry-run 通過後，正式輪換（單事務，中途失敗整體 rollback）：
      deno task reencrypt-secrets --old-key <OLD_KEY> --new-key <NEW_KEY> --execute
    涵蓋表：jamf_instances / mdm_windows_laps / mdm_windows_bitlocker /
-           self_mdm_configs / dep_tokens（含所有 *_enc 欄位）
+           self_mdm_configs / dep_tokens / webhook_endpoints（所有加密欄位，
+           含 webhook_endpoints.secret——欄位名非 *_enc 但內容加密）
 5. 將進程 env 的 DATA_ENCRYPTION_KEY 切為 NEW_KEY，重啟服務。
 6. 抽樣驗證：GET laps-password / bitlocker-recovery 能正常解密明文。
 7. 安全銷毀 OLD_KEY（KMS 標記停用 + 移除離線副本），保留審計記錄。

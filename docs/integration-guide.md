@@ -619,7 +619,7 @@ function verifyCoGrowWebhook(opts: {
 
 - [ ] 取得 `ADMIN_API_TOKEN`（我方產出時通知你方）
 - [ ] 準備 Webhook 接收 URL（HTTPS）
-- [ ] 取得 webhook secret（我方註冊 endpoint 時生成）
+- [ ] 建立 webhook endpoint 取得 secret（`POST .../webhook-endpoints` 回傳一次，見 §8.1）
 - [ ] iOS 場景：ABM/ASM 帳號 + Organization ID（Custom App 派發用）
 
 ### 9.2 系統能力

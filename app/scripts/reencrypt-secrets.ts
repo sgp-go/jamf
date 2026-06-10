@@ -27,6 +27,7 @@ import {
   mdmWindowsBitlocker,
   mdmWindowsLaps,
   selfMdmConfigs,
+  webhookEndpoints,
 } from "~/db/schema/index.ts";
 import {
   decryptWith,
@@ -57,6 +58,9 @@ const TARGETS: { label: string; table: AnyTable; columns: string[] }[] = [
     table: depTokens,
     columns: ["consumerSecretEnc", "accessSecretEnc"],
   },
+  // webhook_endpoints.secret 欄位名非 *_enc，但內容經 encryptSecret 加密，必須一起輪換
+  // （否則輪換後 dispatcher 用新 key 解舊密文 → 簽名失敗 → webhook 推送全掛）。
+  { label: "webhook_endpoints", table: webhookEndpoints, columns: ["secret"] },
 ];
 
 interface TargetStats {
