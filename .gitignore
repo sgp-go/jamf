@@ -40,7 +40,9 @@ AgentApp/fastlane/test_output/
 /certs/**
 # 內部文件
 docs/工作量評估*.md
-.claude/
+.claude/*
+# 但專案級開發規範（rules）需隨 git 共享 + 供 CLAUDE.md @import
+!.claude/rules/
 
 # Node 產品化版本（app/）
 node_modules/

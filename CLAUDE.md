@@ -22,6 +22,12 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 - Swagger 文件: `https://cogrow.jamfcloud.com/api/doc/`
 - 詳細整合文件: `docs/archived/jamf-api-integration.md`（單租戶探索期，已歸檔）
 
+### 開發規範
+
+- 新增 / 修改 OpenAPI 端點一律遵守以下規範（tag / createRoute 必填項 / schema 命名 / 檢查清單）：
+
+@.claude/rules/openapi-conventions.md
+
 ## 檔案結構
 
 - `.env` - API 憑據（Client ID/Secret、api_admin 帳戶密碼）
