@@ -2,13 +2,21 @@ import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
-import { listAuditLogs } from "~/services/admin/audit.ts";
+import {
+  EXPORT_MAX_ROWS,
+  extractAuditMeta,
+  listAuditLogs,
+  listAuditLogsExport,
+  logAudit,
+} from "~/services/admin/audit.ts";
+import { CSV_UTF8_BOM, toCsvRow } from "~/lib/csv.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/audit-logs
+ * /api/v1/admin/tenants/{tenantId}/audit-logs/export.csv
  *
- * Read-only 審計日誌查詢。寫入由各 admin route 自行調用 logAudit / extractAuditMeta。
- * CSV 匯出待 admin UI 接 + 大量資料才需要，暫不做。
+ * Read-only 審計日誌查詢 + CSV 匯出。寫入由各 admin route 自行調用
+ * logAudit / extractAuditMeta。
  */
 
 const tenantParam = z.object({
@@ -122,6 +130,55 @@ const listSpec = createRoute({
   },
 });
 
+const exportQuery = listQuery.omit({ page: true, limit: true });
+
+const CSV_HEADER = [
+  "id",
+  "createdAt",
+  "actor",
+  "action",
+  "resourceType",
+  "resourceId",
+  "ip",
+  "userAgent",
+  "requestId",
+  "payload",
+];
+
+const exportSpec = createRoute({
+  method: "get",
+  path: "/admin/tenants/{tenantId}/audit-logs/export.csv",
+  tags: ["審計日誌"],
+  security: [{ BearerAuth: [] }],
+  summary: "匯出審計日誌 CSV（同查詢過濾維度）",
+  description: [
+    "把符合過濾條件的審計日誌匯出為 CSV 檔（UTF-8 含 BOM，Excel 可直接開），按 `created_at` 降序。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    `- 單次匯出上限 ${EXPORT_MAX_ROWS.toLocaleString("en-US")} 筆；超過時回應 header \`X-Export-Truncated: true\`，請用 \`since\`/\`until\` 縮小範圍分段匯出`,
+    "- `until` 未傳時以請求當下時間封頂（保證匯出期間新寫入不影響結果一致性）",
+    "- `payload` 欄位為 JSON 字串",
+    "- 匯出行為本身會寫一條 `audit.exported` 審計紀錄",
+  ].join("\n"),
+  request: { params: tenantParam, query: exportQuery },
+  responses: {
+    200: {
+      description:
+        "CSV 文本（欄位：id,createdAt,actor,action,resourceType,resourceId,ip,userAgent,requestId,payload）",
+      content: {
+        "text/csv": {
+          schema: z.string().openapi({
+            description: "RFC 4180 CSV，首行為欄位名，UTF-8 含 BOM",
+          }),
+        },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 export const auditAdminApp = new OpenAPIHono({
   defaultHook: validationFailedHook,
 });
@@ -161,4 +218,68 @@ auditAdminApp.openapi(listSpec, async (c) => {
     },
     200,
   );
+});
+
+auditAdminApp.openapi(exportSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const q = c.req.valid("query");
+  // until 以請求當下封頂：audit 為 append-only + desc 排序，無上界時匯出
+  // 期間的新寫入會讓批次 offset 位移產生重複列
+  const until = q.until ? new Date(q.until) : new Date();
+
+  const { rows, truncated } = await listAuditLogsExport({
+    tenantId,
+    actionPrefix: q.actionPrefix,
+    resourceType: q.resourceType,
+    actorPrefix: q.actorPrefix,
+    since: q.since ? new Date(q.since) : undefined,
+    until,
+  });
+
+  const lines = [toCsvRow(CSV_HEADER)];
+  for (const r of rows) {
+    lines.push(
+      toCsvRow([
+        r.id,
+        r.createdAt.toISOString(),
+        r.actor,
+        r.action,
+        r.resourceType,
+        r.resourceId,
+        r.ip,
+        r.userAgent,
+        r.requestId,
+        r.payload === null ? null : JSON.stringify(r.payload),
+      ]),
+    );
+  }
+  const csv = CSV_UTF8_BOM + lines.join("\r\n") + "\r\n";
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "audit.exported",
+    resourceType: "tenant",
+    resourceId: tenantId,
+    payload: {
+      rowCount: rows.length,
+      truncated,
+      filters: {
+        actionPrefix: q.actionPrefix ?? null,
+        resourceType: q.resourceType ?? null,
+        actorPrefix: q.actorPrefix ?? null,
+        since: q.since ?? null,
+        until: until.toISOString(),
+      },
+    },
+  });
+
+  const stamp = until.toISOString().slice(0, 10);
+  c.header("Content-Type", "text/csv; charset=utf-8");
+  c.header(
+    "Content-Disposition",
+    `attachment; filename="audit-logs-${stamp}.csv"`,
+  );
+  if (truncated) c.header("X-Export-Truncated", "true");
+  return c.body(csv, 200);
 });

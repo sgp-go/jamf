@@ -102,7 +102,7 @@ export function extractAuditMeta(c: HasHeaderAccess): {
   return { actor, ip, userAgent, requestId };
 }
 
-export async function listAuditLogs(opts: ListAuditOptions): Promise<ListAuditResult> {
+function buildAuditWhere(opts: Omit<ListAuditOptions, "page" | "limit">): SQL {
   const conditions: SQL[] = [eq(auditLogs.tenantId, opts.tenantId)];
 
   if (opts.actionPrefix) {
@@ -121,7 +121,11 @@ export async function listAuditLogs(opts: ListAuditOptions): Promise<ListAuditRe
     conditions.push(lt(auditLogs.createdAt, opts.until));
   }
 
-  const where = conditions.length === 1 ? conditions[0] : and(...conditions);
+  return conditions.length === 1 ? conditions[0] : and(...conditions)!;
+}
+
+export async function listAuditLogs(opts: ListAuditOptions): Promise<ListAuditResult> {
+  const where = buildAuditWhere(opts);
 
   const [rows, totalRows] = await Promise.all([
     db
@@ -138,4 +142,53 @@ export async function listAuditLogs(opts: ListAuditOptions): Promise<ListAuditRe
     rows,
     total: Number(totalRows[0]?.value ?? 0),
   };
+}
+
+/** 每批撈取筆數（匯出用，平衡記憶體與往返次數） */
+const EXPORT_BATCH_SIZE = 5000;
+/** 單次匯出上限。超過時 truncated=true，caller 應提示用 since/until 縮小範圍 */
+export const EXPORT_MAX_ROWS = 100_000;
+
+export interface ExportAuditResult {
+  rows: AuditLog[];
+  /** true = 結果被 EXPORT_MAX_ROWS 截斷，未涵蓋全部符合條件的紀錄 */
+  truncated: boolean;
+}
+
+/**
+ * 匯出用查詢：批次撈取至上限，不做 count。
+ *
+ * ⚠️ caller 必須傳 `until`（建議用請求當下時間封頂）：audit 是 append-only +
+ * desc 排序，匯出期間新寫入會讓 offset 分頁位移產生重複列；有 until 上界即穩定。
+ */
+export async function listAuditLogsExport(
+  opts: Omit<ListAuditOptions, "page" | "limit"> & { until: Date },
+): Promise<ExportAuditResult> {
+  const where = buildAuditWhere(opts);
+  const rows: AuditLog[] = [];
+
+  while (rows.length < EXPORT_MAX_ROWS) {
+    const batchLimit = Math.min(EXPORT_BATCH_SIZE, EXPORT_MAX_ROWS - rows.length);
+    const batch = await db
+      .select()
+      .from(auditLogs)
+      .where(where)
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(batchLimit)
+      .offset(rows.length);
+    rows.push(...batch);
+    if (batch.length < batchLimit) {
+      return { rows, truncated: false };
+    }
+  }
+
+  // 撈滿上限後再探一筆，確認是否真的截斷
+  const probe = await db
+    .select({ id: auditLogs.id })
+    .from(auditLogs)
+    .where(where)
+    .orderBy(desc(auditLogs.createdAt))
+    .limit(1)
+    .offset(rows.length);
+  return { rows, truncated: probe.length > 0 };
 }
