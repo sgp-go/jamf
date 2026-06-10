@@ -379,7 +379,7 @@ Deno.test("buildRegistrySetBatch: 一個 key 多個 value 各自 Replace", () =>
     entries: [
       { name: "device_id", type: "string", value: "windows-001" },
       { name: "agent_token", type: "string", value: "at_secret_xxx" },
-      { name: "api_endpoint", type: "string", value: "https://api.cogrow.com/api/agent/v1" },
+      { name: "api_endpoint", type: "string", value: "https://api.cogrow.com/api/v1" },
       { name: "report_interval_min", type: "int", value: 1440 },
     ],
   });

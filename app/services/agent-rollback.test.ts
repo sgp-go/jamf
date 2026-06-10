@@ -73,7 +73,7 @@ function makeSpyDeps(health: RolloutHealthResult, over?: Partial<AutoRollbackDep
 const baseInput = {
   tenantId: "t1",
   appId: "bad-app",
-  apiEndpoint: "https://api.cogrow.com/api/agent/v1",
+  apiEndpoint: "https://api.cogrow.com/api/v1",
   windowMinutes: 30,
   policy,
   sourceRef: "agent-v1.3.0.0",
