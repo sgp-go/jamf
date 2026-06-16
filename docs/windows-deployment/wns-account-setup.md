@@ -107,22 +107,22 @@ WNS_STORE_PRODUCT_ID=<your-store-product-id>
 
 確認登入 `partner.microsoft.com/en-us/dashboard/apps-and-games/overview` 能看到「Apps and games | Overview」頁面：
 
-![Apps and games 工作區](./images/wns-apps-and-games.png)
+![Apps and games 工作區](../images/wns-apps-and-games.png)
 
 ### 步驟
 
 1. 點頂部「**+ New product**」按鈕
 2. 在彈出選單選 **MSIX or PWA app**（**必須**——只有這個類型能取得 Package SID 與 PFN，EXE/MSI 與 Game 都不行）
 
-   ![Product type 選單](./images/wns-new-product-menu.png)
+   ![Product type 選單](../images/wns-new-product-menu.png)
 
 3. 在「Create your app by reserving a name」對話框輸入應用名（**保留 3 個月，不上架不收費，名字會成為 PFN 前綴的一部分，建議獨特易識別**）
 
-   ![Reserve dialog](./images/wns-reserve-dialog.png)
+   ![Reserve dialog](../images/wns-reserve-dialog.png)
 
 4. 點 **Check availability** 確認名稱可用（綠色 ✓）
 
-   ![Check availability](./images/wns-check-availability.png)
+   ![Check availability](../images/wns-check-availability.png)
 
 5. 點 **Reserve product name** 提交。提交後若彈「Sign in required - Your session has expired」，點 **Sign in** 重新登入即可（應用其實已建好，URL 會自動帶上 Product ID）
 
@@ -140,11 +140,11 @@ WNS_STORE_PRODUCT_ID=<your-store-product-id>
 
 進入剛建立的應用詳情頁，URL 為 `/dashboard/products/<Product ID>/overview`：
 
-![App overview 左欄](./images/wns-app-overview.png)
+![App overview 左欄](../images/wns-app-overview.png)
 
 點左欄 **Product management → Product Identity**（直連 URL：`/dashboard/products/<Product ID>/identity`）：
 
-![Product identity 頁面](./images/wns-identity.png)
+![Product identity 頁面](../images/wns-identity.png)
 
 ### 取值
 
@@ -173,7 +173,7 @@ ms-app://S-1-15-2-1253093273-833848983-1416962196-922505673-1233200576-298171957
 
 仍在應用詳情頁，左欄 **Product management → WNS/MPNS**（直連 URL：`/dashboard/apps/<Product ID>/pushnotifications`）：
 
-![WNS/MPNS 頁面](./images/wns-partner-push-page.png)
+![WNS/MPNS 頁面](../images/wns-partner-push-page.png)
 
 頁面文字會引導你去「**App Registration portal**」連結 → 跳轉到 Azure Portal 的 App Registration 詳情頁，appId 已預填。
 
@@ -183,7 +183,7 @@ ms-app://S-1-15-2-1253093273-833848983-1416962196-922505673-1233200576-298171957
 
 帳戶選擇器若列出多個帳戶，**必須選與 Partner Center 同一個帳戶**（本案：`appledev@jinsehua.com.cn`）。選錯帳戶會找不到對應的 App Registration。
 
-![Azure 登入帳戶選擇](./images/wns-azure-login.png)
+![Azure 登入帳戶選擇](../images/wns-azure-login.png)
 
 ### 進入「證書和密碼」
 
@@ -197,13 +197,13 @@ https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade
 
 進入後預設在「客戶端密碼」分頁：
 
-![Azure 客戶端密碼空](./images/wns-azure-secrets-empty.png)
+![Azure 客戶端密碼空](../images/wns-azure-secrets-empty.png)
 
 ### 新建客戶端密碼
 
 1. 點 **+ 新客戶端密碼**
 
-   ![新增 secret 對話框](./images/wns-azure-add-secret-dialog.png)
+   ![新增 secret 對話框](../images/wns-azure-add-secret-dialog.png)
 
 2. 填入「說明」（建議寫用途，例如 `WNS push for Cogrow MDM`）
 3. 「截止期限」**MSA app 受限只能 180 天（6 個月）**——到期前必須輪替，否則 WNS 推播會回 `invalid_client`，建議在日曆上設提醒
