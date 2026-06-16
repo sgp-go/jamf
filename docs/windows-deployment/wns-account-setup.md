@@ -105,6 +105,10 @@ WNS_STORE_PRODUCT_ID=<your-store-product-id>
 
 ## 第 2 步：建立應用佔位（取 Package SID 用）
 
+> 📌 **應用名稱請取自己的、獨特易識別的名字**（例如 `<你們的標識>MDMPush`），不要照抄本文範例的 `CogrowMDMPush`——名稱在 Partner Center 全域保留，重複會 Check availability 不過，且**名稱會成為 PFN 前綴的一部分**。
+>
+> ⚠️ 名稱（Identity Name）改了 → 算出的 **PFN 就會不同** → 後端 `.env` 的 `WNS_PFN` 與 **push MSIX 的 Identity 都要跟著換**。後端代碼不受影響（PFN/SID/Secret 全從 `.env` 讀），但 push MSIX 必須用你們自己的 Identity 重 build。完整的「改 Identity → 重 build push MSIX → 改 .env → 驗證」全流程與現成腳本見 **[push-infrastructure-setup.md §5](push-infrastructure-setup.md#5-step-3build-自己-pfn-的-push-msix)**。
+
 確認登入 `partner.microsoft.com/en-us/dashboard/apps-and-games/overview` 能看到「Apps and games | Overview」頁面：
 
 ![Apps and games 工作區](../images/wns-apps-and-games.png)
