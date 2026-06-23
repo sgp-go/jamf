@@ -112,17 +112,33 @@ POST /api/mdm/win/devices/{udid}/reboot
 
 ## 4. 多租戶 Enrollment 路由
 
-每個租戶的 PPKG 裡的 DiscoveryUrl 帶 tenant slug：
+PPKG 裡的 DiscoveryUrl 兩種形態：
 
 ```
+教育局通用 PPKG（設備直屬 tenant）：
 https://mdm.school.edu/t/{tenant-slug}/EnrollmentServer/Discovery.svc
+
+學校專用 PPKG（設備 enroll 自動歸學校）：
+https://mdm.school.edu/t/{tenant-slug}/g/{group-code}/EnrollmentServer/Discovery.svc
 ```
 
-設備 enrollment 時，後端從 URL 的 `{tenant-slug}` 識別租戶，取對應的 CA 簽發設備憑證，設備自動綁定到正確的租戶。
+**自動歸校的觸發機制**：
+- `POST /admin/tenants/{tid}/enrollment/ppkg-config` 帶 `deviceGroupId` → 回傳的 XML DiscoveryUrl 嵌入 `/g/{code}` 段
+- 設備 enrollment 時後端從 URL 解析 `{group-code}` → 查 `device_group` → 落庫 `mdm_devices.device_group_id`
+- 不帶 group / group 解析失敗（被刪 / 改名 / code 不合法）：
+  - **首次 enroll** → `device_group_id = null`（直屬 tenant）
+  - **重 enroll 已歸組設備** → **保留原 `device_group_id`**（避免通用 PPKG 或失效 group code 把學校歸屬誤清）
+  - enroll 不中斷，server log warn 提示
 
-**PPKG 生成 API 自動處理**：呼叫 `POST /admin/tenants/{tid}/enrollment/ppkg-config` 時，回傳的 XML 裡 DiscoveryUrl 已帶上該租戶的 slug，無需手動拼接。
+> ⚠️ 重 enroll 通用 PPKG **不會**把已歸校設備拉回直屬 tenant；想清空歸屬必須走「手動調整歸屬」走 PATCH。
 
-**Management 通道不帶 slug**：設備 enrollment 後的 SyncML 管理通道（`/api/mdm/win/manage/{deviceId}`）不需要 tenant 前綴——設備已綁定到租戶，後端從設備記錄查 tenant。
+**Management 通道不帶 slug / group**：設備 enrollment 後的 SyncML 管理通道（`/api/mdm/win/manage/{deviceId}`）不需要 tenant / group 前綴——設備已綁定到 tenant + group，後端從設備記錄查。
+
+**手動調整歸屬**：
+- 設備直屬 tenant → 想分配到學校：`PATCH /tenants/{tid}/devices/{did}` body `{"deviceGroupId": "<學校 UUID>"}`
+- 設備換校：同上，傳新的 `deviceGroupId`
+- 設備從學校回到直屬 tenant：傳 `{"deviceGroupId": null}`
+- 不論手動或自動，都不用重做 PPKG / 重 enroll
 
 **批量命令的租戶隔離**：`provision-lock-policy/bulk` 和 `provision-laps-policy/bulk` 的 `{ all: true }` 模式必須帶 `tenantId`，防止跨租戶操作：
 

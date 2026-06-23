@@ -72,6 +72,7 @@ import {
   getSelfMdmConfigByTenantSlug,
   loadCaFromConfig,
 } from "~/services/mdm/self-mdm-config.ts";
+import { getDeviceGroupByTenantAndCode } from "~/services/admin/device-groups.ts";
 
 const w = new Hono();
 
@@ -138,9 +139,19 @@ w.post("/t/:tenantSlug/EnrollmentServer/Policy.svc", async (c) => {
   return c.body(responseXml, 200);
 });
 
-/** POST /t/:tenantSlug/EnrollmentServer/Enrollment.svc */
-w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", async (c) => {
-  const slug = c.req.param("tenantSlug");
+/**
+ * Enrollment.svc handler — multi-tenant + 可選 group 段。
+ *
+ * Group 解析策略：
+ * - 成功 → deviceGroupId = grp.id（INSERT 寫入 / UPDATE 覆蓋為新值）
+ * - 失敗（找不到 / 跨 tenant / code 不存在）→ deviceGroupId 保持 undefined（fail-safe）
+ *   INSERT 首次 enroll 走 DB default（null=直屬 tenant）；UPDATE 重 enroll 保留原值
+ *   （不誤清——例：IT 改了 group code 後現役設備重 enroll，不該把它從 school-a 抹掉）
+ * - 非 group 路由（groupCode=undefined）→ 同上，保留設備原 group_id；想改派校用 PATCH
+ *
+ * 不阻斷 enrollment：避免 IT 把已派出 USB 的 PPKG 中 group 改名後現場學生機 enroll 全 fail。
+ */
+async function handleEnrollmentRequest(c: Context, slug: string, groupCode?: string) {
   const xml = await c.req.text();
   let parsed;
   try {
@@ -159,6 +170,23 @@ w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", async (c) => {
     return c.text(`tenant "${slug}" not configured`, 404);
   }
   const ca = loadCaFromConfig(config);
+
+  // 解析 group code → device_group.id；失敗或無 groupCode → 保持 undefined（fail-safe）。
+  // 見函式頭 doc：undefined 讓 service 端「INSERT 落 DB default null / UPDATE 保留原值」。
+  let deviceGroupId: string | undefined;
+  if (groupCode) {
+    try {
+      const grp = await getDeviceGroupByTenantAndCode({
+        tenantId: config.tenantId,
+        code: groupCode,
+      });
+      deviceGroupId = grp.id;
+    } catch (e) {
+      console.warn(
+        `[Win MDM] device_group code "${groupCode}" 解析失敗（tenant=${slug}），保留設備既有 device_group_id（首次 enroll 則為 null）：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
 
   const deviceId = parsed.context.DeviceID ||
     parsed.context["DeviceID"] ||
@@ -187,6 +215,7 @@ w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", async (c) => {
   await enrollWindowsDevice({
     tenantId: config.tenantId,
     selfMdmConfigId: config.id,
+    deviceGroupId,
     udid,
     windowsDeviceId: deviceId,
     windowsHardwareId: hardwareId,
@@ -201,8 +230,13 @@ w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", async (c) => {
     subject: `CN=${deviceId}`,
   });
 
+  const groupTag = groupCode
+    ? deviceGroupId
+      ? ` group=${groupCode} gid=${deviceGroupId}`
+      : ` group=${groupCode} [unresolved → keep existing group_id]`
+    : "";
   console.log(
-    `[Win MDM] Enrolled (tenant=${slug}): deviceId=${deviceId} udid=${udid}`,
+    `[Win MDM] Enrolled (tenant=${slug}${groupTag}): deviceId=${deviceId} udid=${udid}`,
   );
 
   // enrollment hook: 禁手動註銷 + 隱藏復原頁面
@@ -260,6 +294,48 @@ w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", async (c) => {
 
   setSoapHeaders(c, SOAP_ENROLLMENT_RESP, result.soapResponse);
   return c.body(result.soapResponse, 200);
+}
+
+/** POST /t/:tenantSlug/EnrollmentServer/Enrollment.svc — 設備直屬 tenant */
+w.post("/t/:tenantSlug/EnrollmentServer/Enrollment.svc", (c) =>
+  handleEnrollmentRequest(c, c.req.param("tenantSlug")),
+);
+
+/** POST /t/:tenantSlug/g/:groupCode/EnrollmentServer/Enrollment.svc — 設備歸屬 device_group */
+w.post("/t/:tenantSlug/g/:groupCode/EnrollmentServer/Enrollment.svc", (c) =>
+  handleEnrollmentRequest(c, c.req.param("tenantSlug"), c.req.param("groupCode")),
+);
+
+/** POST /t/:tenantSlug/g/:groupCode/EnrollmentServer/Discovery.svc */
+w.post("/t/:tenantSlug/g/:groupCode/EnrollmentServer/Discovery.svc", async (c) => {
+  const slug = c.req.param("tenantSlug");
+  const groupCode = c.req.param("groupCode");
+  const xml = await c.req.text();
+  const req = parseDiscoverRequest(xml);
+  if (!req.messageId) return c.text("missing MessageID", 400);
+
+  const baseUrl = getBaseUrl(c);
+  // 把 /g/{code} 段帶入 Discovery 響應的 baseUrl，後續 Policy / Enrollment URL 自動帶上
+  const tenantBase = `${baseUrl}/t/${slug}/g/${groupCode}`;
+  const responseXml = buildDiscoverResponse({
+    requestMessageId: req.messageId,
+    baseUrl: tenantBase,
+  });
+  console.log(
+    `[Win MDM] Discovery (tenant=${slug} group=${groupCode}): email=${req.emailAddress ?? "?"} baseUrl=${tenantBase}`,
+  );
+  setSoapHeaders(c, SOAP_DISCOVER_RESP, responseXml);
+  return c.body(responseXml, 200);
+});
+
+/** POST /t/:tenantSlug/g/:groupCode/EnrollmentServer/Policy.svc — 響應內容與 non-group 相同 */
+w.post("/t/:tenantSlug/g/:groupCode/EnrollmentServer/Policy.svc", async (c) => {
+  const xml = await c.req.text();
+  const messageId = parsePolicyMessageId(xml);
+  if (!messageId) return c.text("missing MessageID", 400);
+  const responseXml = buildPolicyResponse({ requestMessageId: messageId });
+  setSoapHeaders(c, SOAP_POLICY_RESP, responseXml);
+  return c.body(responseXml, 200);
 });
 
 // ============================================================

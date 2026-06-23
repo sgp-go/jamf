@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "~/db/client.ts";
-import { tenants } from "~/db/schema/tenants.ts";
+import { deviceGroups, tenants } from "~/db/schema/tenants.ts";
 import { selfMdmConfigs } from "~/db/schema/self-mdm.ts";
 import { AppError } from "~/lib/errors.ts";
+
+/**
+ * device_group.code 進 PPKG DiscoveryUrl 的 `/g/{code}` 段，必須 URL-safe。
+ * 限 [a-z0-9-_]，1~64 字元。schema 層已有 length 限制，這裡再卡字符集。
+ */
+const DEVICE_GROUP_CODE_PATTERN = /^[a-z0-9_-]{1,64}$/;
 
 /**
  * 生成 Windows Provisioning Package customizations.xml（USB PPKG 用，W3 主軸 4）。
@@ -60,6 +66,14 @@ export interface LocalAccountCustomization {
 
 export interface GeneratePpkgInput {
   tenantId: string;
+  /**
+   * 設備 enroll 後自動歸屬的 device_group UUID（學校）。省略 → 設備直屬 tenant（教育局），
+   * 後續可透過 PATCH /tenants/{tid}/devices/{did} 手動分配。
+   *
+   * Service 會校驗 group ⊂ tenant + group.code URL-safe，並在 DiscoveryUrl 中嵌入
+   * `/g/{code}` 段。Windows enrollment 路由解析這段後落庫到 mdm_devices.device_group_id。
+   */
+  deviceGroupId?: string;
   /** Enrollment 服務帳號 UPN（如 enrollment@school.local） */
   upn: string;
   /** OnPremise=password / Certificate=thumbprint；對應 authPolicy */
@@ -82,6 +96,8 @@ export interface GeneratePpkgResult {
 export interface RenderContext {
   tenant: { slug: string; displayName: string | null };
   cfg: { publicBaseUrl: string };
+  /** 校驗通過的 device_group（code 已驗 URL-safe），null = 直屬 tenant */
+  deviceGroup: { code: string; displayName: string | null } | null;
   /** 完整 input（含 upn / secret / authPolicy / wifi / localAccounts） */
   input: GeneratePpkgInput;
 }
@@ -127,12 +143,43 @@ export async function generatePpkgCustomizations(
     );
   }
 
+  // device_group 校驗：必須屬於同一 tenant，且 code 必須 URL-safe（會進 DiscoveryUrl path）
+  let deviceGroup: { code: string; displayName: string | null } | null = null;
+  if (input.deviceGroupId) {
+    const row = await db.query.deviceGroups.findFirst({
+      where: and(
+        eq(deviceGroups.id, input.deviceGroupId),
+        eq(deviceGroups.tenantId, input.tenantId),
+      ),
+      columns: { code: true, displayName: true },
+    });
+    if (!row) {
+      throw new AppError(
+        404,
+        "device_group_not_found",
+        "Device group not found in this tenant",
+      );
+    }
+    if (!DEVICE_GROUP_CODE_PATTERN.test(row.code)) {
+      throw new AppError(
+        400,
+        "device_group_code_not_url_safe",
+        `device_group.code "${row.code}" 含非 URL-safe 字符（限 [a-z0-9_-]，需先 PATCH 更新 code 才能用於 PPKG）`,
+      );
+    }
+    deviceGroup = { code: row.code, displayName: row.displayName };
+  }
+
   const timestamp = new Date().toISOString().slice(0, 10);
-  const packageName = `cogrow-${tenant.slug}-${timestamp}`;
+  // group 帶上時檔名含 group code，方便 IT 區分多份 PPKG
+  const packageName = deviceGroup
+    ? `cogrow-${tenant.slug}-${deviceGroup.code}-${timestamp}`
+    : `cogrow-${tenant.slug}-${timestamp}`;
 
   const xml = renderCustomizationsXml({
     tenant: { slug: tenant.slug, displayName: tenant.displayName },
     cfg: { publicBaseUrl: cfg.publicBaseUrl },
+    deviceGroup,
     input,
   });
 
@@ -148,14 +195,20 @@ export async function generatePpkgCustomizations(
  * 拆出來方便 unit test 不依賴 DB（且未來 admin UI 用 dry-run preview 也好對接）。
  */
 export function renderCustomizationsXml(ctx: RenderContext): string {
-  const { tenant, cfg, input } = ctx;
+  const { tenant, cfg, deviceGroup, input } = ctx;
 
+  const groupSegment = deviceGroup ? `/g/${deviceGroup.code}` : "";
   const discoveryUrl =
-    `${cfg.publicBaseUrl.replace(/\/+$/, "")}/t/${tenant.slug}/EnrollmentServer/Discovery.svc`;
+    `${cfg.publicBaseUrl.replace(/\/+$/, "")}/t/${tenant.slug}${groupSegment}/EnrollmentServer/Discovery.svc`;
   const packageId = randomUUID();
   const timestamp = new Date().toISOString().slice(0, 10);
-  const packageName = `cogrow-${tenant.slug}-${timestamp}`;
-  const notesTarget = tenant.displayName ?? tenant.slug;
+  const packageName = deviceGroup
+    ? `cogrow-${tenant.slug}-${deviceGroup.code}-${timestamp}`
+    : `cogrow-${tenant.slug}-${timestamp}`;
+  const tenantLabel = tenant.displayName ?? tenant.slug;
+  const notesTarget = deviceGroup
+    ? `${tenantLabel} / ${deviceGroup.displayName ?? deviceGroup.code}`
+    : tenantLabel;
 
   const lines: string[] = [
     `<?xml version="1.0" encoding="utf-8"?>`,

@@ -65,6 +65,25 @@ export async function getDeviceGroup(opts: { tenantId: string; deviceGroupId: st
   return row;
 }
 
+/**
+ * 依 (tenantId, code) 查 device_group。Windows enrollment 從 PPKG DiscoveryUrl 的
+ * `/g/{code}` 段解析後用此函式落庫。
+ *
+ * 找不到 → 404 device_group_not_found（caller 自決定要 hard fail 還是 fallback 到
+ * 「直屬 tenant」即不寫 deviceGroupId）。
+ */
+export async function getDeviceGroupByTenantAndCode(opts: {
+  tenantId: string;
+  code: string;
+}) {
+  const row = await db.query.deviceGroups.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.code, opts.code), eqOp(t.tenantId, opts.tenantId)),
+  });
+  if (!row) throw new AppError(404, "device_group_not_found", "Device group not found");
+  return row;
+}
+
 export async function updateDeviceGroup(opts: {
   tenantId: string;
   deviceGroupId: string;

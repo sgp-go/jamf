@@ -68,6 +68,18 @@ export async function enrollWindowsDevice(input: {
   windowsHardwareId?: string | null;
   deviceName?: string | null;
   osVersion?: string | null;
+  /**
+   * device_group 歸屬，三態語義（INSERT 與 UPDATE 對稱）：
+   * - `undefined`（省略）→ 不寫該欄位。INSERT 走 DB default（null=直屬 tenant）；
+   *   UPDATE **保留原值**（避免 fail-safe 重 enroll 把學校歸屬誤清）。
+   * - `null` → 顯式寫 null（清空歸屬，回直屬 tenant）。
+   * - `string` UUID → 顯式寫入該 group。
+   *
+   * Route 層（windows-mdm.ts handleEnrollmentRequest）只會傳 `undefined` 或 `string`：
+   *   group 解析成功 → string；非 group 路由 / fail-safe → undefined。
+   *   顯式 null 留給其他 caller（PATCH /tenants/{tid}/devices/{did} 等想清空的場景）。
+   */
+  deviceGroupId?: string | null;
 }): Promise<string> {
   const existing = await db.query.mdmDevices.findFirst({
     where: eq(mdmDevices.windowsDeviceId, input.windowsDeviceId),
@@ -75,39 +87,44 @@ export async function enrollWindowsDevice(input: {
   });
 
   if (existing) {
-    await db
-      .update(mdmDevices)
-      .set({
-        udid: input.udid,
-        windowsHardwareId: input.windowsHardwareId ?? null,
-        deviceName: input.deviceName ?? null,
-        osVersion: input.osVersion ?? null,
-        enrollmentStatus: "enrolled",
-        enrollmentType: "ppkg",
-        selfMdmConfigId: input.selfMdmConfigId,
-        selfMdmManaged: true,
-        enrolledAt: new Date(),
-      })
-      .where(eq(mdmDevices.id, existing.id));
-    return existing.id;
-  }
-
-  const [row] = await db
-    .insert(mdmDevices)
-    .values({
-      tenantId: input.tenantId,
-      selfMdmConfigId: input.selfMdmConfigId,
-      platform: "windows",
+    const patch: Record<string, unknown> = {
       udid: input.udid,
-      windowsDeviceId: input.windowsDeviceId,
       windowsHardwareId: input.windowsHardwareId ?? null,
       deviceName: input.deviceName ?? null,
       osVersion: input.osVersion ?? null,
       enrollmentStatus: "enrolled",
       enrollmentType: "ppkg",
+      selfMdmConfigId: input.selfMdmConfigId,
       selfMdmManaged: true,
       enrolledAt: new Date(),
-    })
+    };
+    if (input.deviceGroupId !== undefined) {
+      patch.deviceGroupId = input.deviceGroupId;
+    }
+    await db.update(mdmDevices).set(patch).where(eq(mdmDevices.id, existing.id));
+    return existing.id;
+  }
+
+  const insertValues: typeof mdmDevices.$inferInsert = {
+    tenantId: input.tenantId,
+    selfMdmConfigId: input.selfMdmConfigId,
+    platform: "windows",
+    udid: input.udid,
+    windowsDeviceId: input.windowsDeviceId,
+    windowsHardwareId: input.windowsHardwareId ?? null,
+    deviceName: input.deviceName ?? null,
+    osVersion: input.osVersion ?? null,
+    enrollmentStatus: "enrolled",
+    enrollmentType: "ppkg",
+    selfMdmManaged: true,
+    enrolledAt: new Date(),
+  };
+  if (input.deviceGroupId !== undefined) {
+    insertValues.deviceGroupId = input.deviceGroupId;
+  }
+  const [row] = await db
+    .insert(mdmDevices)
+    .values(insertValues)
     .returning({ id: mdmDevices.id });
   return row.id;
 }

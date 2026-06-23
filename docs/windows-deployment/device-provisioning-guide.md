@@ -122,6 +122,7 @@ curl -X POST \
   "https://<後端域名>/api/v1/admin/tenants/<tenantId>/enrollment/ppkg-config" \
   -o customizations.xml \
   -d '{
+    "deviceGroupId": "<該校 device_group UUID>",
     "upn": "enrollment@school.local",
     "secret": "<enrollment 密碼>",
     "wifi": [
@@ -138,10 +139,15 @@ curl -X POST \
 
 | 參數 | 必填 | 說明 |
 |---|---|---|
+| `deviceGroupId` | 選填 | 該校 `device_group` UUID。**帶上** → PPKG 含 `/g/{code}` 段，設備 enroll 即自動歸校；**省略** → 設備直屬教育局（tenant），後續可 PATCH 分配 |
 | `upn` | ✅ | Enrollment 服務帳號（任意含 `@`），bulk enrollment 用 |
 | `secret` | ✅ | OnPremise 模式密碼（後端不驗證，任意值）|
 | `wifi[]` | 選填 | `ssid` + `securityType`(Open/WEP/WPA2-Personal) + `securityKey`。**強烈建議填**，否則 OOBE 要手動連網 |
 | `localAccounts[]` | 選填 | `username` + `password` + `isAdmin`。**`isAdmin:false`=學生標準帳號（必須）**；`isAdmin:true`=IT 管理帳號 |
+
+> 💡 **每校一份 PPKG 的命名規則**：API 回傳的檔名會自動帶 group code，例如 `cogrow-{tenant-slug}-{group-code}-{date}-customizations.xml`，IT 區分多份 PPKG 不會搞混。
+>
+> ⚠️ **device_group.code 必須是 URL-safe**（`[a-z0-9_-]{1,64}`）。如果建 group 時 code 含中文 / 空格 / 大寫，PPKG 生成會回 400 `device_group_code_not_url_safe`，需先 PATCH 改 code 才能用於 PPKG。
 
 > ⚠️ **安全**：`customizations.xml` 含明文 WiFi 金鑰與帳號密碼。產出後妥善保管，build 完即刪，勿外流。
 

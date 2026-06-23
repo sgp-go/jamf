@@ -4,6 +4,7 @@ import { renderCustomizationsXml, type RenderContext } from "./enrollment-ppkg.t
 const baseCtx: RenderContext = {
   tenant: { slug: "demo", displayName: "Demo School" },
   cfg: { publicBaseUrl: "https://mdm.example.com" },
+  deviceGroup: null,
   input: {
     tenantId: "00000000-0000-0000-0000-000000000000",
     upn: "enrollment@demo.example.com",
@@ -265,4 +266,66 @@ Deno.test("renderCustomizationsXml: XML 格式骨架正確（PackageConfig + Set
   assertStringIncludes(xml, `<PackageConfig xmlns="urn:schemas-Microsoft-com:Windows-ICD-Package-Config.v1.0">`);
   assertStringIncludes(xml, `<Settings xmlns="urn:schemas-microsoft-com:windows-provisioning">`);
   assertStringIncludes(xml, `</WindowsCustomizations>`);
+});
+
+// ──────────────────────────────────────────────────────────────
+// device_group 段：PPKG DiscoveryUrl 嵌入 /g/{code}，設備 enroll 即歸組
+// ──────────────────────────────────────────────────────────────
+
+Deno.test("renderCustomizationsXml: deviceGroup 帶入 DiscoveryUrl /g/{code} 段", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    deviceGroup: { code: "guangfu-es", displayName: "光復國小" },
+  });
+  assertStringIncludes(
+    xml,
+    "<DiscoveryServiceFullUrl>https://mdm.example.com/t/demo/g/guangfu-es/EnrollmentServer/Discovery.svc</DiscoveryServiceFullUrl>",
+  );
+});
+
+Deno.test("renderCustomizationsXml: deviceGroup=null 時 DiscoveryUrl 不含 /g/ 段（向後相容）", () => {
+  const xml = renderCustomizationsXml(baseCtx);
+  assertStringIncludes(
+    xml,
+    "<DiscoveryServiceFullUrl>https://mdm.example.com/t/demo/EnrollmentServer/Discovery.svc</DiscoveryServiceFullUrl>",
+  );
+  assertEquals(xml.includes("/g/"), false);
+});
+
+Deno.test("renderCustomizationsXml: deviceGroup 帶 displayName 進 Notes（tenant / group 雙標）", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    deviceGroup: { code: "guangfu-es", displayName: "光復國小" },
+  });
+  assertStringIncludes(xml, "for tenant Demo School / 光復國小</Notes>");
+});
+
+Deno.test("renderCustomizationsXml: deviceGroup displayName=null 時 Notes fallback 到 code", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    deviceGroup: { code: "guangfu-es", displayName: null },
+  });
+  assertStringIncludes(xml, "for tenant Demo School / guangfu-es</Notes>");
+});
+
+Deno.test("renderCustomizationsXml: deviceGroup 帶入 Name=cogrow-{slug}-{code}-{date}", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    deviceGroup: { code: "guangfu-es", displayName: "光復國小" },
+  });
+  const m = xml.match(/<Name>(cogrow-demo-guangfu-es-\d{4}-\d{2}-\d{2})<\/Name>/);
+  assertEquals(m !== null, true);
+});
+
+Deno.test("renderCustomizationsXml: publicBaseUrl trailing slash + deviceGroup 不重複斜線", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    cfg: { publicBaseUrl: "https://mdm.example.com/" },
+    deviceGroup: { code: "guangfu-es", displayName: null },
+  });
+  assertStringIncludes(
+    xml,
+    "https://mdm.example.com/t/demo/g/guangfu-es/EnrollmentServer/Discovery.svc",
+  );
+  assertEquals(xml.includes("https://mdm.example.com//t"), false);
 });

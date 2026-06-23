@@ -148,6 +148,32 @@ status: z.enum(["draft", "active", "archived"]).openapi({
 }),
 ```
 
+### Optional 欄位視覺標記
+
+OpenAPI 3.x 規範 + Scalar / Swagger UI / Redoc 等渲染器的約定是「**只顯示 required 標籤，不顯示 optional**」（`required` 是 schema 層的 string[]，不是欄位自身屬性）。對外接的台灣團隊看 UI 時無法一眼分辨「沒標 required 就是選填」。
+
+**規則**：所有 `.optional()` / `.nullable()` 欄位的 `description` **必須以 `**【選填】**` 起頭**，required 欄位則不加。
+
+```ts
+// ✅ 對：選填明確標出
+deviceGroupId: z.string().uuid().optional().openapi({
+  description: "**【選填】** 設備 enroll 後自動歸屬的 device_group UUID...",
+}),
+authPolicy: z.enum(["OnPremise", "Certificate"]).optional().openapi({
+  description: "**【選填】** 預設 OnPremise；Certificate 尚未驗證 schema",
+}),
+
+// ❌ 不對：選填字段沒視覺標記，台灣團隊只能靠反推
+deviceGroupId: z.string().uuid().optional().openapi({
+  description: "設備 enroll 後自動歸屬的 device_group UUID...",
+}),
+```
+
+**例外**：
+- path param 永遠是 required，不加
+- query param 帶 `.default()` 視為「有預設可省略」，在描述裡寫「預設 X」即可，不加「【選填】」前綴
+- nested schema 內部欄位（如 `wifiSchema.securityKey`）按其在 nested schema 自身的 optional 性決定
+
 ---
 
 ## 5. Response 規則
@@ -183,6 +209,7 @@ responses: {
 - [ ] 所有 path param 有 description + example
 - [ ] 所有 query param 有 description
 - [ ] Schema 業務欄位有 description
+- [ ] **Optional / nullable 欄位 description 以 `**【選填】**` 起頭**（path / default query 除外）
 - [ ] Response description 描述返回內容
 - [ ] Tag 在 server.ts 的 `tags` 與 `x-tagGroups` 中均有聲明
 - [ ] 不可逆操作有警告
