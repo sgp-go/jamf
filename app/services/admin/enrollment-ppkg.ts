@@ -62,6 +62,14 @@ export interface LocalAccountCustomization {
   password: string;
   /** 是否加入 Administrators 群組（預設 false=Standard Users） */
   isAdmin?: boolean;
+  /**
+   * 強制此帳號**首次登入時必須改密碼**。為 true 的帳號會匯入到 PPKG
+   * `ProvisioningCommands/DeviceContext/CommandLine`，PPKG 套用時以 SYSTEM 跑
+   * `net user <username> /logonpasswordchg:yes`。
+   *
+   * 教育場景常見用法：PPKG 配統一臨時密碼 + 此旗標 → 學生首次登入被迫自設密碼。
+   */
+  forceChangePasswordAtNextLogon?: boolean;
 }
 
 export interface GeneratePpkgInput {
@@ -80,10 +88,26 @@ export interface GeneratePpkgInput {
   secret: string;
   /** 預設 OnPremise；Certificate 需 W4 後續真機驗證 schema */
   authPolicy?: AuthPolicy;
-  /** WiFi profile 清單（PPKG 安裝後預配）；schema 待 GUI 反向工程 */
-  wifi?: WifiCustomization[];
+  /**
+   * WiFi profile 清單（PPKG 安裝後預配）。**必填且至少 1 個**——OOBE 階段裝置在
+   * 套用 PPKG 之前是斷網的，沒 WiFi 就無法跑 enrollment（Discovery / Policy /
+   * Enrollment 三段都打不到後端）。2026-06-25 真機驗證確認過：少 wifi 段直接
+   * 出「註冊管理設備失敗」彈窗。
+   *
+   * 桌機 / 有線網路場景目前不支援——下次有需求時加一個 `allowNoWifi: true`
+   * 旗標單獨開放（YAGNI 先不做）。
+   */
+  wifi: WifiCustomization[];
   /** 本機帳號（學生 standard + admin）；schema 待 GUI 反向工程 */
   localAccounts?: LocalAccountCustomization[];
+  /**
+   * 啟用 PPKG `OOBE/Desktop/HideOobe=True`，套用時隱藏 OOBE 互動畫面。
+   *
+   * ⚠️ Win10 22H2 上 HideOobe 並不等同完全 bypass OOBE — 不保證能跳過「設備設定方式」
+   * 等畫面。完整 bypass OOBE 在 MS 官方流程靠 unattend.xml 不靠 PPKG。設此旗標只能減
+   * 少互動，仍需真機驗證效果。
+   */
+  skipOobe?: boolean;
 }
 
 export interface GeneratePpkgResult {
@@ -114,6 +138,13 @@ export async function generatePpkgCustomizations(
   }
   if (!input.secret) {
     throw new AppError(400, "invalid_secret", "secret required");
+  }
+  if (!input.wifi || input.wifi.length === 0) {
+    throw new AppError(
+      400,
+      "wifi_required",
+      "wifi must contain at least 1 SSID. OOBE 階段裝置在套 PPKG 前是斷網的，沒 WiFi 段 enrollment 必失敗（2026-06-25 真機驗證）",
+    );
   }
 
   const tenant = await db.query.tenants.findFirst({
@@ -229,14 +260,35 @@ export function renderCustomizationsXml(ctx: RenderContext): string {
   // Workplace/Enrollments — required（每個 PPKG 都要有 enrollment 段）
   lines.push(renderEnrollmentSection(input, discoveryUrl));
 
-  // 可選 WiFi
-  if (input.wifi && input.wifi.length > 0) {
-    lines.push(renderWifiSection(input.wifi));
+  // WiFi 必填（2026-06-25 改）——pure-function 內也擋一道，防 TS `as any` 繞過 type
+  if (!input.wifi || input.wifi.length === 0) {
+    throw new AppError(
+      400,
+      "wifi_required",
+      "wifi must contain at least 1 SSID. OOBE 階段裝置斷網，沒 WiFi 段 enrollment 必失敗",
+    );
   }
+  lines.push(renderWifiSection(input.wifi));
 
   // 可選本機帳號
   if (input.localAccounts && input.localAccounts.length > 0) {
     lines.push(renderAccountsSection(input.localAccounts));
+  }
+
+  // 可選 OOBE skip
+  if (input.skipOobe) {
+    lines.push(renderOobeSection());
+  }
+
+  // 可選 ProvisioningCommands —— 從帶 forceChangePasswordAtNextLogon=true 的
+  // localAccount 自動組 `net user <u> /logonpasswordchg:yes` 命令鏈。
+  if (input.localAccounts && input.localAccounts.length > 0) {
+    const forced = input.localAccounts.filter(
+      (a) => a.forceChangePasswordAtNextLogon,
+    );
+    if (forced.length > 0) {
+      lines.push(renderProvisioningCommandsSection(forced));
+    }
   }
 
   lines.push(`      </Common>`);
@@ -399,6 +451,82 @@ function renderAccountsSection(accounts: LocalAccountCustomization[]): string {
   );
 
   return lines.join("\n");
+}
+
+/**
+ * OOBE skip 段 — 2026-06-25 Win10 ICD GUI export 反向工程 schema：
+ *
+ *   <OOBE>
+ *     <Desktop>
+ *       <HideOobe>True</HideOobe>            <!-- 注意 "Oobe" 小寫 obe -->
+ *     </Desktop>
+ *   </OOBE>
+ *
+ * ICD GUI 在 `OOBE/Desktop` 段下只暴露 `HideOobe` 與 `EnableCortanaVoice` 兩個布林，
+ * 沒有 SkipMachineOOBE / SkipUserOOBE。HideOobe 只能隱藏部分 OOBE 互動，**不保證**
+ * 完全 bypass 帳號類型選擇頁。真機驗證後若仍卡 OOBE 需走 unattend.xml 方案。
+ */
+function renderOobeSection(): string {
+  return [
+    `        <OOBE>`,
+    `          <Desktop>`,
+    `            <HideOobe>True</HideOobe>`,
+    `          </Desktop>`,
+    `        </OOBE>`,
+  ].join("\n");
+}
+
+/**
+ * Windows 本機帳號 username 安全字符集 —— 為了讓 username 進 PPKG ProvisioningCommands
+ * `cmd /c net user <username> /logonpasswordchg:yes` 命令安全，限制為純字母數字 + 三個
+ * 標點符號（`. _ -`），長度 1~20（Windows 本機帳號上限）。
+ *
+ * 為什麼要在此重新校驗：ProvisioningCommands CommandLine 是進 batch shell 的字串，
+ * username 帶 `& | < > " ^ %` 等字符會 shell injection。Accounts/Users 段的 username
+ * 走 XML escape 沒這風險，但批次命令 escape 規則跟 XML 不同，分開校驗更穩。
+ */
+const SAFE_NET_USER_NAME = /^[A-Za-z0-9._-]{1,20}$/;
+
+/**
+ * ProvisioningCommands 段 — 2026-06-25 Win10 ICD GUI export 反向工程 schema：
+ *
+ *   <ProvisioningCommands>
+ *     <DeviceContext>
+ *       <CommandLine>cmd /c net user student /logonpasswordchg:yes</CommandLine>
+ *     </DeviceContext>
+ *   </ProvisioningCommands>
+ *
+ * DeviceContext 段下 ICD 只暴露 `CommandFiles` 與 `CommandLine` 兩個葉子節點
+ * （不是列表，每個 PPKG 一條），CommandLine 以 SYSTEM 身分執行，OOBE 完成前跑。
+ *
+ * 多個 user 要強制改密 → 用 `&&` 串成一行（前一條失敗後續不跑；改 `&` 會無條件繼續，
+ * 教育場景失敗應暴露不應吞，故用 `&&`）。
+ */
+function renderProvisioningCommandsSection(
+  forcedAccounts: LocalAccountCustomization[],
+): string {
+  for (const a of forcedAccounts) {
+    if (!SAFE_NET_USER_NAME.test(a.username)) {
+      throw new AppError(
+        400,
+        "invalid_username_for_provisioning_command",
+        `username "${a.username}" 含非安全字符（限 [A-Za-z0-9._-]，長度 1~20），無法安全進 PPKG ProvisioningCommands CommandLine`,
+      );
+    }
+  }
+
+  const netUserCmds = forcedAccounts
+    .map((a) => `net user ${a.username} /logonpasswordchg:yes`)
+    .join(" && ");
+  const commandLine = `cmd /c ${netUserCmds}`;
+
+  return [
+    `        <ProvisioningCommands>`,
+    `          <DeviceContext>`,
+    `            <CommandLine>${escapeXmlText(commandLine)}</CommandLine>`,
+    `          </DeviceContext>`,
+    `        </ProvisioningCommands>`,
+  ].join("\n");
 }
 
 // ──────────────────────────────────────────────────────────────

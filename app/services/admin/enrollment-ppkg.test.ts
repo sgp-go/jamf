@@ -1,6 +1,7 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "jsr:@std/assert@^1";
 import { renderCustomizationsXml, type RenderContext } from "./enrollment-ppkg.ts";
 
+// WiFi 必填（2026-06-25 改）——base fixture 帶一個預設 SSID，避免每個 test 都得自帶
 const baseCtx: RenderContext = {
   tenant: { slug: "demo", displayName: "Demo School" },
   cfg: { publicBaseUrl: "https://mdm.example.com" },
@@ -9,6 +10,7 @@ const baseCtx: RenderContext = {
     tenantId: "00000000-0000-0000-0000-000000000000",
     upn: "enrollment@demo.example.com",
     secret: "P@ssw0rd!",
+    wifi: [{ ssid: "Default-WiFi", securityKey: "default-pass" }],
   },
 };
 
@@ -85,8 +87,35 @@ Deno.test("renderCustomizationsXml: authPolicy=Certificate throw 501（未驗證
 });
 
 // ──────────────────────────────────────────────────────────────
-// WiFi 段 — 2026-05-28 Win10 ICD GUI export 反向工程 schema
+// WiFi 段 — 必填（2026-06-25 真機驗證後改硬性）+ schema 反向工程
 // ──────────────────────────────────────────────────────────────
+
+Deno.test("renderCustomizationsXml: wifi=[] 空陣列 → throw 400（必填防線）", () => {
+  assertThrows(
+    () =>
+      renderCustomizationsXml({
+        ...baseCtx,
+        // deno-lint-ignore no-explicit-any
+        input: { ...baseCtx.input, wifi: [] as any },
+      }),
+    Error,
+    "must contain at least 1 SSID",
+  );
+});
+
+Deno.test("renderCustomizationsXml: wifi 缺失（TS as any 繞過）→ throw 400", () => {
+  assertThrows(
+    () => {
+      const input = { ...baseCtx.input };
+      // deno-lint-ignore no-explicit-any
+      delete (input as any).wifi;
+      // deno-lint-ignore no-explicit-any
+      return renderCustomizationsXml({ ...baseCtx, input: input as any });
+    },
+    Error,
+    "must contain at least 1 SSID",
+  );
+});
 
 Deno.test("renderCustomizationsXml: WiFi 單個 WPA2-Personal SSID 完整段", () => {
   const xml = renderCustomizationsXml({
@@ -225,6 +254,156 @@ Deno.test("renderCustomizationsXml: localAccount 多個 user 並列在同一 Use
   const adminCount = (xml.match(/<UserGroup>Administrators<\/UserGroup>/g) || []).length;
   assertEquals(standardCount, 2);
   assertEquals(adminCount, 1);
+});
+
+// ──────────────────────────────────────────────────────────────
+// OOBE skip 段 — 2026-06-25 Win10 ICD GUI export 反向工程 schema
+// ──────────────────────────────────────────────────────────────
+
+Deno.test("renderCustomizationsXml: skipOobe=true 渲染 HideOobe 段", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    input: { ...baseCtx.input, skipOobe: true },
+  });
+  assertStringIncludes(xml, `<OOBE>`);
+  assertStringIncludes(xml, `<Desktop>`);
+  assertStringIncludes(xml, `<HideOobe>True</HideOobe>`);
+});
+
+Deno.test("renderCustomizationsXml: skipOobe 不傳/false → 不渲染 OOBE 段", () => {
+  const xmlOmitted = renderCustomizationsXml(baseCtx);
+  assertEquals(xmlOmitted.includes("<OOBE>"), false);
+  assertEquals(xmlOmitted.includes("<HideOobe>"), false);
+
+  const xmlFalse = renderCustomizationsXml({
+    ...baseCtx,
+    input: { ...baseCtx.input, skipOobe: false },
+  });
+  assertEquals(xmlFalse.includes("<OOBE>"), false);
+});
+
+// ──────────────────────────────────────────────────────────────
+// ProvisioningCommands 段 — 強制首次登入改密
+// ──────────────────────────────────────────────────────────────
+
+Deno.test("renderCustomizationsXml: forceChangePasswordAtNextLogon=true 渲染 net user 命令", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    input: {
+      ...baseCtx.input,
+      localAccounts: [
+        {
+          username: "student",
+          password: "TempPass!1",
+          forceChangePasswordAtNextLogon: true,
+        },
+      ],
+    },
+  });
+  assertStringIncludes(xml, `<ProvisioningCommands>`);
+  assertStringIncludes(xml, `<DeviceContext>`);
+  assertStringIncludes(
+    xml,
+    `<CommandLine>cmd /c net user student /logonpasswordchg:yes</CommandLine>`,
+  );
+});
+
+Deno.test("renderCustomizationsXml: 多個 forceChangePasswordAtNextLogon 串成 && 鏈", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    input: {
+      ...baseCtx.input,
+      localAccounts: [
+        { username: "stu-a", password: "a", forceChangePasswordAtNextLogon: true },
+        { username: "stu-b", password: "b" }, // 不強制 → 不進命令
+        { username: "stu-c", password: "c", forceChangePasswordAtNextLogon: true },
+      ],
+    },
+  });
+  // 注意 && 在 XML text 內會被 escape 成 &amp;&amp;（escapeXmlText 處理）
+  assertStringIncludes(
+    xml,
+    `<CommandLine>cmd /c net user stu-a /logonpasswordchg:yes &amp;&amp; net user stu-c /logonpasswordchg:yes</CommandLine>`,
+  );
+  // stu-b 不該出現在 ProvisioningCommands 段（但仍在 Accounts 段）
+  assertEquals(
+    xml.includes("net user stu-b /logonpasswordchg:yes"),
+    false,
+  );
+});
+
+Deno.test("renderCustomizationsXml: 沒有 forceChangePasswordAtNextLogon → 不渲染 ProvisioningCommands 段", () => {
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    input: {
+      ...baseCtx.input,
+      localAccounts: [
+        { username: "stu-only", password: "p" }, // 不強制
+      ],
+    },
+  });
+  assertEquals(xml.includes("<ProvisioningCommands>"), false);
+  assertEquals(xml.includes("/logonpasswordchg"), false);
+});
+
+Deno.test("renderCustomizationsXml: username 含非安全字符 → throw 400（batch injection 防線）", () => {
+  // username 含 `&` → 直接 batch injection
+  assertThrows(
+    () =>
+      renderCustomizationsXml({
+        ...baseCtx,
+        input: {
+          ...baseCtx.input,
+          localAccounts: [
+            {
+              username: "stu&whoami",
+              password: "p",
+              forceChangePasswordAtNextLogon: true,
+            },
+          ],
+        },
+      }),
+    Error,
+    "含非安全字符",
+  );
+
+  // 中文 / 空格也應被擋（Windows 本機帳號允許但對 batch 不安全）
+  assertThrows(
+    () =>
+      renderCustomizationsXml({
+        ...baseCtx,
+        input: {
+          ...baseCtx.input,
+          localAccounts: [
+            {
+              username: "stu 01",
+              password: "p",
+              forceChangePasswordAtNextLogon: true,
+            },
+          ],
+        },
+      }),
+    Error,
+    "含非安全字符",
+  );
+});
+
+Deno.test("renderCustomizationsXml: username 安全字符（A-Za-z0-9._-）放行", () => {
+  // 不應 throw
+  const xml = renderCustomizationsXml({
+    ...baseCtx,
+    input: {
+      ...baseCtx.input,
+      localAccounts: [
+        {
+          username: "stu_01.test-a",
+          password: "p",
+          forceChangePasswordAtNextLogon: true,
+        },
+      ],
+    },
+  });
+  assertStringIncludes(xml, `net user stu_01.test-a /logonpasswordchg:yes`);
 });
 
 Deno.test("renderCustomizationsXml: localAccount username/password 含特殊字元正確 escape", () => {

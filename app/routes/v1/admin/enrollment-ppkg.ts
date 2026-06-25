@@ -40,7 +40,19 @@ const localAccountSchema = z.object({
   username: z.string().min(1).openapi({ example: "student" }),
   password: z.string().min(1),
   isAdmin: z.boolean().optional().openapi({
-    description: "true=Administrators；省略/false=Standard Users（學生用）",
+    description: "**【選填】** true=Administrators；省略/false=Standard Users（學生用）",
+  }),
+  forceChangePasswordAtNextLogon: z.boolean().optional().openapi({
+    description: [
+      "**【選填】** true=強制此帳號**首次登入時改密碼**（PPKG 套用時以 SYSTEM 跑",
+      "`net user <username> /logonpasswordchg:yes`，多個 true 帳號用 `&&` 串成一條命令）。",
+      "",
+      "教育場景常見組合：PPKG 配統一臨時密碼 + 此旗標 → 學生首次登入被迫自設密碼，",
+      "PPKG 內明文密碼僅作初始派發、不會被學生長期使用。",
+      "",
+      "**安全限制**：username 必須符合 `[A-Za-z0-9._-]{1,20}`（避免 batch shell injection），",
+      "否則回 400 invalid_username_for_provisioning_command。",
+    ].join("\n"),
   }),
 });
 
@@ -66,11 +78,26 @@ const ppkgBody = z.object({
   authPolicy: z.enum(["OnPremise", "Certificate"]).optional().openapi({
     description: "**【選填】** 預設 OnPremise；Certificate 尚未驗證 schema（會回 501）",
   }),
-  wifi: z.array(wifiSchema).optional().openapi({
-    description: "**【選填】** WiFi profile 清單（PPKG 安裝後預配，OOBE 即自動連網）",
+  wifi: z.array(wifiSchema).min(1).openapi({
+    description: [
+      "WiFi profile 清單（至少 1 個 SSID）。**必填**——OOBE 階段裝置在套 PPKG 前",
+      "是斷網的，沒 WiFi 段 enrollment 必失敗（Discovery / Policy / Enrollment 三段",
+      "都打不到後端，2026-06-25 真機驗證）。",
+      "",
+      "桌機 / 有線網路場景目前不支援；如需要請聯繫後端開 `allowNoWifi` 旗標。",
+    ].join("\n"),
   }),
   localAccounts: z.array(localAccountSchema).optional().openapi({
     description: "**【選填】** 本機帳號清單（學生 Standard + IT Admin）",
+  }),
+  skipOobe: z.boolean().optional().openapi({
+    description: [
+      "**【選填】** 啟用 PPKG `OOBE/Desktop/HideOobe=True`，套用時隱藏 OOBE 互動畫面。",
+      "",
+      "⚠️ Win10 22H2 上 `HideOobe` **不保證**完全跳過「您要如何設定此裝置」這類畫面，",
+      "MS 官方完整 bypass OOBE 流程靠 unattend.xml 不靠 PPKG。設此旗標只能減少互動，",
+      "真機驗證後若仍卡 OOBE 需另走 unattend.xml 方案。",
+    ].join("\n"),
   }),
 });
 
@@ -117,6 +144,7 @@ enrollmentPpkgAdminApp.openapi(ppkgConfigSpec, async (c) => {
     authPolicy: body.authPolicy,
     wifi: body.wifi,
     localAccounts: body.localAccounts,
+    skipOobe: body.skipOobe,
   });
   await logAudit({
     ...extractAuditMeta(c),
@@ -131,6 +159,10 @@ enrollmentPpkgAdminApp.openapi(ppkgConfigSpec, async (c) => {
       xmlBytes: xml.length,
       wifiCount: body.wifi?.length ?? 0,
       accountCount: body.localAccounts?.length ?? 0,
+      forceChangePasswordCount:
+        body.localAccounts?.filter((a) => a.forceChangePasswordAtNextLogon)
+          .length ?? 0,
+      skipOobe: body.skipOobe ?? false,
       deviceGroupId: body.deviceGroupId ?? null,
     },
   });

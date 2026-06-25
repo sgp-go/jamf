@@ -62,6 +62,7 @@ Deno.test("generatePpkgCustomizations: 不帶 deviceGroupId → DiscoveryUrl 不
       tenantId,
       upn: "enrollment@school.local",
       secret: "P@ss",
+      wifi: [{ ssid: "Test-WiFi", securityKey: "test-pass" }],
     });
     assertStringIncludes(xml, "/EnrollmentServer/Discovery.svc");
     assertEquals(xml.includes("/g/"), false);
@@ -79,6 +80,7 @@ Deno.test("generatePpkgCustomizations: 帶合法 deviceGroupId → DiscoveryUrl 
         deviceGroupId: groupId,
         upn: "enrollment@school.local",
         secret: "P@ss",
+        wifi: [{ ssid: "Test-WiFi", securityKey: "test-pass" }],
       });
       assertStringIncludes(xml, "/g/guangfu-es/EnrollmentServer/Discovery.svc");
       assertStringIncludes(filename, "-guangfu-es-");
@@ -113,6 +115,7 @@ Deno.test("generatePpkgCustomizations: deviceGroupId 跨 tenant → 404 device_g
               deviceGroupId: foreignGroupId, // 屬於 t2 的 group，但用 t1 生成 PPKG
               upn: "enrollment@school.local",
               secret: "P@ss",
+              wifi: [{ ssid: "Test-WiFi", securityKey: "test-pass" }],
             }),
           "device_group_not_found",
           404,
@@ -131,6 +134,7 @@ Deno.test("generatePpkgCustomizations: deviceGroupId 不存在 → 404 device_gr
           deviceGroupId: "00000000-0000-0000-0000-000000000000",
           upn: "enrollment@school.local",
           secret: "P@ss",
+          wifi: [{ ssid: "Test-WiFi", securityKey: "test-pass" }],
         }),
       "device_group_not_found",
       404,
@@ -150,6 +154,7 @@ Deno.test("generatePpkgCustomizations: group.code 含非 URL-safe 字符 → 400
             deviceGroupId: groupId,
             upn: "enrollment@school.local",
             secret: "P@ss",
+            wifi: [{ ssid: "Test-WiFi", securityKey: "test-pass" }],
           }),
         "device_group_code_not_url_safe",
         400,
