@@ -9,9 +9,9 @@ import {
 
 describe("csp-bitlocker", () => {
   describe("buildBitLockerAdmxInstall", () => {
-    it("產生 ADMX Add 命令", () => {
+    it("產生 ADMX Replace 命令（idempotent upsert）", () => {
       const cmd = buildBitLockerAdmxInstall();
-      expect(cmd.verb).toBe("Add");
+      expect(cmd.verb).toBe("Replace");
       expect(cmd.target).toContain("ADMXInstall/CoGrowMDM/Policy/BitLockerPolicy");
       expect(cmd.format).toBe("chr");
       expect(cmd.data).toContain("CoGrow.MDM.BitLockerPolicies");

@@ -50,12 +50,13 @@ const BITLOCKER_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
 </policyDefinitions>`;
 
 /**
- * BitLocker ADMX ingest（一次性）。重複 Add 回 418，無害。
+ * BitLocker ADMX ingest。用 Replace 統一 idempotent — 見 csp.ts buildLockAdmxInstall
+ * 註解（6/25 真機驗證 Add verb 對 re-enroll 設備永遠 418 → PolicyManager state 不一致）。
  */
 export function buildBitLockerAdmxInstall(): SyncMLCommand {
   return {
     cmdId: "0",
-    verb: "Add",
+    verb: "Replace",
     target:
       `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${ADMX_APP}/Policy/${BITLOCKER_ADMX_ID}`,
     format: "chr",

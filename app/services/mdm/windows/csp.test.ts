@@ -1064,9 +1064,9 @@ Deno.test("buildPersonalizationStatusQuery: 桌布 / 鎖屏 對應正確路徑",
 
 // ===== buildLockAdmxInstall / buildLockState（遠端鎖定，ADMX-backed Policy CSP）=====
 
-Deno.test("buildLockAdmxInstall: Add ADMXInstall + format=chr + 內含 LockState ADMX", () => {
+Deno.test("buildLockAdmxInstall: Replace ADMXInstall（idempotent upsert）+ format=chr + 內含 LockState ADMX", () => {
   const cmd = buildLockAdmxInstall();
-  assertEquals(cmd.verb, "Add");
+  assertEquals(cmd.verb, "Replace");
   assertEquals(
     cmd.target,
     "./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/CoGrowMDM/Policy/AgentPolicy",

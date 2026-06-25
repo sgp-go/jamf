@@ -959,8 +959,11 @@ export function buildRegistryDelete(opts: {
 // 重定向到 Policies 子樹 → Agent 端 LockWatcher/LockState 讀取路徑零改動。
 // 詳見 brain/wiki/admx-backed-policy-registry-write.md。
 //
-// 限制：① 重複 ADMXInstall（Add）回 418 Already exists → ingest 只能一次（放
-// install-agent 流程，見 buildLockAdmxInstall），lock 命令只發 Set Policy。
+// 限制：① 自定義 ADMXInstall 用 `verb=Replace` 統一寫法（idempotent upsert，6/25 真機
+// re-enroll demo 揭露 Add verb 對「設備曾 enroll 過、ADMX template 殘留」場景永遠 418
+// Already exists，PolicyManager 半新半舊 → 後續 Set Policy 命令 ack 200 但實際不寫
+// target Registry，LOCK / LAPS / BitLocker 全鏈靜默失效）。Replace 對 first-install 等同
+// Add，對 re-install 等同 overwrite，故 5 個 helper 統一 Replace。
 // ② DisableTaskMgr 加固走自定義 ADMX 被拒（425，Software\...\Policies\System 為系統
 // 保留策略區）→ 改由 Agent 端在拉起/關閉 LockUI 時自行寫 HKLM（LocalSystem 有權限），P2。
 
@@ -1012,16 +1015,16 @@ export interface LockStateInput {
 }
 
 /**
- * ADMX ingest 命令（Add ./.../Policy/ConfigOperations/ADMXInstall/{App}/Policy/{Id}）。
+ * ADMX ingest 命令（Replace ./.../Policy/ConfigOperations/ADMXInstall/{App}/Policy/{Id}）。
  *
- * **一次性**：在 install-agent 流程注入（設備生命週期早期 ingest 一次）。重複 Add 同 App
- * 回 418 Already exists（真機驗證），呼叫端可視為「已就緒」忽略。ingest 後 lock 只發
- * buildLockState 的 Set Policy 命令。
+ * 用 Replace 是 idempotent upsert：第一次等同 Add，後續 re-enroll 等同 overwrite。6/25
+ * 真機 demo 驗證：Add verb 對 re-enroll 設備永遠 418 Already exists，導致 PolicyManager
+ * state 不一致 → 後續 LockState Replace ack 200 但實際不寫 target Registry。
  */
 export function buildLockAdmxInstall(): SyncMLCommand {
   return {
     cmdId: "0",
-    verb: "Add",
+    verb: "Replace",
     target:
       `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${LOCK_ADMX_ID}`,
     format: "chr",
@@ -1101,13 +1104,13 @@ const LAPS_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
 </policyDefinitions>`;
 
 /**
- * LAPS ADMX ingest（一次性，與 Lock ADMX 獨立）。
- * 重複 Add 回 418 Already exists，無害。
+ * LAPS ADMX ingest（與 Lock ADMX 獨立）。用 Replace 統一 idempotent — 見
+ * buildLockAdmxInstall 註解。
  */
 export function buildLapsAdmxInstall(): SyncMLCommand {
   return {
     cmdId: "0",
-    verb: "Add",
+    verb: "Replace",
     target:
       `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${LAPS_ADMX_ID}`,
     format: "chr",
@@ -1188,10 +1191,11 @@ const PPKG_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
   </policies>
 </policyDefinitions>`;
 
+/** PPKG removal ADMX ingest。用 Replace 統一 idempotent — 見 buildLockAdmxInstall 註解。 */
 export function buildPpkgRemovalAdmxInstall(): SyncMLCommand {
   return {
     cmdId: "0",
-    verb: "Add",
+    verb: "Replace",
     target:
       `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${PPKG_ADMX_ID}`,
     format: "chr",
@@ -1252,10 +1256,11 @@ const SELF_UNINSTALL_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
   </policies>
 </policyDefinitions>`;
 
+/** Self-uninstall ADMX ingest。用 Replace 統一 idempotent — 見 buildLockAdmxInstall 註解。 */
 export function buildSelfUninstallAdmxInstall(): SyncMLCommand {
   return {
     cmdId: "0",
-    verb: "Add",
+    verb: "Replace",
     target:
       `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${SELF_UNINSTALL_ADMX_ID}`,
     format: "chr",

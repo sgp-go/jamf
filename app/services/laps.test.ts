@@ -74,9 +74,9 @@ Deno.test({
 
 // ── CSP Builder: buildLapsAdmxInstall ────────────────────────────────────────
 
-Deno.test("buildLapsAdmxInstall: verb=Add, target 含 LapsPolicy", () => {
+Deno.test("buildLapsAdmxInstall: verb=Replace（idempotent），target 含 LapsPolicy", () => {
   const cmd = buildLapsAdmxInstall();
-  assertEquals(cmd.verb, "Add");
+  assertEquals(cmd.verb, "Replace");
   assertEquals(cmd.format, "chr");
   assertMatch(cmd.target, /ADMXInstall\/CoGrowMDM\/Policy\/LapsPolicy$/);
   assertMatch(cmd.data!, /policyDefinitions/);
