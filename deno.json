@@ -20,6 +20,7 @@
   "imports": {
     "~/": "./app/",
     "@hono/hono": "jsr:@hono/hono@^4",
+    "@hono/node-server": "npm:@hono/node-server@^2",
     "@std/dotenv": "jsr:@std/dotenv@^0.225",
     "plist": "npm:plist@3",
     "node-forge": "npm:node-forge@1"

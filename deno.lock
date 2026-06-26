@@ -21,6 +21,7 @@
     "jsr:@std/path@1": "1.1.4",
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/testing@*": "1.0.19",
+    "npm:@hono/node-server@2": "2.0.4_hono@4.12.9",
     "npm:@hono/node-server@^1.13.7": "1.19.14_hono@4.12.9",
     "npm:@hono/zod-openapi@~0.18.3": "0.18.4_hono@4.12.9_zod@3.25.76",
     "npm:@scalar/hono-api-reference@~0.5.172": "0.5.184_hono@4.12.9",
@@ -507,6 +508,12 @@
         "hono"
       ]
     },
+    "@hono/node-server@2.0.4_hono@4.12.9": {
+      "integrity": "sha512-Ut3y0dMMPWy6bZ2kVfx25EOVbZlm15dhF4mOsezMlhpNHy+4MkU1qN9Y6lnruYi4wPmFzimGX2X7LF/FwHli4A==",
+      "dependencies": [
+        "hono"
+      ]
+    },
     "@hono/zod-openapi@0.18.4_hono@4.12.9_zod@3.25.76": {
       "integrity": "sha512-6NHMHU96Hh32B1yDhb94Z4Z5/POsmEu2AXpWLWcBq9arskRnOMt2752yEoXoADV8WUAc7H1IkNaQHGj1ytXbYw==",
       "dependencies": [
@@ -879,6 +886,7 @@
     "dependencies": [
       "jsr:@hono/hono@4",
       "jsr:@std/dotenv@0.225",
+      "npm:@hono/node-server@2",
       "npm:node-forge@1",
       "npm:plist@3"
     ],
