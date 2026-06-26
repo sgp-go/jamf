@@ -3,6 +3,99 @@
 > 提供給對接團隊（台灣後端）做產品演示用的標準流程腳本。
 > 真機端到端驗證日期：**2026-06-26**（Win11 24H2 Pro / Lenovo IdeaPad 700 PF5XSMN1）。
 
+## 0. 對接團隊一次性同步（首次拿到此版本必看）
+
+從 main 拉到本次 commits 後，**必做下列三步**才能跑 demo。後端代碼 + Agent MSI + 既有設備升級**缺一不可**。
+
+### 0.1 後端代碼
+
+```bash
+git pull origin main      # 拿 8 個新 commit（5 root cause fix + 新 endpoint + adapter 換）
+deno task dev              # 或 production：重啟 systemd unit
+```
+
+新拉的關鍵 commit：
+- `fix(http)` — `@hono/node-server` 取代 `Deno.serve`（繞 HEAD Content-Length=0 bug）
+- `fix(eda-csp)` × 2 — MSI download response 補 Last-Modified+ETag + buildMsiUninstall 改 Delete verb
+- `fix(unenroll)` — PPKG dedup 8 處清 + watcher 跨 ADMX cleanup 撐 + agent 重 enroll 不誤自卸
+- `fix(agent)` — checkin 走 token-first 避免孤兒 row
+- `feat(app-deploy)` — 新增 `/apps/{appId}/{install,uninstall}` 端點
+
+### 0.2 Agent MSI v1.4.0.8 — **必須自行 build + 上傳到自己的 backend**
+
+Agent MSI 是 build 產物（~76MB），**不入 git**。每個團隊在自己的 build machine 上 build + 上傳到自己的 `apps` 表（不同 backend 的 `apps` 表不共享）。
+
+```powershell
+# 在 build machine（需 .NET 8 SDK + WiX 5 dotnet tool；首次參考 build-machine-setup.md）
+cd C:\path\to\jamf_explore
+git pull   # 拿 SelfUninstallWatcher.cs / PpkgRemovalWatcher.cs 的 fix
+pwsh -File win-agent-app\build.ps1 -Version 1.4.0.8
+# 產出 win-agent-app\build\msi\CoGrowMDMAgent.msi (~76MB)
+```
+
+上傳到後端：
+
+```bash
+# 從 MSI 提取真實 ProductCode（必要——bundleId 必須 = MSI 內 ProductCode 否則 EDA-CSP 拒）
+msiinfo export CoGrowMDMAgent.msi Property | grep ProductCode
+# 例：ProductCode  {176848CB-7917-4829-B158-F18F7585B7DA}
+
+# 上傳到 admin API
+curl -X POST "$BACKEND/api/v1/admin/tenants/$TID/apps" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -F 'displayName=CoGrow MDM Agent' \
+  -F 'version=1.4.0.8' \
+  -F 'bundleId={176848CB-7917-4829-B158-F18F7585B7DA}' \
+  -F 'kind=msi' \
+  -F 'file=@win-agent-app/build/msi/CoGrowMDMAgent.msi'
+# 記下回傳的 id 作為 $NEW_APP_ID
+```
+
+**自動下發鏈會選最新 row**（按 `createdAt DESC`），所以新 enrollment 會自動派 1.4.0.8，**不用手動指定 appId**。
+
+> ⚠️ **build machine 必須是 Windows**（dotnet 跨平台但 WiX 跑 native Windows libraries）。詳見 [build-machine-setup.md](./build-machine-setup.md)。
+
+### 0.3 既有 1.4.0.7（或更舊版本）設備批量升級
+
+新 Agent fix 一個關鍵 bug：**舊 v1.4.0.7 設備持有持久 `HKLM\Software\CoGrow\Agent\State\SelfUninstallTriggered` registry trigger（unenroll 鏈寫的），下次重新 enroll + 自動裝 v1.4.0.8 後新 agent 啟動立刻自卸**——必須先在 v1.4.0.7 階段升到 v1.4.0.8（v1.4.0.8 在 spawn `msiexec /x` 前會清掉這個 trigger）。
+
+```sql
+-- 找出所有跑舊版的 Windows 設備
+SELECT id, udid, agent_app_id, last_seen_at
+FROM mdm_devices
+WHERE platform='windows'
+  AND enrollment_status='enrolled'
+  AND agent_app_id != '<NEW_APP_ID>'  -- 上一步上傳得到的 v1.4.0.8 row id
+ORDER BY last_seen_at DESC;
+```
+
+對每台跑：
+
+```bash
+curl -X POST "$BACKEND/api/v1/admin/tenants/$TID/devices/$DEVICE_ID/install-agent" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -F 'appId=<NEW_APP_ID>' \
+  -F 'apiEndpoint=https://your-prod-domain/api/v1'
+```
+
+WiX MajorUpgrade 自動卸舊裝新，service 優雅停啟（自我保護不擋 MajorUpgrade）。生產建議 ≥ 5 台灰度後再全量。
+
+### 0.4 `app_download_base_url` 必須 HTTPS
+
+```sql
+-- 必須是 HTTPS！Win11 24H2 EDA-CSP LocalSystem context 對 HTTP scheme 不友善
+-- 0x80072EF3 WINHTTP_INCORRECT_HANDLE_STATE 就是這個（2026-06-26 真機踩到）
+SELECT public_base_url, app_download_base_url FROM self_mdm_configs WHERE is_active=true;
+```
+
+期望：兩個欄位都是 `https://<your-prod-domain>`。demo 期可用 ngrok HTTPS，生產建議 Cloudflare Tunnel / paid ngrok / Let's Encrypt + 反代。
+
+### 0.5 PPKG 不用重 build
+
+PPKG 內容沒改（PackageID / DiscoveryUrl / WiFi / 內嵌帳號 一樣），既有 USB 上的 `.ppkg` 還能用。如改 device_group code / publicBaseUrl / enrollment UPN 才需重 build。
+
+---
+
 ## 1. 演示前準備（30 分鐘）
 
 ### 1.1 後端服務

@@ -601,12 +601,15 @@ Deno.test("buildMsiInstall: 非法 ProductCode 拋 TypeError", () => {
   );
 });
 
-Deno.test("buildMsiUninstall: Exec /{ProductID}/Uninstall", () => {
+Deno.test("buildMsiUninstall: Delete MSI/{ProductID} 整節點（Microsoft EDA-CSP 標準卸載路徑）", () => {
   const cmd = buildMsiUninstall(SAMPLE_PRODUCT_ID);
-  assertEquals(cmd.verb, "Exec");
+  // EDA-CSP MSI schema 沒 /Uninstall sub-node——卸載是對整個 MSI/{ProductID}
+  // 節點發 SyncML Delete verb，CSP 內部觸發 msiexec /x。
+  // 走錯路徑（如 Exec /Uninstall）會返 404（2026-06-26 真機踩到）。
+  assertEquals(cmd.verb, "Delete");
   assertEquals(
     cmd.target,
-    "./Device/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI/%7BB91CF9B4-1234-5678-9ABC-DEF012345678%7D/Uninstall"
+    "./Device/Vendor/MSFT/EnterpriseDesktopAppManagement/MSI/%7BB91CF9B4-1234-5678-9ABC-DEF012345678%7D"
   );
   assertEquals(cmd.data, undefined);
 });
