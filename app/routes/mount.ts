@@ -1,3 +1,4 @@
+import { appDeployAdminApp } from "~/routes/v1/admin/app-deploy.ts";
 import { appsAdminApp } from "~/routes/v1/admin/apps.ts";
 import { auditAdminApp } from "~/routes/v1/admin/audit.ts";
 import { complianceAdminApp } from "~/routes/v1/admin/compliance.ts";
@@ -40,6 +41,7 @@ export const controlApiMounts: Mount[] = [
   { basePath: "/api/v1", app: devicesAdminApp },
   { basePath: "/api/v1", app: jamfInstancesAdminApp },
   { basePath: "/api/v1", app: appsAdminApp },
+  { basePath: "/api/v1", app: appDeployAdminApp },
   { basePath: "/api/v1", app: installAgentAdminApp },
   { basePath: "/api/v1", app: enrollmentPpkgAdminApp },
   { basePath: "/api/v1", app: profilesAdminApp },
