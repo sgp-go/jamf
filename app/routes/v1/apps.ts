@@ -1,4 +1,4 @@
-import { createReadStream } from "node:fs";
+import { createReadStream, statSync } from "node:fs";
 import { Readable } from "node:stream";
 import { OpenAPIHono, createRoute, z } from "@hono/zod-openapi";
 import { commonErrorResponses } from "~/lib/api.ts";
@@ -44,15 +44,23 @@ const downloadSpec = createRoute({
 export const appsApp = new OpenAPIHono({ defaultHook: validationFailedHook });
 
 appsApp.openapi(downloadSpec, async (c) => {
-  const { appId } = c.req.valid("param");
+  const { appId, filename: urlFilename } = c.req.valid("param");
   const file = await resolveAppFile(appId);
   const total = file.size;
-  // Accept-Ranges 必須宣告：EDA-CSP 用 BITS 下載 .msi，BITS 強依賴 HTTP Range
-  // 支持；缺它 BITS 會拒絕下載（設備端 HEAD 後不發 GET）。
+  const stat = statSync(file.path);
+  // Accept-Ranges 必須宣告：EDA-CSP 用 BITS 下載 .msi，BITS 強依賴 HTTP Range。
+  // Last-Modified + ETag 也必須有任一：BITS HEAD 後拿 version anchor 才會發 GET，
+  // 兩者全缺會讓 WinHTTP handle 進入 incorrect_handle_state (0x80072EF3)，
+  // 每 12 秒重試永遠失敗（2026-06-26 真機踩到）。
+  // Content-Disposition filename 用 URL path 的 filename 段，避免跟 display_name 的空格
+  // 不一致——EDA-CSP SecureRepair 對 filename 一致性嚴格（記憶 eda-csp-msi-install-3-blockers ②）。
+  const safeName = urlFilename.replace(/[^a-zA-Z0-9._-]/g, "_");
   const baseHeaders: Record<string, string> = {
     "Content-Type": "application/octet-stream",
     "Accept-Ranges": "bytes",
-    "Content-Disposition": `attachment; filename="${file.filename.replace(/"/g, "")}"`,
+    "Content-Disposition": `attachment; filename="${safeName}"`,
+    "Last-Modified": stat.mtime.toUTCString(),
+    "ETag": `"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`,
   };
 
   // HEAD：BITS 下載前探測 Content-Length + Accept-Ranges，不回 body
