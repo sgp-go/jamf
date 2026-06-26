@@ -130,3 +130,19 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 - `.env` 檔案不要提交到版本控制
 - Client Credentials Token 有效期 30 分鐘，需要重新整理
 - API Role `Full Access Admin` 包含全部 520 個權限，僅用於開發測試
+
+## 多後端部署規範（對接團隊必看）
+
+### Agent MSI 是 build 產物，**不入 git**
+
+`win-agent-app/build/msi/CoGrowMDMAgent.msi`（~76MB）每個團隊在自己的 Windows build machine build，上傳到自己的 `apps` 表。**我方上傳到我方 backend 的 MSI 不會出現在台灣團隊的 backend `apps` 表**——他們必須 `git pull` 後跟著跑 `build.ps1 -Version <ver>` + admin API 上傳。
+
+build 流程詳見 `docs/windows-deployment/build-machine-setup.md` + `docs/windows-deployment/agent-app-build-and-deploy.md`。對接交付時務必提醒。
+
+### `app_download_base_url` 必須 HTTPS
+
+Win11 24H2 EDA-CSP LocalSystem context 對 HTTP scheme 不友善（WinHTTP handle 進入 incorrect_handle_state 0x80072EF3）。生產配置 `self_mdm_configs.app_download_base_url` 必須是 HTTPS（Cloudflare Tunnel / paid ngrok / Let's Encrypt + 反代）。
+
+### 既有設備升舊版 agent 必須先過 1.4.0.8
+
+v1.4.0.7 寫的持久 `HKLM\Software\CoGrow\Agent\State\SelfUninstallTriggered` registry 殘留會讓重 enroll 後新 agent 啟動立刻自卸（已修在 v1.4.0.8 `SelfUninstallWatcher` 的 `ClearTriggered`）。升級鏈：v1.4.0.7 → 1.4.0.8（不能跳）。

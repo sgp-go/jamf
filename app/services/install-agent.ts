@@ -14,7 +14,7 @@ import {
   buildMsiStatusQuery,
 } from "~/services/mdm/windows/csp.ts";
 import { getActiveSelfMdmConfig } from "~/services/mdm/self-mdm-config.ts";
-import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
+import { enqueueWindowsCommand, triggerWnsPush } from "~/services/mdm/windows/command.ts";
 import { publishCommandEvent } from "~/services/mdm/command-events.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { encryptSecret } from "~/lib/secrets.ts";
@@ -303,6 +303,16 @@ export async function installAgentOnDevice(
   console.log(
     `[Win MDM] BitLocker enable 已排入: encryptionId=${bitlockerEncryptionId} udid=${device.udid}`,
   );
+
+  // fire-and-forget WNS push 喚醒設備秒級拉命令。雖然 LAPS + BitLocker 走
+  // enqueueWindowsCommand 已內建觸發過，這裡顯式再 push 一次作為防禦——若未來某
+  // tenant 配置關閉 LAPS / BitLocker，主要的 MSI install 命令直插事務不會被任何
+  // 隱式 push 觸發，手動升級既有設備就喪失秒級喚醒。
+  triggerWnsPush(device.udid).catch((e) => {
+    console.warn(
+      `[install-agent] WNS push 觸發失敗（不影響 enqueue）: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  });
 
   return {
     deviceId: device.id,
