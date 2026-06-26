@@ -409,17 +409,16 @@ async function resolveDeviceBySerial(opts: {
 agentApp.openapi(reportRoute, async (c) => {
   const { tenantId } = c.req.valid("param");
   const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
 
   const device = await resolveAgentDevice({
     tenantId,
     serialNumber: body.serialNumber,
     udid: body.udid ?? null,
+    token,
   });
 
-  await authorizeAgentReport({
-    device,
-    token: extractBearerToken(c.req.header("authorization")),
-  });
+  await authorizeAgentReport({ device, token });
 
   const saved = await saveAgentReport({
     tenantId,
@@ -477,17 +476,16 @@ agentApp.openapi(reportRoute, async (c) => {
 agentApp.openapi(checkinRoute, async (c) => {
   const { tenantId } = c.req.valid("param");
   const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
 
   const device = await resolveAgentDevice({
     tenantId,
     serialNumber: body.serialNumber,
     udid: body.udid ?? null,
+    token,
   });
 
-  await authorizeAgentReport({
-    device,
-    token: extractBearerToken(c.req.header("authorization")),
-  });
+  await authorizeAgentReport({ device, token });
 
   // 上線即觸發 / 確認 LAPS 輪換（不等每日 report 週期），回傳待辦動作。
   // 內部容錯：觸發失敗不影響 checkin 上線信號成立。
@@ -582,13 +580,14 @@ agentApp.openapi(latestReportRoute, async (c) => {
 agentApp.openapi(usageReportRoute, async (c) => {
   const { tenantId } = c.req.valid("param");
   const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
 
   const device = await resolveAgentDevice({
     tenantId,
     serialNumber: body.serialNumber,
+    token,
   });
 
-  const token = extractBearerToken(c.req.header("authorization"));
   await authorizeAgentReport({ device, token });
 
   // 防篡改第 3 層：驗 HMAC 簽名（密鑰＝agent_token）。無簽名（iOS / 舊版 agent）

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import { agentReports, deviceUsageStats } from "~/db/schema/agent.ts";
@@ -32,7 +33,33 @@ export async function resolveAgentDevice(opts: {
   tenantId: string;
   serialNumber: string;
   udid?: string | null;
+  token?: string | null;
 }): Promise<{ id: string; agentTokenHash: string | null }> {
+  // 路徑 1：token-first（install-agent 簽發後 row 上 hash 唯一，比 serial 更可靠）。
+  // Windows ppkg enrollment 寫的 row 一開始沒 serial_number；token 才能精確命中。
+  if (opts.token) {
+    const tokenHash = createHash("sha256").update(opts.token).digest("hex");
+    const byToken = await db.query.mdmDevices.findFirst({
+      where: (t, { and: andOp, eq: eqOp }) =>
+        andOp(eqOp(t.tenantId, opts.tenantId), eqOp(t.agentTokenHash, tokenHash)),
+      columns: { id: true, agentTokenHash: true, serialNumber: true, udid: true },
+    });
+    if (byToken) {
+      // backfill：row 缺 serial / udid 時順手補上，下次 serial-only lookup 也走得通。
+      const patch: { serialNumber?: string; udid?: string } = {};
+      if (!byToken.serialNumber) patch.serialNumber = opts.serialNumber;
+      if (!byToken.udid && opts.udid) patch.udid = opts.udid;
+      if (Object.keys(patch).length > 0) {
+        await db.update(mdmDevices).set({ ...patch, updatedAt: new Date() })
+          .where(eq(mdmDevices.id, byToken.id));
+      }
+      return { id: byToken.id, agentTokenHash: byToken.agentTokenHash };
+    }
+    // token 給了但匹配不到 → 不 fallback insert（避免 silent 創建空 row 隱藏鑑權問題），
+    // 走下面 serial 路徑或留給 authorize 拋 401。
+  }
+
+  // 路徑 2：(tenantId, serialNumber) 查
   const existing = await db.query.mdmDevices.findFirst({
     where: (t, { and: andOp, eq: eqOp }) =>
       andOp(eqOp(t.tenantId, opts.tenantId), eqOp(t.serialNumber, opts.serialNumber)),
@@ -40,6 +67,7 @@ export async function resolveAgentDevice(opts: {
   });
   if (existing) return existing;
 
+  // 路徑 3：fallback insert platform=apple agent_only（iOS BYOD 場景）
   const [created] = await db
     .insert(mdmDevices)
     .values({
