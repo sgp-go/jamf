@@ -43,7 +43,6 @@ import {
   buildLapsRotation,
   buildLockState,
   buildPpkgRemoval,
-  buildPpkgRemovalClear,
   buildSelfUninstall,
   buildRemoteWipe,
   buildUnenroll,
@@ -1247,15 +1246,18 @@ w.post("/api/mdm/win/devices/:udid/unenroll", async (c) => {
   }
 
   // 3. 移除預配套件（Agent 執行 Remove-ProvisioningPackage）
+  // 不再緊跟 PpkgRemovalClear——同 OMA-DM session 內毫秒級內把 Pending 寫回 0 會擦掉信號，
+  // 2s 輪詢的 PpkgRemovalWatcher 來不及讀到，導致 PPKG 沒被清。Agent 跑完會自己寫 Pending=0
+  // （PpkgRemovalWatcher.cs:72），backend 不需要再清 ADMX policy。
   cmds.push({ type: "PpkgRemoval", cmd: buildPpkgRemoval("cogrow")[0] });
 
   // 4. 清 LAPS 策略（清 registry 密碼殘留）
+  // punt: 同款 self-erase 風險——LapsResetPassword 在前、LapsClear 在後緊跟，Agent 2s
+  // 輪詢可能來不及讀 Pending=1。但 LapsResetPassword 在 step 2 已寫信箱、step 4 才清，間隔
+  // 若干條命令毫秒級 ack——還是有風險。待後續真機驗：密碼是否真改為 123456 + LAPS 觸發日誌。
   cmds.push({ type: "LapsClear", cmd: buildLapsClear()[0] });
 
-  // 5. 清 PPKG 移除策略
-  cmds.push({ type: "PpkgRemovalClear", cmd: buildPpkgRemovalClear()[0] });
-
-  // 6. 解鎖設備
+  // 5. 解鎖設備
   cmds.push({ type: "Unlock", cmd: buildLockState({ enabled: false })[0] });
 
   // 6. Agent 自卸載（通過 ADMX 信箱讓 Agent 自己跑 msiexec /x）

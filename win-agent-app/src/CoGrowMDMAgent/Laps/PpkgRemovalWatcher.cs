@@ -82,11 +82,65 @@ public sealed class PpkgRemovalWatcher : BackgroundService
     {
         try
         {
-            var script = string.IsNullOrEmpty(filter)
-                ? "Get-ProvisioningPackage -AllInstalledPackages | Remove-ProvisioningPackage -ForceRemoval -ErrorAction SilentlyContinue"
-                : $"Get-ProvisioningPackage -AllInstalledPackages | Where-Object {{ $_.PackageName -like '*{filter}*' }} | Remove-ProvisioningPackage -ForceRemoval -ErrorAction SilentlyContinue";
+            // Win10 22H2 Remove-ProvisioningPackage (实际是 Uninstall-ProvisioningPackage alias) 不支持
+            // -ForceRemoval 参数，只接 -PackageId。pipe object 不会绑定到 -PackageId（必须 ByValue），
+            // 所以用 ForEach-Object 显式取 PackageId 调用。
+            // 兜底：若 cmdlet 仍报 NullRef（已知半移除状态 bug），直接删 .ppkg 文件 + AssetCache。
+            //
+            // ⚠️ Windows dedup PPKG by PackageID：即使 cmdlet 卸了 + .ppkg 文件删了，PackageID 仍残留
+            // 在 Provisioning\PackageInfo / Results / CommandResults / Multivariant\CachedCRCs /
+            // EnterpriseResourceManager\Tracked / PolicyManager\Providers / Enrollments\{ID} 多处
+            // 注册表。下次同一 PackageID 的 PPKG 再装会 short-circuit 跳过 enrollment workflow，
+            // 导致 enroll 失败但用户看 PPKG installed=1。所以这里**主动清掉所有 dedup cache**。
+            var matchFilter = string.IsNullOrEmpty(filter)
+                ? "$true"
+                : $"$_.PackageName -like '*{filter}*'";
+            var script =
+                "$ErrorActionPreference='SilentlyContinue';" +
+                // 先收集匹配的 PackageID（清完后还要用 ID 去抹 dedup 残留）
+                $"$ids = @(Get-ProvisioningPackage -AllInstalledPackages | Where-Object {{ {matchFilter} }} | ForEach-Object {{ $_.PackageId.ToString().Trim('{{','}}').ToLower() }});" +
+                $"Get-ProvisioningPackage -AllInstalledPackages | Where-Object {{ {matchFilter} }} | ForEach-Object {{" +
+                "  Uninstall-ProvisioningPackage -PackageId $_.PackageId -ErrorAction SilentlyContinue;" +
+                "  $stagePath = Join-Path 'C:\\ProgramData\\Microsoft\\Provisioning' ($_.PackageName + '.ppkg');" +
+                "  if (Test-Path $stagePath) { Remove-Item $stagePath -Force -ErrorAction SilentlyContinue };" +
+                "  if (Test-Path $_.PackagePath) { Remove-Item $_.PackagePath -Force -ErrorAction SilentlyContinue }" +
+                "};" +
+                "Remove-Item 'C:\\ProgramData\\Microsoft\\Provisioning\\AssetCache' -Recurse -Force -ErrorAction SilentlyContinue;" +
+                // 抹 dedup cache: 对每个 PackageID 清掉 Windows 内部缓存的 8 处占位
+                "foreach ($id in $ids) {" +
+                "  $upper = $id.ToUpper();" +
+                "  $bid = '{' + $id + '}';" +
+                // ⚠️ 不清 HKLM\Microsoft\Enrollments\{ID}：那是当前 enrollment record，
+                // 删它会让 ADMX engine 反应清掉 implementing-side（HKLM\Software\CoGrow\Agent\*\Pending），
+                // 后续 SelfUninstall\Pending 信号消失，msiexec /x 不会被 SelfUninstallWatcher 触发。
+                // Enrollments\{ID} 由 DMClient/Unenroll 命令在 unenroll 链结尾撤销，PpkgRemoval 不该碰。
+                "  $paths = @(" +
+                "    \"HKLM:\\SOFTWARE\\Microsoft\\EnterpriseResourceManager\\Tracked\\$id\"," +
+                "    \"HKLM:\\SOFTWARE\\Microsoft\\PolicyManager\\Providers\\$id\"," +
+                "    \"HKLM:\\SOFTWARE\\Microsoft\\Provisioning\\PackageInfo\\$bid\"," +
+                "    \"HKLM:\\SOFTWARE\\Microsoft\\Provisioning\\Results\\$bid\"," +
+                "    \"HKLM:\\SOFTWARE\\Microsoft\\Provisioning\\CommandResults\\DeviceContext\\$bid\"," +
+                "    \"HKLM:\\SOFTWARE\\Microsoft\\Multivariant\\Status\\CachedCRCs\\RunTime\\$bid\"" +
+                "  );" +
+                "  foreach ($p in $paths) { if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue } };" +
+                // knob value 也清（OOBE/Desktop/HideOobe_WinningProvider 存的 PackageID）
+                "  $knob = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device\\knobs' -ErrorAction SilentlyContinue;" +
+                "  if ($knob) {" +
+                "    $knob.PSObject.Properties | Where-Object { $_.Value -eq $id } | ForEach-Object {" +
+                "      Remove-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\PolicyManager\\current\\device\\knobs' -Name $_.Name -ErrorAction SilentlyContinue" +
+                "    }" +
+                "  };" +
+                // OOBEPackage value 清
+                "  $oobe = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Provisioning\\OOBEPackage' -ErrorAction SilentlyContinue;" +
+                "  if ($oobe -and $oobe.PackageId -match $id) { Remove-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Provisioning\\OOBEPackage' -Name 'PackageId' -ErrorAction SilentlyContinue };" +
+                "  Write-Output (\"cleaned_dedup_id=\" + $id)" +
+                "}";
 
-            var psi = new ProcessStartInfo("powershell", $"-NoProfile -ExecutionPolicy Bypass -Command \"{script}\"")
+            // 用 -EncodedCommand (base64 UTF-16LE) 傳 script，避開 PowerShell -Command 對嵌套
+            // " 字符的脆弱 escape 處理。否則複雜 script 內的 array of strings 會被 PowerShell
+            // parser 在 line:1 char:N 處報語法錯（路徑字串 unquoted 被當成裸 token）。
+            var encoded = Convert.ToBase64String(System.Text.Encoding.Unicode.GetBytes(script));
+            var psi = new ProcessStartInfo("powershell", $"-NoProfile -ExecutionPolicy Bypass -EncodedCommand {encoded}")
             {
                 CreateNoWindow = true,
                 UseShellExecute = false,
