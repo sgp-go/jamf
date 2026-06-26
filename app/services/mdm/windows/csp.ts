@@ -451,9 +451,13 @@ export function buildMsiInstall(params: MsiInstallParams): SyncMLCommand {
 }
 
 /**
- * 建立 .msi 卸載命令（Exec /{ProductID}/Uninstall）。
+ * 建立 .msi 卸載命令（Delete `MSI/{ProductID}` 整個節點）。
  *
- * 設備執行 `msiexec /x {ProductID} /quiet`。沒有額外參數（卸載命令行由 OS 決定）。
+ * Microsoft EDA-CSP MSI schema **沒有 `/Uninstall` sub-node**——標準卸載是對整個
+ * `MSI/{ProductID}` 節點發 SyncML Delete，CSP 內部會觸發 `msiexec /x {ProductID} /quiet`。
+ * 走錯路徑（如 `/Uninstall` Exec）會返 404 not found（2026-06-26 真機踩到）。
+ *
+ * 參考：https://learn.microsoft.com/en-us/windows/client-management/mdm/enterprisedesktopappmanagement-csp
  */
 export function buildMsiUninstall(
   productId: string,
@@ -462,8 +466,8 @@ export function buildMsiUninstall(
   const normalized = normalizeProductId(productId);
   return {
     cmdId: "0",
-    verb: "Exec",
-    target: `${edaBase(context)}/${encodeURIComponent(normalized)}/Uninstall`,
+    verb: "Delete",
+    target: `${edaBase(context)}/${encodeURIComponent(normalized)}`,
   };
 }
 

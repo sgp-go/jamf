@@ -349,7 +349,7 @@ export async function enqueueWindowsCommand(opts: {
  * 副作用：
  *   - 410 channel expired → 清空 device.wnsChannelUri，提醒 caller 重跑 push-config
  */
-async function triggerWnsPush(deviceUdid: string): Promise<void> {
+export async function triggerWnsPush(deviceUdid: string): Promise<void> {
   const device = await getMdmDevice(deviceUdid);
   if (!device || !device.wnsChannelUri) return; // 沒 channel 就不發
   let client;
