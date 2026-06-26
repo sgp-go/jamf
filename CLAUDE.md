@@ -89,6 +89,8 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 | `/api/v1/admin/tenants/{tid}/devices/{did}/laps-rotate` | POST | 手動觸發 LAPS 密碼輪換 |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/bitlocker-recovery` | GET | 查詢設備 BitLocker Recovery Password（解密明文，寫 audit log） |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/install-agent` | POST | 對設備下發 Agent MSI（含 LAPS + BitLocker 自動觸發） |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/install` | POST | 派發任意 MSI App 到設備（不簽 agent_token；秒級 WNS 喚醒） |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/uninstall` | POST | 派發 MSI App 卸載命令（EDA-CSP `Delete /MSI/{ProductID}` 觸發 msiexec /x） |
 | `/api/v1/admin/tenants/{tid}/apps` | POST | 上傳 App 安裝包（multipart/form-data） |
 
 ### 自建 MDM 端點（`/api/mdm`）
