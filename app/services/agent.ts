@@ -4,6 +4,7 @@ import { db } from "~/db/client.ts";
 import { agentReports, deviceUsageStats } from "~/db/schema/agent.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
+import { touchDeviceLastSeen } from "~/services/mdm/devices.ts";
 import {
   mergeUsage,
   type UsageAnomaly,
@@ -126,6 +127,7 @@ export async function saveAgentReport(input: AgentReportInput): Promise<{ id: st
   if (!row) {
     throw new AppError(500, "report_save_failed", "Failed to save agent report");
   }
+  await touchDeviceLastSeen(input.deviceId);
   return row;
 }
 

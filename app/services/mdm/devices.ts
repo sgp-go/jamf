@@ -39,6 +39,25 @@ export async function getMdmDeviceByWindowsId(
   });
 }
 
+/**
+ * 標記設備「最後活躍時間」。每次設備跟 backend 有實際雙向通訊時呼叫：
+ * - Windows: OMA-DM `manage` POST 進入 `handleSyncMLRequest` 入口
+ * - Agent: `POST /api/v1/tenants/{tid}/agent/reports` 收到上報
+ *
+ * 這個欄位是 `hardDeleteDevice` 5min 保護 + `compliance` 離線判定的真值來源。
+ * fire-and-forget：失敗不擋業務流，console.warn 留痕。
+ */
+export async function touchDeviceLastSeen(deviceId: string): Promise<void> {
+  try {
+    await db
+      .update(mdmDevices)
+      .set({ lastSeenAt: new Date() })
+      .where(eq(mdmDevices.id, deviceId));
+  } catch (err) {
+    console.warn(`[devices] touchDeviceLastSeen failed for ${deviceId}:`, err);
+  }
+}
+
 export async function listMdmDevicesByPlatform(
   platform: "apple" | "windows",
   tenantId?: string,

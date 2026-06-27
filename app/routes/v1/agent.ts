@@ -18,6 +18,7 @@ import {
   authorizeAgentReport,
   extractBearerToken,
 } from "~/services/agent-auth.ts";
+import { touchDeviceLastSeen } from "~/services/mdm/devices.ts";
 import { verifyUsageSignature } from "~/services/usage-signature.ts";
 import { publishEvent } from "~/services/webhooks/index.ts";
 
@@ -486,6 +487,9 @@ agentApp.openapi(checkinRoute, async (c) => {
   });
 
   await authorizeAgentReport({ device, token });
+
+  // checkin 是 agent 啟動後的第一個信號，比 reports 更早 → 標記活躍
+  await touchDeviceLastSeen(device.id);
 
   // 上線即觸發 / 確認 LAPS 輪換（不等每日 report 週期），回傳待辦動作。
   // 內部容錯：觸發失敗不影響 checkin 上線信號成立。

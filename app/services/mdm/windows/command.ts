@@ -18,6 +18,7 @@
 import {
   getMdmDevice,
   getMdmDeviceByWindowsId,
+  touchDeviceLastSeen,
   upsertMdmDevice,
 } from "~/services/mdm/devices.ts";
 import {
@@ -97,6 +98,10 @@ export async function handleSyncMLRequest(opts: {
       contentType: "text/plain",
     };
   }
+
+  // 每次設備發起 manage POST 都標記活躍。OMA-DM session 是 Windows 的主要心跳通道，
+  // 比 Agent reports 頻率高（client-initiated 1201 + 各種事件 trigger）。
+  await touchDeviceLastSeen(device.id);
 
   let parsed;
   try {

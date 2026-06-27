@@ -490,8 +490,10 @@ export async function unenrollDeviceInTenant(opts: {
  *   已用 reset-enrollment.ps1 強拆，backend 留下的孤兒 row 阻止重新 enroll（或污染 admin UI）
  *   時才該動。**
  *
- * 保護：若 device.lastSeenAt 在 5 分鐘內 → 409。代表設備可能還活著，硬刪後它下次
- * checkin 會自動 enroll 一個新 row，操作沒意義。傳 `force=true` 繞過。
+ * 保護：若 device.lastSeenAt 在 5 分鐘內 → 409。代表設備還活著（Windows OMA-DM
+ * manage POST / Agent checkin / Agent reports 任一觸發 `touchDeviceLastSeen`
+ * 都會更新該欄位），硬刪後它下次 checkin 會自動 enroll 一個新 row，操作沒意義。
+ * 傳 `force=true` 繞過。
  */
 export async function hardDeleteDevice(opts: {
   tenantId: string;
