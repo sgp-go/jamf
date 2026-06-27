@@ -1,8 +1,13 @@
 import { and, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
 import { db } from "~/db/client.ts";
-import { mdmCommands, mdmDevices } from "~/db/schema/devices.ts";
+import { mdmCommands, mdmDevices, mdmWindowsApps } from "~/db/schema/devices.ts";
 import type { MdmCommand, MdmDevice } from "~/db/schema/devices.ts";
+import { agentReports, deviceUsageStats } from "~/db/schema/agent.ts";
 import type { AgentReport, DeviceUsageStat } from "~/db/schema/agent.ts";
+import { mdmWindowsLaps } from "~/db/schema/laps.ts";
+import { mdmWindowsBitlocker } from "~/db/schema/bitlocker.ts";
+import { profileAssignments } from "~/db/schema/profiles.ts";
+import { appAssignments } from "~/db/schema/apps.ts";
 import { AppError } from "~/lib/errors.ts";
 import { getLatestAgentReport, listUsageStats } from "~/services/agent.ts";
 import { JamfClient } from "~/services/jamf/client.ts";
@@ -473,6 +478,92 @@ export async function unenrollDeviceInTenant(opts: {
     throw new AppError(404, "device_not_found", "Device not found");
   }
   return row;
+}
+
+/**
+ * 硬刪設備 row（救火用，配對 `win-agent-app/scripts/reset-enrollment.ps1`）。
+ *
+ * 與 `unenrollDeviceInTenant`（軟刪、保歷史）的語義差異：
+ * - 軟刪：標 `enrollment_status=unenrolled`，row 保留，命令/上報歷史完整。**常規流程用這個。**
+ * - 硬刪：DELETE row，FK cascade 自動清掉 mdm_commands / agent_reports / usage_stats /
+ *   mdm_windows_apps / laps / bitlocker / profile_assignments / app_assignments。**僅當設備端
+ *   已用 reset-enrollment.ps1 強拆，backend 留下的孤兒 row 阻止重新 enroll（或污染 admin UI）
+ *   時才該動。**
+ *
+ * 保護：若 device.lastSeenAt 在 5 分鐘內 → 409。代表設備可能還活著，硬刪後它下次
+ * checkin 會自動 enroll 一個新 row，操作沒意義。傳 `force=true` 繞過。
+ */
+export async function hardDeleteDevice(opts: {
+  tenantId: string;
+  deviceId: string;
+  force?: boolean;
+}): Promise<{
+  deletedDeviceId: string;
+  deletedUdid: string | null;
+  deletedSerialNumber: string | null;
+  cascadedRows: Record<string, number>;
+}> {
+  const device = await db.query.mdmDevices.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.id, opts.deviceId), eqOp(t.tenantId, opts.tenantId)),
+    columns: { id: true, udid: true, serialNumber: true, lastSeenAt: true },
+  });
+  if (!device) {
+    throw new AppError(404, "device_not_found", "Device not found");
+  }
+
+  if (!opts.force && device.lastSeenAt) {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    if (device.lastSeenAt > fiveMinAgo) {
+      throw new AppError(
+        409,
+        "device_recently_active",
+        `Device last seen at ${device.lastSeenAt.toISOString()} — likely still online. Run reset-enrollment.ps1 on the device first, or pass force=true.`,
+      );
+    }
+  }
+
+  // 撈 cascade 統計（DELETE 之前算，之後子表已空）。並行查 8 個 COUNT。
+  const [
+    [{ value: commands } = { value: 0 }],
+    [{ value: reports } = { value: 0 }],
+    [{ value: usage } = { value: 0 }],
+    [{ value: winApps } = { value: 0 }],
+    [{ value: laps } = { value: 0 }],
+    [{ value: bitlocker } = { value: 0 }],
+    [{ value: profileAssigns } = { value: 0 }],
+    [{ value: appAssigns } = { value: 0 }],
+  ] = await Promise.all([
+    db.select({ value: count() }).from(mdmCommands).where(eq(mdmCommands.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(agentReports).where(eq(agentReports.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(deviceUsageStats).where(eq(deviceUsageStats.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(mdmWindowsApps).where(eq(mdmWindowsApps.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(mdmWindowsLaps).where(eq(mdmWindowsLaps.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(mdmWindowsBitlocker).where(eq(mdmWindowsBitlocker.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(profileAssignments).where(eq(profileAssignments.deviceId, opts.deviceId)),
+    db.select({ value: count() }).from(appAssignments).where(eq(appAssignments.deviceId, opts.deviceId)),
+  ]);
+
+  // 級聯靠 FK onDelete:cascade（mdm_migrations 是 set null，保 Jamf 遷移歷史）。
+  await db
+    .delete(mdmDevices)
+    .where(and(eq(mdmDevices.id, opts.deviceId), eq(mdmDevices.tenantId, opts.tenantId)));
+
+  return {
+    deletedDeviceId: opts.deviceId,
+    deletedUdid: device.udid ?? null,
+    deletedSerialNumber: device.serialNumber ?? null,
+    cascadedRows: {
+      mdm_commands: commands,
+      agent_reports: reports,
+      device_usage_stats: usage,
+      mdm_windows_apps: winApps,
+      mdm_windows_laps: laps,
+      mdm_windows_bitlocker: bitlocker,
+      profile_assignments: profileAssigns,
+      app_assignments: appAssigns,
+    },
+  };
 }
 
 export async function toggleAppLock(opts: {

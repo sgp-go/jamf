@@ -85,6 +85,7 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 
 | 端點 | 方法 | 說明 |
 |------|------|------|
+| `/api/v1/admin/tenants/{tid}/devices/{did}` | DELETE | **救火**硬刪設備 row（FK cascade 清子表）；配對 `win-agent-app/scripts/reset-enrollment.ps1`。預設拒絕 `lastSeenAt < 5min` 的設備，`?force=true` 繞過 |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/laps-password` | GET | 查詢設備 LAPS 管理員密碼（解密明文，寫 audit log） |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/laps-rotate` | POST | 手動觸發 LAPS 密碼輪換 |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/bitlocker-recovery` | GET | 查詢設備 BitLocker Recovery Password（解密明文，寫 audit log） |
