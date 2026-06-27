@@ -306,6 +306,12 @@ const mdmConfigSchema = z
         "為 null 時回退到 publicBaseUrl（所有流量走同一地址）。",
       example: "http://192.168.1.100:3000",
     }),
+    agentAppId: z.string().uuid().nullable().openapi({
+      description:
+        "**指定本 tenant 的 CoGrow MDM Agent app**（apps.id）。新設備 enroll 完成後 enrollment hook " +
+        "自動派發此 app 給設備。為 null 時 hook 會 warn 並跳過 install-agent（避免誤派發任意 MSI）。",
+      example: "6015f333-8075-432b-bbea-b7dcbadf0022",
+    }),
   })
   .openapi("MdmConfig");
 
@@ -317,9 +323,16 @@ const mdmConfigUpdateBody = z
     }),
     appDownloadBaseUrl: z.string().url().nullable().optional().openapi({
       description:
-        "文件下載基底 URL。傳 null 清除（回退到 publicBaseUrl）。" +
+        "**【選填】** 文件下載基底 URL。傳 null 清除（回退到 publicBaseUrl）。" +
         "傳 URL 字串設定獨立的下載地址。不傳此欄位則不修改。",
       example: "http://192.168.1.100:3000",
+    }),
+    agentAppId: z.string().uuid().nullable().optional().openapi({
+      description:
+        "**【選填】** 指定 enrollment hook 派發的 agent app（apps.id）。傳 null 清除（enrollment 後不自動派發）。" +
+        "傳 UUID 設定 / 換 agent 版本。不傳此欄位則不修改。" +
+        "**FK 校驗**：UUID 必須對應同 tenant + platform=windows + kind=msi 的 app，否則 409。",
+      example: "6015f333-8075-432b-bbea-b7dcbadf0022",
     }),
   })
   .openapi("MdmConfigUpdate");
@@ -452,6 +465,7 @@ tenantsAdminApp.openapi(createMdmConfigSpec, async (c) => {
   }).returning({
     publicBaseUrl: selfMdmConfigs.publicBaseUrl,
     appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl,
+    agentAppId: selfMdmConfigs.agentAppId,
   });
 
   await logAudit({
@@ -473,7 +487,7 @@ tenantsAdminApp.openapi(getMdmConfigSpec, async (c) => {
   const { eq } = await import("drizzle-orm");
   const cfg = await db.query.selfMdmConfigs.findFirst({
     where: eq(selfMdmConfigs.tenantId, tenantId),
-    columns: { publicBaseUrl: true, appDownloadBaseUrl: true },
+    columns: { publicBaseUrl: true, appDownloadBaseUrl: true, agentAppId: true },
   });
   if (!cfg) throw new AppError(404, "mdm_config_not_found", "此 tenant 無 MDM 配置");
   return c.json({ ok: true as const, data: cfg }, 200);
@@ -484,11 +498,34 @@ tenantsAdminApp.openapi(updateMdmConfigSpec, async (c) => {
   const body = c.req.valid("json");
   const { db } = await import("~/db/client.ts");
   const { selfMdmConfigs } = await import("~/db/schema/self-mdm.ts");
-  const { eq } = await import("drizzle-orm");
+  const { apps } = await import("~/db/schema/apps.ts");
+  const { eq, and } = await import("drizzle-orm");
 
   const updates: Record<string, unknown> = {};
   if (body.publicBaseUrl !== undefined) updates.publicBaseUrl = body.publicBaseUrl;
   if (body.appDownloadBaseUrl !== undefined) updates.appDownloadBaseUrl = body.appDownloadBaseUrl;
+  if (body.agentAppId !== undefined) {
+    // 校驗 app 屬於同 tenant + windows + msi（避免設成別人的 app 或非 MSI）
+    if (body.agentAppId !== null) {
+      const ok = await db.query.apps.findFirst({
+        where: and(
+          eq(apps.id, body.agentAppId),
+          eq(apps.tenantId, tenantId),
+          eq(apps.platform, "windows"),
+          eq(apps.kind, "msi"),
+        ),
+        columns: { id: true },
+      });
+      if (!ok) {
+        throw new AppError(
+          409,
+          "agent_app_not_valid",
+          `app ${body.agentAppId} 不屬於 tenant ${tenantId} 或非 windows+msi`,
+        );
+      }
+    }
+    updates.agentAppId = body.agentAppId;
+  }
 
   if (Object.keys(updates).length === 0) {
     throw new AppError(400, "no_fields", "至少提供一個欄位");
@@ -498,7 +535,11 @@ tenantsAdminApp.openapi(updateMdmConfigSpec, async (c) => {
     .update(selfMdmConfigs)
     .set(updates)
     .where(eq(selfMdmConfigs.tenantId, tenantId))
-    .returning({ publicBaseUrl: selfMdmConfigs.publicBaseUrl, appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl });
+    .returning({
+      publicBaseUrl: selfMdmConfigs.publicBaseUrl,
+      appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl,
+      agentAppId: selfMdmConfigs.agentAppId,
+    });
 
   if (!row) throw new AppError(404, "mdm_config_not_found", "此 tenant 無 MDM 配置");
 

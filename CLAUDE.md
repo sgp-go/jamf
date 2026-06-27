@@ -86,13 +86,15 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 | 端點 | 方法 | 說明 |
 |------|------|------|
 | `/api/v1/admin/tenants/{tid}/devices/{did}` | DELETE | **救火**硬刪設備 row（FK cascade 清子表）；配對 `win-agent-app/scripts/reset-enrollment.ps1`。預設拒絕 `lastSeenAt < 5min` 的設備，`?force=true` 繞過 |
+| `/api/v1/admin/tenants/{tid}/mdm-config` | GET/POST/PATCH | MDM 配置（publicBaseUrl / appDownloadBaseUrl / **agentAppId**）。`agentAppId` 指定 enrollment hook 自動派發的 agent app，未設則 hook 跳過 install-agent 並 warn |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/laps-password` | GET | 查詢設備 LAPS 管理員密碼（解密明文，寫 audit log） |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/laps-rotate` | POST | 手動觸發 LAPS 密碼輪換 |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/bitlocker-recovery` | GET | 查詢設備 BitLocker Recovery Password（解密明文，寫 audit log） |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/install-agent` | POST | 對設備下發 Agent MSI（含 LAPS + BitLocker 自動觸發） |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/install` | POST | 派發任意 MSI App 到設備（不簽 agent_token；秒級 WNS 喚醒） |
 | `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/uninstall` | POST | 派發 MSI App 卸載命令（EDA-CSP `Delete /MSI/{ProductID}` 觸發 msiexec /x） |
-| `/api/v1/admin/tenants/{tid}/apps` | POST | 上傳 App 安裝包（multipart/form-data） |
+| `/api/v1/admin/tenants/{tid}/apps` | POST | 上傳普通 App 安裝包（教學軟體、OEM 工具等），multipart/form-data |
+| `/api/v1/admin/tenants/{tid}/apps/agent` | POST | **上傳 CoGrow MDM Agent MSI**（自動 set `agentAppId` 指針 → 新設備 enroll 後派發新版）。必須 .msi。跟 `/apps` 路徑分離避免誤觸發切指針 |
 
 ### 自建 MDM 端點（`/api/mdm`）
 
@@ -139,6 +141,15 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 `win-agent-app/build/msi/CoGrowMDMAgent.msi`（~76MB）每個團隊在自己的 Windows build machine build，上傳到自己的 `apps` 表。**我方上傳到我方 backend 的 MSI 不會出現在台灣團隊的 backend `apps` 表**——他們必須 `git pull` 後跟著跑 `build.ps1 -Version <ver>` + admin API 上傳。
 
 build 流程詳見 `docs/windows-deployment/build-machine-setup.md` + `docs/windows-deployment/agent-app-build-and-deploy.md`。對接交付時務必提醒。
+
+### Agent MSI 必須走 `/apps/agent` 端點上傳
+
+`apps` 表只記 kind=msi 不分用途。新設備 enroll hook 不會啟發式猜測「哪個 MSI 是 agent」（之前坑：派發了最近上傳的 7-Zip 而不是 agent）。所以：
+
+- **上傳 agent MSI** → 走 `POST /api/v1/admin/tenants/{tid}/apps/agent`，**自動切 `agentAppId` 指針**，一步完成升級
+- **上傳普通 App**（教學軟體、OEM 工具）→ 走 `POST /api/v1/admin/tenants/{tid}/apps`，**不會碰 agentAppId**
+
+未設 agentAppId → enrollment hook warn 並跳過 install-agent，設備 enroll 後 agent 不會自動裝。台灣團隊首次 deploy 帶這個機制的代碼後，若 `apps` 表裡已有 agent MSI 但 `agentAppId` 為 null，用 `PATCH /mdm-config` 一次性回填即可。
 
 ### `app_download_base_url` 必須 HTTPS
 

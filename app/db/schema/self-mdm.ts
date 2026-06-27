@@ -27,6 +27,19 @@ export const selfMdmConfigs = pgTable(
       .unique(),
     publicBaseUrl: text().notNull(),
     appDownloadBaseUrl: text(),
+    /**
+     * 新設備 enroll 完成後要派發的 CoGrow MDM Agent app（指向 apps.id）。
+     *
+     * 為什麼放在 tenant 配置而非自動推導：apps 表只記文件類型（kind=msi/msix/...），
+     * 不區分用途。一個 tenant 可以上傳多個 MSI（agent + 教學軟體 + 7-Zip…），系統
+     * 必須明確知道「哪個是 agent」才能 enrollment hook 自動派發。預設 null 時
+     * enrollment hook 會跳過 install-agent 並 warn。
+     *
+     * ⚠️ FK 在 migration 裡手寫加上（onDelete: set null）：drizzle schema 這裡不寫
+     * `.references(() => apps.id)`，避開 apps.ts ↔ devices.ts ↔ self-mdm.ts 的三角
+     * 循環依賴。FK 約束本身在 DB 層仍生效。
+     */
+    agentAppId: uuid(),
     apnsTopic: text(),
     apnsCertPem: text(),
     apnsKeyPemEnc: text(),

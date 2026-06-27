@@ -265,24 +265,16 @@ async function handleEnrollmentRequest(c: Context, slug: string, groupCode?: str
 
   // install-agent + LAPS
   try {
-    const { db: dbImport } = await import("~/db/client.ts");
-    const { apps } = await import("~/db/schema/apps.ts");
-    const { eq: eqOp, and: andOp, desc: descOp } = await import("drizzle-orm");
     const enrolledDevice = await getMdmDevice(udid);
-    const latestApp = await dbImport.query.apps.findFirst({
-      where: andOp(
-        eqOp(apps.tenantId, config.tenantId),
-        eqOp(apps.platform, "windows"),
-        eqOp(apps.kind, "msi"),
-      ),
-      orderBy: [descOp(apps.createdAt)],
-      columns: { id: true },
-    });
-    if (latestApp && enrolledDevice) {
+    if (!config.agentAppId) {
+      console.warn(
+        `[Win MDM] 自動 install-agent 跳過：tenant ${config.tenantId} 未設 agentAppId（PATCH /admin/tenants/${config.tenantId}/mdm-config 設定）`,
+      );
+    } else if (enrolledDevice) {
       const agentResult = await installAgentOnDevice({
         tenantId: config.tenantId,
         deviceId: enrolledDevice.id,
-        appId: latestApp.id,
+        appId: config.agentAppId,
         apiEndpoint: `${config.publicBaseUrl}/api/v1`,
       });
       console.log(`[Win MDM] 已自動排入 install-agent + LAPS udid=${udid} cmds=${agentResult.commandIds.length}`);
@@ -503,33 +495,25 @@ w.post("/EnrollmentServer/Enrollment.svc", async (c) => {
   }
 
   // 自動派發 Agent App（含 LAPS ADMX + 密碼輪換）。
-  // 需要 tenant 下有 Windows Agent App 記錄，否則靜默跳過。
+  // 需要 self_mdm_config.agentAppId 明確指定，否則跳過（避免誤派發任意 MSI 當 agent）。
   try {
-    const { db } = await import("~/db/client.ts");
-    const { apps } = await import("~/db/schema/apps.ts");
-    const { eq: eqOp, and: andOp, desc: descOp } = await import("drizzle-orm");
     const enrolledDevice = await getMdmDevice(udid);
-    const latestApp = await db.query.apps.findFirst({
-      where: andOp(
-        eqOp(apps.tenantId, config.tenantId),
-        eqOp(apps.platform, "windows"),
-        eqOp(apps.kind, "msi"),
-      ),
-      orderBy: [descOp(apps.createdAt)],
-      columns: { id: true },
-    });
-    if (latestApp && enrolledDevice) {
+    if (!config.agentAppId) {
+      console.warn(
+        `[Win MDM] 自動 install-agent 跳過：tenant ${config.tenantId} 未設 agentAppId（PATCH /admin/tenants/${config.tenantId}/mdm-config 設定）`,
+      );
+    } else if (enrolledDevice) {
       const agentResult = await installAgentOnDevice({
         tenantId: config.tenantId,
         deviceId: enrolledDevice.id,
-        appId: latestApp.id,
+        appId: config.agentAppId,
         apiEndpoint: `${config.publicBaseUrl}/api/v1`,
       });
       console.log(
         `[Win MDM] 已自動排入 install-agent + LAPS udid=${udid} cmds=${agentResult.commandIds.length}`,
       );
     } else {
-      console.warn(`[Win MDM] 自動 install-agent 跳過：${!latestApp ? "tenant 下無 Windows MSI app" : "device 未找到"}`);
+      console.warn(`[Win MDM] 自動 install-agent 跳過：device ${udid} 未找到`);
     }
   } catch (e) {
     console.warn(

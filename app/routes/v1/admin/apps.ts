@@ -138,6 +138,63 @@ const uploadSpec = createRoute({
   },
 });
 
+const uploadAgentSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/apps/agent",
+  tags: ["應用套件管理"],
+  security,
+  summary: "上傳 CoGrow MDM Agent MSI（自動 set agentAppId）",
+  description: [
+    "上傳 CoGrow MDM Agent MSI 安裝包。**跟 POST /apps 的差別**：上傳成功後**自動** ",
+    "將該 tenant 的 `self_mdm_configs.agentAppId` 指向新 row。新設備 enroll 時 hook ",
+    "讀此欄位決定派發哪個 agent，所以「上傳新 agent」=「升級到新版」一次完成，避免",
+    "「上傳了但忘記 PATCH /mdm-config」的坑（這正是這個專用端點存在的原因）。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**限制**：",
+    "- 檔案必須是 `.msi`（其他格式 400）",
+    "- tenant 必須已建好 `self_mdm_config`（否則 agentAppId 無處可 set，仍會上傳但 warn）",
+    "",
+    "**事件**：成功後寫 audit log `action=agent_app.upload`，含新 appId + 舊 agentAppId。",
+    "",
+    "上傳普通可派發 App（教學軟體、OEM 工具等）請用 `POST /apps`，不要走這個端點，",
+    "避免誤切 agent 指針。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: {
+      content: {
+        "multipart/form-data": {
+          schema: z.object({
+            file: z.any().openapi({ type: "string", format: "binary", description: "CoGrow MDM Agent MSI 檔案（必須 .msi 後綴）" }),
+            displayName: z.string().openapi({ example: "CoGrow MDM Agent" }),
+            version: z.string().openapi({ example: "1.4.0.8" }),
+            bundleId: z.string().optional().openapi({
+              description: "**【選填】** MSI ProductCode（建議帶上，方便版本比對）",
+              example: "{176848CB-7917-4829-B158-F18F7585B7DA}",
+            }),
+            installArgs: z.string().optional().openapi({
+              description: "**【選填】** msiexec 額外參數",
+              example: "/qn /norestart",
+            }),
+            signedBy: z.string().optional().openapi({
+              description: "**【選填】** 數位簽名者識別",
+            }),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "上傳成功且 agentAppId 已切到新 app；回傳完整 App 物件",
+      content: { "application/json": { schema: successSchema(appSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 const listSpec = createRoute({
   method: "get",
   path: "/admin/tenants/{tenantId}/apps",
@@ -194,6 +251,83 @@ const deleteSpec = createRoute({
 
 export const appsAdminApp = new OpenAPIHono({ defaultHook: validationFailedHook });
 appsAdminApp.use("/admin/*", adminAuth());
+
+// agent 上傳必須註冊在 detailSpec（/apps/{appId}）**之前**，否則 "agent" 字串會被當 UUID 匹配 → 404
+appsAdminApp.openapi(uploadAgentSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = await c.req.parseBody();
+  const file = body["file"];
+  if (!(file instanceof File)) {
+    throw new AppError(400, "missing_file", "Field 'file' is required");
+  }
+  if (!file.name.toLowerCase().endsWith(".msi")) {
+    throw new AppError(
+      400,
+      "agent_must_be_msi",
+      `Agent upload requires a .msi file (got "${file.name}")`,
+    );
+  }
+  const displayName = String(body["displayName"] ?? "");
+  const version = String(body["version"] ?? "");
+  if (!displayName || !version) {
+    throw new AppError(400, "missing_metadata", "displayName and version are required");
+  }
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const row = await uploadApp({
+    tenantId,
+    displayName,
+    version,
+    filename: file.name,
+    fileBytes: buf,
+    kind: "msi",
+    bundleId: body["bundleId"] ? String(body["bundleId"]) : null,
+    installArgs: body["installArgs"] ? String(body["installArgs"]) : null,
+    signedBy: body["signedBy"] ? String(body["signedBy"]) : null,
+  });
+
+  // 立刻切 agentAppId 指針（這個端點存在的核心理由）
+  // 先讀舊值寫 audit，再 UPDATE。兩次 round trip 換 audit 完整性，值得。
+  const { db } = await import("~/db/client.ts");
+  const { selfMdmConfigs } = await import("~/db/schema/self-mdm.ts");
+  const { eq } = await import("drizzle-orm");
+  const before = await db.query.selfMdmConfigs.findFirst({
+    where: eq(selfMdmConfigs.tenantId, tenantId),
+    columns: { agentAppId: true },
+  });
+  const previousAgentAppId = before?.agentAppId ?? null;
+
+  let agentAppIdSet: string | null = null;
+  if (before) {
+    await db
+      .update(selfMdmConfigs)
+      .set({ agentAppId: row.id })
+      .where(eq(selfMdmConfigs.tenantId, tenantId));
+    agentAppIdSet = row.id;
+  } else {
+    // tenant 沒 self_mdm_config（罕見：通常 enrollment 前已建好）。app row 已寫成功，
+    // admin 後續可 POST /mdm-config 建配置後再 PATCH agentAppId。
+    console.warn(
+      `[agent.upload] tenant ${tenantId} 無 self_mdm_config，agentAppId 未 set；app id=${row.id} 已建好`,
+    );
+  }
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "agent_app.upload",
+    resourceType: "app",
+    resourceId: row.id,
+    payload: {
+      displayName,
+      version,
+      filename: file.name,
+      fileSizeBytes: buf.length,
+      agentAppIdSet,
+      previousAgentAppId,
+    },
+  });
+  return c.json({ ok: true as const, data: toAppDto(row) }, 201);
+});
 
 appsAdminApp.openapi(uploadSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
