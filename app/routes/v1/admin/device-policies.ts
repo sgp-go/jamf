@@ -20,7 +20,14 @@ import {
   pushPasswordPolicyToDevice,
   pushUsbPolicyToDevice,
   pushAppRestrictionToDevice,
+  pushVpnToDevice,
+  removeVpnFromDevice,
+  pushCameraPolicyToDevice,
+  pushFirewallPolicyToDevice,
+  pushDeviceRenameToDevice,
+  pushSettingsRestrictionToDevice,
 } from "~/services/device-policies.ts";
+import { db } from "~/db/client.ts";
 
 // ── Response schema ──
 
@@ -357,6 +364,293 @@ const pushAppRestrictionSpec = createRoute({
   },
 });
 
+// ── VPN ──
+
+const vpnBody = z
+  .object({
+    profileName: z.string().min(1).max(64).openapi({
+      description: "VPN profile 名稱（顯示於設備 VPN 設定畫面，不可含 /）",
+      example: "School-VPN",
+    }),
+    serverHost: z.string().min(1).openapi({
+      description: "VPN 伺服器位址（FQDN 或 IP）",
+      example: "vpn.school.edu.tw",
+    }),
+    protocol: z.enum(["IKEv2", "L2TP"]).openapi({
+      description: "VPN 協議：IKEv2（推薦，無需 PSK）或 L2TP（需 l2tpPsk）",
+    }),
+    l2tpPsk: z.string().optional().openapi({
+      description: "**【選填】** L2TP 預共享密鑰。protocol=L2TP 時必填；IKEv2 忽略",
+    }),
+    rememberCredentials: z.boolean().default(true).openapi({
+      description: "允許設備記住使用者帳密。預設 true",
+    }),
+    alwaysOn: z.boolean().default(false).openapi({
+      description: "Always-on：螢幕解鎖即自動連線。預設 false",
+    }),
+    dnsSuffix: z.string().optional().openapi({
+      description: "**【選填】** DNS 後綴（如 school.edu.tw）",
+    }),
+    routingPolicy: z.enum(["SplitTunnel", "ForceTunnel"]).default("SplitTunnel").openapi({
+      description: "SplitTunnel=只指定流量走 VPN；ForceTunnel=全流量走 VPN",
+    }),
+    trustedNetworkDetection: z.array(z.string()).optional().openapi({
+      description: "**【選填】** 信任網路 DNS 後綴清單（在這些網路時不自動連 VPN）",
+    }),
+  })
+  .openapi("PushVpnInput");
+
+const pushVpnSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-vpn",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送 VPN 連線設定",
+  description: [
+    "遠端推送 VPN profile 到設備，設備在 VPN 設定畫面看到新增 profile。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- MVP 只支援 Windows 原生 IKEv2 / L2TP 兩種協議",
+    "- VPN 帳號密碼**不在 profile 內**，使用者首次連線時自行輸入",
+    "- L2TP PSK 會明文寫在 ProfileXML（OS 設備端會加密儲存）",
+    "- 同名 profileName 重複派發會覆蓋",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: vpnBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const removeVpnBody = z
+  .object({
+    profileName: z.string().min(1).max(64).openapi({
+      description: "要移除的 VPN profile 名稱",
+      example: "School-VPN",
+    }),
+  })
+  .openapi("RemoveVpnInput");
+
+const removeVpnSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/remove-vpn",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "移除設備上的 VPN 設定",
+  description: [
+    "遠端移除設備上指定 VPN profile。",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: removeVpnBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ── Camera 禁用 ──
+
+const cameraBody = z
+  .object({
+    allow: z.boolean().openapi({
+      description: "true=允許相機；false=禁用內建相機（考試 / 機密場景）",
+      example: false,
+    }),
+  })
+  .openapi("PushCameraPolicyInput");
+
+const pushCameraSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-camera-policy",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送 Camera 禁用 / 啟用政策",
+  description: [
+    "啟用或禁用設備內建相機。Win10 1607+ 所有版本皆支援。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：策略只控制內建相機，外接 USB 視訊裝置需配 USB 管控政策。",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: cameraBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ── 防火牆 ──
+
+const firewallBody = z
+  .object({
+    enabled: z.boolean().default(true).openapi({
+      description: "強制啟用三個防火牆 profile（Domain/Private/Public）。預設 true",
+    }),
+    stealthMode: z.boolean().default(true).openapi({
+      description: "啟用隱形模式（拒絕未請求的入站連線）。預設 true",
+    }),
+    showNotifications: z.boolean().default(false).openapi({
+      description: "顯示防火牆阻擋通知。預設 false（避免學生關通知）",
+    }),
+  })
+  .openapi("PushFirewallPolicyInput");
+
+const pushFirewallSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-firewall-policy",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送防火牆政策",
+  description: [
+    "確保 Windows 防火牆保持啟用,防止學生關閉。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- 一次套用到三個 profile (Domain/Private/Public)，學校場景需全覆蓋",
+    "- 隱形模式（stealth）建議啟用，降低 portscan / 蠕蟲攻擊面",
+    "- 此 API 不管理具體 inbound/outbound 規則（如需精細化規則,走 profile）",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: firewallBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ── 自動設備命名 ──
+
+const renameBody = z
+  .object({
+    explicitName: z.string().min(1).max(15).optional().openapi({
+      description:
+        "**【選填】** 直接指定名稱（與 template 二選一）。Windows ComputerName 上限 15 字元，不可含空白 / 保留符號",
+      example: "TPE001-1234",
+    }),
+    template: z.string().optional().openapi({
+      description:
+        "**【選填】** 命名模板（與 explicitName 二選一）。" +
+        "支援變數：{schoolCode}=device_group.code、{serial}=完整序號、{serial4}=序號後 4 碼、{udid8}=UDID 前 8 碼",
+      example: "{schoolCode}-{serial4}",
+    }),
+  })
+  .refine((d) => d.explicitName || d.template, {
+    message: "必須提供 explicitName 或 template 其中之一",
+  })
+  .openapi("RenameDeviceInput");
+
+const renameResultSchema = z
+  .object({
+    commandIds: z.array(z.string().uuid()),
+    appliedName: z.string().openapi({
+      description: "實際派發的設備名稱（模板替換後的結果）",
+      example: "TPE001-1234",
+    }),
+  })
+  .openapi("RenameDeviceResult");
+
+const renameDeviceSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/rename",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "自動設備命名（依範本生成 ComputerName）",
+  description: [
+    "派發 ComputerName 變更指令到設備（PRD §5.1 自動設備命名）。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- Windows ComputerName 規範：最多 15 字元、不含空白與保留符號",
+    "- 設備需重啟後新名稱才生效",
+    "- 模板變數於後端替換後再呼叫 CSP，回傳實際派發的 appliedName",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: renameBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入，回傳實際使用名稱",
+      content: { "application/json": { schema: successSchema(renameResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ── 設備功能限制（Settings 頁面可見性）──
+
+const settingsPageBody = z
+  .object({
+    mode: z.enum(["hide", "showonly"]).openapi({
+      description:
+        "hide=隱藏 pages 列出的頁面；showonly=只顯示 pages 列出的頁面（其他全隱藏）",
+    }),
+    pages: z.array(z.string()).min(1).openapi({
+      description:
+        "ms-settings 識別符列表（不含 ms-settings: 前綴）。" +
+        "常用：recovery / windowsupdate / printers / network-wifi / accounts / personalization",
+      example: ["recovery", "windowsupdate"],
+    }),
+  })
+  .openapi("PushSettingsRestrictionInput");
+
+const pushSettingsRestrictionSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-settings-restriction",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送設定 App 頁面可見性限制",
+  description: [
+    "透過 Policy CSP `Settings/PageVisibilityList` 限制學生可進入的「設定」頁面（PRD §5.2 設備功能限制）。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- 同一設備 PageVisibilityList **只能設一條**，後送的覆蓋前送的",
+    "- 這是 UI 層隱藏，不是系統層禁用；搭配標準帳戶 + LAPS 才完整",
+    "- showonly 模式請務必保留必要頁面（如 network-wifi），否則學生無法連網",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: settingsPageBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 // ── App instance ──
 
 export const devicePoliciesAdminApp = new OpenAPIHono({
@@ -447,6 +741,132 @@ devicePoliciesAdminApp.openapi(pushUsbPolicySpec, async (c) => {
     resourceType: "device",
     resourceId: deviceId,
     payload: body,
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// VPN
+devicePoliciesAdminApp.openapi(pushVpnSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushVpnToDevice(device, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_vpn",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      profileName: body.profileName,
+      protocol: body.protocol,
+      serverHost: body.serverHost,
+      hasPsk: !!body.l2tpPsk,
+    },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+devicePoliciesAdminApp.openapi(removeVpnSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const { profileName } = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await removeVpnFromDevice(device, profileName);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.remove_vpn",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { profileName },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Camera
+devicePoliciesAdminApp.openapi(pushCameraSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const { allow } = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushCameraPolicyToDevice(device, allow);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_camera_policy",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { allow },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// 防火牆
+devicePoliciesAdminApp.openapi(pushFirewallSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushFirewallPolicyToDevice(device, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_firewall_policy",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: body,
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// 自動命名
+devicePoliciesAdminApp.openapi(renameDeviceSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+
+  // 模板需查 device.serialNumber + device_group.code；explicitName 不查
+  let ctx = { schoolCode: null as string | null, serialNumber: null as string | null, udid: device.udid };
+  if (body.template) {
+    const detail = await db.query.mdmDevices.findFirst({
+      where: (t, { eq: eqOp }) => eqOp(t.id, deviceId),
+      columns: { serialNumber: true, deviceGroupId: true },
+      with: { deviceGroup: { columns: { code: true } } },
+    });
+    ctx = {
+      schoolCode: detail?.deviceGroup?.code ?? null,
+      serialNumber: detail?.serialNumber ?? null,
+      udid: device.udid,
+    };
+  }
+
+  const { commandIds, appliedName } = await pushDeviceRenameToDevice(device, body, ctx);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.rename",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      mode: body.explicitName ? "explicit" : "template",
+      template: body.template ?? null,
+      appliedName,
+    },
+  });
+  return c.json({ ok: true as const, data: { commandIds, appliedName } }, 202);
+});
+
+// 設備功能限制
+devicePoliciesAdminApp.openapi(pushSettingsRestrictionSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushSettingsRestrictionToDevice(device, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_settings_restriction",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { mode: body.mode, pageCount: body.pages.length, pages: body.pages },
   });
   return c.json({ ok: true as const, data: { commandIds } }, 202);
 });

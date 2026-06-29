@@ -1,4 +1,4 @@
-# 設備策略推送（WiFi / 桌布 / 密碼 / USB / AppLocker）
+# 設備策略推送（WiFi / VPN / 桌布 / 密碼 / USB / Camera / 防火牆 / 自動命名 / AppLocker / Settings）
 
 管理員透過 Admin API 將安全與配置策略遠端推送到 Windows 設備。後端將業務參數轉換為 Windows CSP（Configuration Service Provider）SyncML 命令，排入命令佇列，設備在下次 MDM 同步時套用。
 
@@ -159,6 +159,167 @@ sequenceDiagram
 - **FilePublisherRule**（`type: "publisher"`）：按簽名者 X.500 DN 匹配，支援產品名稱和版本範圍過濾
 - 設備需 Windows 10/11 Enterprise 或 Education 才完整支援 AppLocker
 
+## VPN 連線設定
+
+| 項目 | 說明 |
+|------|------|
+| 端點 | `POST /admin/tenants/{tid}/devices/{did}/push-vpn` |
+| CSP 路徑 | `./Vendor/MSFT/VPNv2/{profileName}/ProfileXML` |
+| SyncML verb | `Add`（同名重派覆蓋） |
+| 資料格式 | `chr`（VPNv2 ProfileXML） |
+| 支援協議 | `IKEv2`（推薦,內建 EAP-MSCHAPv2 wrapper）/ `L2TP`（含 PSK） |
+
+移除端點：`POST /admin/.../remove-vpn`，verb 為 `Delete`。
+
+### VPN 參數
+
+| 參數 | 型別 | 說明 |
+|------|------|------|
+| `profileName` | string | 顯示於設備 VPN 設定畫面（不可含 `/`） |
+| `serverHost` | string | VPN 伺服器 FQDN 或 IP |
+| `protocol` | `"IKEv2"` \| `"L2TP"` | VPN 協議 |
+| `l2tpPsk` | string? | L2TP 預共享密鑰（protocol=L2TP 時必填） |
+| `rememberCredentials` | boolean | 允許設備記住帳密（預設 `true`） |
+| `alwaysOn` | boolean | 螢幕解鎖即自動連線（預設 `false`） |
+| `dnsSuffix` | string? | DNS 後綴 |
+| `routingPolicy` | `"SplitTunnel"` \| `"ForceTunnel"` | 路由策略（預設 SplitTunnel） |
+| `trustedNetworkDetection` | string[]? | 信任網路 DNS 後綴清單 |
+
+### 重要說明
+
+- VPN 帳號密碼**不在 profile 內**，使用者首次連線時自行輸入
+- **IKEv2 自動內嵌 EAP-MSCHAPv2 wrapper**（Win10+ 不再接受直接 MSChapv2 UserMethod）
+- L2TP PSK 會明文寫在 ProfileXML 中，OS 設備端加密儲存
+- 不支援 SSTP / PPTP / 證書認證 / 第三方 Plugin VPN
+- 真機驗證：`Get-VpnConnection -AllUserConnection`
+
+## Camera 禁用 / 啟用
+
+| 項目 | 說明 |
+|------|------|
+| 端點 | `POST /admin/tenants/{tid}/devices/{did}/push-camera-policy` |
+| CSP 路徑 | `./Device/Vendor/MSFT/Policy/Config/Camera/AllowCamera` |
+| SyncML verb | `Replace` |
+| 資料格式 | `int`（`1`=允許，`0`=禁用） |
+
+### Camera 參數
+
+| 參數 | 型別 | 說明 |
+|------|------|------|
+| `allow` | boolean | `true` 允許 / `false` 禁用內建相機 |
+
+支援 Win10 1607+ 所有版本（Home/Pro/Edu/Ent）。僅控制內建相機，外接 USB 視訊裝置需配 USB 管控政策。
+
+## 防火牆
+
+| 項目 | 說明 |
+|------|------|
+| 端點 | `POST /admin/tenants/{tid}/devices/{did}/push-firewall-policy` |
+| CSP 路徑 | `./Vendor/MSFT/Firewall/MdmStore/{Domain,Private,Public}Profile/{prop}` |
+| SyncML verb | `Replace` |
+| 資料格式 | `bool` |
+| 命令數 | 9（三個 profile × 3 個 prop） |
+
+### 防火牆參數
+
+| 參數 | 型別 | 預設 | 說明 |
+|------|------|------|------|
+| `enabled` | boolean | `true` | 強制啟用三個 profile（Domain/Private/Public） |
+| `stealthMode` | boolean | `true` | 啟用隱形模式（拒絕未請求的入站連線） |
+| `showNotifications` | boolean | `false` | 顯示阻擋通知（學校場景關通知） |
+
+### CSP 反邏輯
+
+| 業務參數 | CSP 欄位 | 值邏輯 |
+|----------|----------|--------|
+| `enabled` | `EnableFirewall` | 直接值 |
+| `stealthMode` | `DisableStealthMode` | **反邏輯**：`true` → `false`（啟用隱形） |
+| `showNotifications` | `DisableInboundNotifications` | **反邏輯**：`false` → `true`（不顯示通知） |
+
+### ⚠️ 驗證注意
+
+`Get-NetFirewallProfile` 預設查 **PersistentStore**（本地用戶層），**不反映 MDM 加持**。CSP 寫入後正確驗證命令：
+
+```powershell
+# 查 MDM PolicyStore（CSP 直接寫入的 store）
+Get-NetFirewallProfile -PolicyStore MDM
+
+# 查 ActiveStore（實際生效狀態 = MDM 加持後最終結果）
+Get-NetFirewallProfile -PolicyStore ActiveStore
+```
+
+CSP 寫入後**不會寫** `HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Firewall` registry — Firewall 走 service 內部 MDM store 而非 PolicyManager。同類 service-level CSP（BitLocker / Defender / VPNv2 / WiFi）皆然。
+
+## 自動設備命名
+
+| 項目 | 說明 |
+|------|------|
+| 端點 | `POST /admin/tenants/{tid}/devices/{did}/rename` |
+| CSP 路徑 | `./Device/Vendor/MSFT/Accounts/ComputerName` |
+| SyncML verb | `Replace` |
+| 資料格式 | `chr` |
+
+### 命名參數（二選一）
+
+| 參數 | 型別 | 說明 |
+|------|------|------|
+| `explicitName` | string? | 直接指定名稱（1-15 字元，無空白與保留符號） |
+| `template` | string? | 命名模板（後端替換變數後派發） |
+
+### 模板變數
+
+| 變數 | 替換為 | 範例 |
+|------|--------|------|
+| `{schoolCode}` | `device_group.code` | `TPE001` |
+| `{serial}` | 完整序號 | `ABC1234` |
+| `{serial4}` | 序號後 4 碼（不足補 0） | `1234` |
+| `{udid8}` | UDID 前 8 碼（去非字母數字） | `windowsd` |
+
+範例：`{schoolCode}-{serial4}` + serial=`ABC1234` + schoolCode=`TPE001` → **`TPE001-1234`**
+
+### 名稱規範
+
+- Windows ComputerName 最長 **15 字元**
+- 不含空白與保留符號（`\/:*?"<>|...`）
+- 變更後**設備需重啟**新名稱才生效
+- 回傳 `appliedName` 為實際派發的最終名稱
+
+## 設備功能限制（Settings 頁面可見性）
+
+| 項目 | 說明 |
+|------|------|
+| 端點 | `POST /admin/tenants/{tid}/devices/{did}/push-settings-restriction` |
+| CSP 路徑 | `./Device/Vendor/MSFT/Policy/Config/Settings/PageVisibilityList` |
+| SyncML verb | `Replace` |
+| 資料格式 | `chr` |
+
+### 設定限制參數
+
+| 參數 | 型別 | 說明 |
+|------|------|------|
+| `mode` | `"hide"` \| `"showonly"` | `hide` 隱藏列出的頁面 / `showonly` 只顯示列出的頁面 |
+| `pages` | string[] | ms-settings 識別符（不含 `ms-settings:` 前綴） |
+
+### 常用識別符
+
+| 識別符 | 對應頁面 |
+|--------|----------|
+| `recovery` | 復原 |
+| `windowsupdate` | Windows Update |
+| `printers` | 印表機 |
+| `network-wifi` | Wi-Fi |
+| `accounts` | 帳戶 |
+| `personalization` | 個人化 |
+| `apps` | 應用 |
+| `system` | 系統 |
+| `privacy` | 隱私 |
+
+### ⚠️ 限制
+
+- 同一設備 PageVisibilityList **只能設一條**，後送的覆蓋前送的
+- 這是 **UI 層隱藏**，不是系統層禁用（搭配標準帳戶 + LAPS 才完整）
+- `showonly` 模式請保留必要頁面（如 `network-wifi`），否則學生無法連網
+
 ## 關鍵技術細節
 
 ### 直推 vs 持久化 Profile 的區別
@@ -191,9 +352,15 @@ sequenceDiagram
 |------|--------|
 | 推送 WiFi | `device.push_wifi` |
 | 移除 WiFi | `device.remove_wifi` |
+| 推送 VPN | `device.push_vpn` |
+| 移除 VPN | `device.remove_vpn` |
 | 推送桌布 | `device.push_wallpaper` |
 | 推送密碼政策 | `device.push_password_policy` |
 | 推送 USB 管控 | `device.push_usb_policy` |
+| 推送 Camera 政策 | `device.push_camera_policy` |
+| 推送防火牆政策 | `device.push_firewall_policy` |
+| 設備重命名 | `device.rename` |
+| 推送設定頁面限制 | `device.push_settings_restriction` |
 | 推送應用限制 | `device.push_app_restriction` |
 
 ## 相關源碼
@@ -202,7 +369,9 @@ sequenceDiagram
 |------|------|
 | `app/routes/v1/admin/device-policies.ts` | Admin API 路由定義（OpenAPI spec + handler） |
 | `app/services/device-policies.ts` | 業務邏輯層（設備驗證 + 命令排入） |
-| `app/services/mdm/windows/csp.ts` | CSP 構建函式（SyncML 命令生成） |
+| `app/services/mdm/windows/csp.ts` | CSP 構建函式（Camera / Firewall / DeviceName / WiFi / USB / 密碼 / AppLocker / 桌布） |
+| `app/services/mdm/windows/csp-vpn.ts` | VPN CSP 構建函式（IKEv2 EAP wrapper + L2TP PSK） |
+| `app/services/mdm/windows/csp-experience.ts` | Experience 與 Settings PageVisibility CSP |
 | `app/services/mdm/windows/command.ts` | `enqueueWindowsCommand()` 命令佇列 |
 | `app/middleware/admin-auth.ts` | Admin 鑑權中介層 |
 | `app/services/admin/audit.ts` | 審計日誌服務 |

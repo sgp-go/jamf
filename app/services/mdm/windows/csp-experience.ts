@@ -55,3 +55,43 @@ export function buildSetAllowRestore(allow: boolean): SyncMLCommand {
     data: allow ? "showonly:" : "hide:recovery",
   };
 }
+
+/**
+ * 通用 Settings 頁面可見性政策（PRD §5.2 設備功能限制）。
+ *
+ * 用 `hide:` 或 `showonly:` 兩種模式控制「設定」app 哪些頁面顯示。
+ * 常用 ms-settings: 識別符（不含 ms-settings: 前綴）：
+ *   - recovery / windowsupdate / printers / network-wifi
+ *   - accounts / personalization / apps / system / privacy / gaming
+ *   - 完整清單見 MS docs ms-settings URI scheme
+ *
+ * 同一台設備上 PageVisibilityList 只能設一條，後送的覆蓋前送的。
+ * 因此使用 `mode` 明確要 hide 或 showonly,而非允許混合。
+ */
+export interface SettingsPageVisibilityInput {
+  mode: "hide" | "showonly";
+  /** ms-settings 識別符列表（不含 "ms-settings:" 前綴） */
+  pages: string[];
+}
+
+export function buildSettingsPageVisibility(
+  input: SettingsPageVisibilityInput,
+): SyncMLCommand {
+  if (!Array.isArray(input.pages) || input.pages.length === 0) {
+    throw new Error("buildSettingsPageVisibility: pages 不可為空");
+  }
+  for (const p of input.pages) {
+    if (!p || /[;\s]/.test(p)) {
+      throw new Error(
+        `buildSettingsPageVisibility: 非法 page 識別符 "${p}"（不可含分號或空白）`,
+      );
+    }
+  }
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: PAGE_VISIBILITY_TARGET,
+    format: "chr",
+    data: `${input.mode}:${input.pages.join(";")}`,
+  };
+}

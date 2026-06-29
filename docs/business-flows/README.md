@@ -26,7 +26,7 @@
 | 文件 | 說明 |
 |------|------|
 | [06-configuration-profile.md](06-configuration-profile.md) | 配置描述檔（CRUD → assign → push → ack → 版本管理 → 變更自動重推） |
-| [07-device-policies.md](07-device-policies.md) | 設備策略推送（WiFi / 桌布 / 密碼政策 / USB 管控，直推模式） |
+| [07-device-policies.md](07-device-policies.md) | 設備策略推送（WiFi / VPN / 桌布 / 密碼 / USB / Camera / 防火牆 / 自動命名 / Settings 限制 / AppLocker，直推模式） |
 | [14-os-update.md](14-os-update.md) | OS 更新管理（排程 / 延後 / 暫停 / 強制更新策略） |
 | [13-defender-enforce.md](13-defender-enforce.md) | Windows Defender 強制啟用（全開 / 自訂防護項） |
 
@@ -49,6 +49,7 @@
 | 文件 | 說明 |
 |------|------|
 | [15-webhook-events.md](15-webhook-events.md) | Webhook 事件通知（端點註冊 → HMAC 簽名 → 推送 → 重試 → 死信） |
+| [17-inventory-and-app-metadata.md](17-inventory-and-app-metadata.md) | 設備購買 Inventory + App 分類 + App 授權數量管理（PRD §5.3 / §5.7） |
 
 ## 閱讀建議
 

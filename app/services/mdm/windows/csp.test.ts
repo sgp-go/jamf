@@ -1,5 +1,8 @@
 import { assertEquals, assertThrows } from "jsr:@std/assert@^1";
 import {
+  buildCameraPolicy,
+  buildFirewallPolicy,
+  buildSetComputerName,
   buildReboot,
   buildRemoteWipe,
   buildMsixInstall,
@@ -1126,4 +1129,88 @@ Deno.test("buildLockState: message/phone 內特殊字元被 escapeAttr 轉義", 
   const cmds = buildLockState({ enabled: true, message: 'a"b<c&d', phone: "x" });
   // escapeAttr：& → &amp;、" → &quot;、< → &lt;
   assertEquals(cmds[0].data?.includes('value="a&quot;b&lt;c&amp;d"'), true);
+});
+
+// ============================================================
+// Camera 禁用
+// ============================================================
+
+Deno.test("buildCameraPolicy: false → AllowCamera=0", () => {
+  const cmd = buildCameraPolicy(false);
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(cmd.target, "./Device/Vendor/MSFT/Policy/Config/Camera/AllowCamera");
+  assertEquals(cmd.format, "int");
+  assertEquals(cmd.data, "0");
+});
+
+Deno.test("buildCameraPolicy: true → AllowCamera=1", () => {
+  const cmd = buildCameraPolicy(true);
+  assertEquals(cmd.data, "1");
+});
+
+// ============================================================
+// 防火牆
+// ============================================================
+
+Deno.test("buildFirewallPolicy: 預設 → 三 profile 各 3 條共 9 條", () => {
+  const cmds = buildFirewallPolicy({});
+  assertEquals(cmds.length, 9);
+  // 三 profile 都應該設 EnableFirewall=true
+  const enableCmds = cmds.filter((c) => c.target.endsWith("/EnableFirewall"));
+  assertEquals(enableCmds.length, 3);
+  assertEquals(enableCmds.every((c) => c.data === "true" && c.format === "bool"), true);
+  // stealth=true 翻譯成 DisableStealthMode=false（反邏輯）
+  const stealthCmds = cmds.filter((c) => c.target.endsWith("/DisableStealthMode"));
+  assertEquals(stealthCmds.every((c) => c.data === "false"), true);
+  // notifications=false 翻譯成 DisableInboundNotifications=true（反邏輯）
+  const notifyCmds = cmds.filter((c) => c.target.endsWith("/DisableInboundNotifications"));
+  assertEquals(notifyCmds.every((c) => c.data === "true"), true);
+});
+
+Deno.test("buildFirewallPolicy: 覆蓋三 profile（Domain/Private/Public）", () => {
+  const cmds = buildFirewallPolicy({ enabled: true });
+  const profiles = cmds.map((c) => c.target.split("/")[5]);
+  // 三個 profile 各出現 3 次（EnableFirewall + DisableStealthMode + DisableInboundNotifications）
+  assertEquals(profiles.filter((p) => p === "DomainProfile").length, 3);
+  assertEquals(profiles.filter((p) => p === "PrivateProfile").length, 3);
+  assertEquals(profiles.filter((p) => p === "PublicProfile").length, 3);
+});
+
+Deno.test("buildFirewallPolicy: showNotifications=true → DisableInboundNotifications=false", () => {
+  const cmds = buildFirewallPolicy({ showNotifications: true });
+  const notifyCmds = cmds.filter((c) => c.target.endsWith("/DisableInboundNotifications"));
+  assertEquals(notifyCmds.every((c) => c.data === "false"), true);
+});
+
+// ============================================================
+// 設備命名
+// ============================================================
+
+Deno.test("buildSetComputerName: 合法名稱 → Replace ComputerName", () => {
+  const cmd = buildSetComputerName("TPE001-1234");
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(cmd.target, "./Device/Vendor/MSFT/Accounts/ComputerName");
+  assertEquals(cmd.format, "chr");
+  assertEquals(cmd.data, "TPE001-1234");
+});
+
+Deno.test("buildSetComputerName: 邊界 15 字元剛好通過", () => {
+  const cmd = buildSetComputerName("ABCDE1234567890"); // 15 chars
+  assertEquals(cmd.data, "ABCDE1234567890");
+});
+
+Deno.test("buildSetComputerName: 超 15 字元拋錯", () => {
+  assertThrows(() => buildSetComputerName("ABCDEFGHIJ123456"), Error, "15");
+});
+
+Deno.test("buildSetComputerName: 空字串拋錯", () => {
+  assertThrows(() => buildSetComputerName(""), Error, "不可為空");
+});
+
+Deno.test("buildSetComputerName: 含空白拋錯", () => {
+  assertThrows(() => buildSetComputerName("foo bar"), Error, "非法字元");
+});
+
+Deno.test("buildSetComputerName: 含保留符號（\\）拋錯", () => {
+  assertThrows(() => buildSetComputerName("foo\\bar"), Error, "非法字元");
 });

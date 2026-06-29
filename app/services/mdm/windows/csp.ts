@@ -1721,6 +1721,115 @@ export function buildPersonalizationStatusQuery(
 }
 
 // ============================================================
+// Camera 禁用（Policy CSP Camera/AllowCamera）
+// ============================================================
+//
+// 0 = 禁用內建相機；1 = 允許（系統預設）。
+// 適用考試 / 機密場景。Win10 1607+ 起所有版本(Home/Pro/Edu/Ent)皆支援。
+
+export function buildCameraPolicy(allow: boolean): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: "./Device/Vendor/MSFT/Policy/Config/Camera/AllowCamera",
+    format: "int",
+    data: allow ? "1" : "0",
+  };
+}
+
+// ============================================================
+// 防火牆（Firewall CSP MdmStore/{Global,DomainProfile,PrivateProfile,PublicProfile}）
+// ============================================================
+//
+// LocURI：./Vendor/MSFT/Firewall/MdmStore/{scope}/{prop}
+// MVP 只覆蓋「強制啟用 + 不允許關閉」的核心欄位：
+//   - EnableFirewall：對應 GUI「Windows Defender 防火牆狀態」
+//   - DisableStealthMode：0=啟用隱形（推薦）
+//   - DisableInboundNotifications：1=不顯示阻擋通知（避免學生關閉）
+//
+// scope=Global 設總開關；DomainProfile/PrivateProfile/PublicProfile 各自獨立，
+// 強制三 profile 同時啟用最穩。
+
+export type FirewallProfileScope =
+  | "Global"
+  | "DomainProfile"
+  | "PrivateProfile"
+  | "PublicProfile";
+
+export interface FirewallPolicyInput {
+  /** 強制啟用三個 profile (Domain/Private/Public)。預設 true */
+  enabled?: boolean;
+  /** 啟用隱形模式（拒絕未請求的入站連線）。預設 true */
+  stealthMode?: boolean;
+  /** 顯示防火牆阻擋通知。預設 false（學校場景關通知） */
+  showNotifications?: boolean;
+}
+
+export function buildFirewallPolicy(input: FirewallPolicyInput): SyncMLCommand[] {
+  const enabled = input.enabled ?? true;
+  const stealth = input.stealthMode ?? true;
+  const notify = input.showNotifications ?? false;
+  const cmds: SyncMLCommand[] = [];
+
+  const setBool = (scope: FirewallProfileScope, prop: string, val: boolean) => {
+    cmds.push({
+      cmdId: "0",
+      verb: "Replace",
+      target: `./Vendor/MSFT/Firewall/MdmStore/${scope}/${prop}`,
+      format: "bool",
+      data: val ? "true" : "false",
+    });
+  };
+
+  for (const scope of ["DomainProfile", "PrivateProfile", "PublicProfile"] as const) {
+    setBool(scope, "EnableFirewall", enabled);
+    // MS 反邏輯：DisableStealthMode=false 代表「啟用隱形」
+    setBool(scope, "DisableStealthMode", !stealth);
+    // MS 反邏輯：DisableInboundNotifications=true 代表「不顯示通知」
+    setBool(scope, "DisableInboundNotifications", !notify);
+  }
+  return cmds;
+}
+
+// ============================================================
+// 自動設備命名（Accounts CSP ComputerName）
+// ============================================================
+//
+// LocURI：./Device/Vendor/MSFT/Accounts/ComputerName
+// MVP 直接派發已組好的最終名稱字串；模板替換（學校代碼 / 序號）由 service 層
+// 完成,CSP 不關心。
+//
+// 限制：
+// - Windows ComputerName 規範：最多 15 字元、不含空白與保留符號
+// - 變更後設備需重啟才生效（CSP 套用本身不會立即觸發 reboot）
+
+const COMPUTER_NAME_MAX_LENGTH = 15;
+const COMPUTER_NAME_INVALID = /[\s\\/:*?"<>|`'~!@#$%^&()=+[\]{};,.]/;
+
+export function buildSetComputerName(name: string): SyncMLCommand {
+  if (!name || name.length === 0) {
+    throw new Error("buildSetComputerName: name 不可為空");
+  }
+  if (name.length > COMPUTER_NAME_MAX_LENGTH) {
+    throw new Error(
+      `buildSetComputerName: 超過 ${COMPUTER_NAME_MAX_LENGTH} 字元上限 (${name})`,
+    );
+  }
+  if (COMPUTER_NAME_INVALID.test(name)) {
+    throw new Error(
+      `buildSetComputerName: 含非法字元（空白 / 保留符號）: ${name}`,
+    );
+  }
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: "./Device/Vendor/MSFT/Accounts/ComputerName",
+    format: "chr",
+    data: name,
+  };
+}
+
+// ============================================================
 // 內部工具
 // ============================================================
 
