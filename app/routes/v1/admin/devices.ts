@@ -3,7 +3,12 @@ import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
-import { hardDeleteDevice, retireDevice, transferDeviceToGroup } from "~/services/devices.ts";
+import {
+  hardDeleteDevice,
+  retireDevice,
+  transferDeviceToGroup,
+  updateDeviceInventory,
+} from "~/services/devices.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/devices/*
@@ -250,6 +255,91 @@ devicesAdminApp.openapi(hardDeleteSpec, async (c) => {
       deletedSerialNumber: result.deletedSerialNumber,
       cascadedRows: result.cascadedRows,
     },
+  });
+  return c.json({ ok: true as const, data: result }, 200);
+});
+
+// ── 採購 Inventory（PRD §5.7） ──
+// purchaseDate / purchaseVendor / purchasePriceCents / purchaseCurrency / warrantyEndDate
+
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
+  message: "must be ISO 8601 date YYYY-MM-DD",
+});
+
+const inventoryBody = z
+  .object({
+    purchaseDate: isoDate.nullable().optional().openapi({
+      description: "**【選填】** 採購日期（ISO 8601）；傳 null 清空",
+      example: "2025-08-15",
+    }),
+    purchaseVendor: z.string().max(256).nullable().optional().openapi({
+      description: "**【選填】** 採購廠商名稱",
+      example: "Lenovo 台灣",
+    }),
+    purchasePriceCents: z.number().int().nonnegative().nullable().optional().openapi({
+      description: "**【選填】** 採購金額（分為單位避免浮點精度誤差，如 TWD 25000.00 = 2500000）",
+      example: 2500000,
+    }),
+    purchaseCurrency: z.string().length(3).nullable().optional().openapi({
+      description: "**【選填】** ISO 4217 三字幣別碼（如 TWD / USD）",
+      example: "TWD",
+    }),
+    warrantyEndDate: isoDate.nullable().optional().openapi({
+      description: "**【選填】** 保固到期日（ISO 8601）",
+      example: "2028-08-14",
+    }),
+  })
+  .openapi("UpdateDeviceInventoryInput");
+
+const inventoryResultSchema = z
+  .object({
+    id: z.string().uuid(),
+    purchaseDate: z.string().nullable(),
+    purchaseVendor: z.string().nullable(),
+    purchasePriceCents: z.number().int().nullable(),
+    purchaseCurrency: z.string().nullable(),
+    warrantyEndDate: z.string().nullable(),
+  })
+  .openapi("DeviceInventoryResult");
+
+const inventorySpec = createRoute({
+  method: "patch",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/inventory",
+  tags: ["設備操作"],
+  security,
+  summary: "更新設備採購 Inventory（PRD §5.7 購買資訊管理）",
+  description: [
+    "更新設備的採購日期、廠商、金額、保固到期日。三態語意：欄位省略=不動;傳 null=清空;傳值=寫入。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**金額單位**：`purchasePriceCents` 以「分」為單位儲存（如 TWD 25,000.00 = 2500000）",
+    "避免浮點精度問題;前端顯示時除以 100 並依 `purchaseCurrency` 格式化。",
+  ].join("\n"),
+  request: {
+    params: tenantDeviceParam,
+    body: { content: { "application/json": { schema: inventoryBody } } },
+  },
+  responses: {
+    200: {
+      description: "更新後的採購欄位",
+      content: { "application/json": { schema: successSchema(inventoryResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+devicesAdminApp.openapi(inventorySpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const patch = c.req.valid("json");
+  const result = await updateDeviceInventory({ tenantId, deviceId, patch });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.update_inventory",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: patch,
   });
   return c.json({ ok: true as const, data: result }, 200);
 });

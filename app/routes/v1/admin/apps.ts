@@ -7,8 +7,10 @@ import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   deleteApp,
   getAppById,
+  getAppLicenseUsage,
   listAppsByTenant,
   toAppDto,
+  updateAppMetadata,
   uploadApp,
 } from "~/services/apps.ts";
 
@@ -62,6 +64,17 @@ const appSchema = z
     }),
     iTunesStoreId: z.number().nullable().openapi({
       description: "iTunes Store ID（Apple Custom App 專用，走 ABM/ASM 派發）",
+    }),
+    category: z.string().nullable().openapi({
+      description: "App 分類標籤（如 teaching / system_tools / office）（PRD §5.3）",
+      example: "teaching",
+    }),
+    licenseCount: z.number().int().nullable().openapi({
+      description: "**【選填】** 已購買授權數;null = 無限制（PRD §5.3）",
+      example: 100,
+    }),
+    licenseNotes: z.string().nullable().openapi({
+      description: "**【選填】** 授權備註（採購合同編號等）",
     }),
     createdAt: z.string().openapi({ description: "ISO 8601 UTC" }),
     updatedAt: z.string().openapi({ description: "ISO 8601 UTC" }),
@@ -124,6 +137,15 @@ const uploadSpec = createRoute({
             kind: appKindSchema.optional(),
             installArgs: z.string().optional(),
             signedBy: z.string().optional(),
+            category: z.string().optional().openapi({
+              description: "**【選填】** App 分類（PRD §5.3），如 teaching / system_tools / office",
+            }),
+            licenseCount: z.string().optional().openapi({
+              description: "**【選填】** 已購買授權數（整數字串）；省略視為無限制",
+            }),
+            licenseNotes: z.string().optional().openapi({
+              description: "**【選填】** 授權備註（採購合同編號等）",
+            }),
           }),
         },
       },
@@ -201,8 +223,21 @@ const listSpec = createRoute({
   tags: ["應用套件管理"],
   security,
   summary: "列出此 tenant 下所有 App 安裝包",
-  description: "回傳指定 tenant 的全部已上傳 App（不分頁）。\n\n**鑑權**：Bearer admin token。",
-  request: { params: tenantParam },
+  description: [
+    "回傳指定 tenant 的全部已上傳 App（不分頁）。可選 `category` 過濾。",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    query: z.object({
+      category: z.string().optional().openapi({
+        param: { name: "category", in: "query" },
+        description: "**【選填】** 按分類過濾（PRD §5.3）",
+        example: "teaching",
+      }),
+    }),
+  },
   responses: {
     200: {
       description: "App 陣列",
@@ -224,6 +259,103 @@ const detailSpec = createRoute({
     200: {
       description: "App 物件",
       content: { "application/json": { schema: successSchema(appSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const patchSpec = createRoute({
+  method: "patch",
+  path: "/admin/tenants/{tenantId}/apps/{appId}",
+  tags: ["應用套件管理"],
+  security,
+  summary: "更新 App metadata（分類 / 授權 / 顯示名等，不動檔案）",
+  description: [
+    "更新已上傳 App 的 metadata。**不可改檔案**（kind / version / fileHash 等綁定二進制）。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**三態語意**：欄位**省略**=不動；傳 `null`=清空；傳值=寫入。",
+  ].join("\n"),
+  request: {
+    params: tenantAppParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              displayName: z.string().min(1).optional(),
+              bundleId: z.string().nullable().optional(),
+              installArgs: z.string().nullable().optional(),
+              signedBy: z.string().nullable().optional(),
+              category: z.string().nullable().optional().openapi({
+                description: "**【選填】** App 分類;傳 null 清空",
+              }),
+              licenseCount: z.number().int().nonnegative().nullable().optional().openapi({
+                description: "**【選填】** 已購買授權數;傳 null 視為無限制",
+              }),
+              licenseNotes: z.string().nullable().optional().openapi({
+                description: "**【選填】** 授權備註;傳 null 清空",
+              }),
+            })
+            .openapi("UpdateAppInput"),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "更新後的 App 物件",
+      content: { "application/json": { schema: successSchema(appSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const licenseUsageSchema = z
+  .object({
+    appId: z.string().uuid(),
+    licenseCount: z.number().int().nullable().openapi({
+      description: "已購買授權總數;null = 未設定（視為無限制）",
+    }),
+    assigned: z.number().int().openapi({
+      description: "已派發到的 distinct 設備數（status=pending/installing/installed）",
+    }),
+    installed: z.number().int().openapi({
+      description: "實際安裝完成的 distinct 設備數（status=installed）",
+    }),
+    overLimit: z.boolean().openapi({
+      description: "true=已超出授權數（licenseCount 非 null 且 assigned > licenseCount）",
+    }),
+    remaining: z.number().int().nullable().openapi({
+      description: "剩餘可派發數;licenseCount=null 時為 null",
+    }),
+  })
+  .openapi("AppLicenseUsage");
+
+const licenseUsageSpec = createRoute({
+  method: "get",
+  path: "/admin/tenants/{tenantId}/apps/{appId}/license-usage",
+  tags: ["應用套件管理"],
+  security,
+  summary: "查詢 App 授權使用情況（PRD §5.3 授權數量管理）",
+  description: [
+    "回傳該 App 已派發數 / 已安裝數 / 是否超出授權上限。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**計算邏輯**：",
+    "- assigned = distinct device_id 數（status IN pending/installing/installed）",
+    "- installed = distinct device_id 數（status = installed）",
+    "- overLimit = licenseCount 非 null 且 assigned > licenseCount",
+    "",
+    "**MVP 限制**：scope=device_group 的派發（沒有具體 device_id）目前不計入 assigned。",
+  ].join("\n"),
+  request: { params: tenantAppParam },
+  responses: {
+    200: {
+      description: "授權使用統計",
+      content: { "application/json": { schema: successSchema(licenseUsageSchema) } },
     },
     ...commonErrorResponses,
   },
@@ -341,6 +473,14 @@ appsAdminApp.openapi(uploadSpec, async (c) => {
   if (!displayName || !version) {
     throw new AppError(400, "missing_metadata", "displayName and version are required");
   }
+  let licenseCount: number | null = null;
+  if (body["licenseCount"] != null && String(body["licenseCount"]).length > 0) {
+    const n = Number(body["licenseCount"]);
+    if (!Number.isInteger(n) || n < 0) {
+      throw new AppError(400, "invalid_license_count", "licenseCount must be a non-negative integer");
+    }
+    licenseCount = n;
+  }
   const buf = new Uint8Array(await file.arrayBuffer());
   const row = await uploadApp({
     tenantId,
@@ -352,6 +492,9 @@ appsAdminApp.openapi(uploadSpec, async (c) => {
     bundleId: body["bundleId"] ? String(body["bundleId"]) : null,
     installArgs: body["installArgs"] ? String(body["installArgs"]) : null,
     signedBy: body["signedBy"] ? String(body["signedBy"]) : null,
+    category: body["category"] ? String(body["category"]) : null,
+    licenseCount,
+    licenseNotes: body["licenseNotes"] ? String(body["licenseNotes"]) : null,
   });
   await logAudit({
     ...extractAuditMeta(c),
@@ -372,7 +515,8 @@ appsAdminApp.openapi(uploadSpec, async (c) => {
 
 appsAdminApp.openapi(listSpec, async (c) => {
   const { tenantId } = c.req.valid("param");
-  const rows = await listAppsByTenant(tenantId);
+  const { category } = c.req.valid("query");
+  const rows = await listAppsByTenant(tenantId, { category });
   return c.json({ ok: true as const, data: rows.map((r) => toAppDto(r)) }, 200);
 });
 
@@ -380,6 +524,27 @@ appsAdminApp.openapi(detailSpec, async (c) => {
   const { tenantId, appId } = c.req.valid("param");
   const row = await getAppById({ appId, tenantId });
   return c.json({ ok: true as const, data: toAppDto(row) }, 200);
+});
+
+appsAdminApp.openapi(patchSpec, async (c) => {
+  const { tenantId, appId } = c.req.valid("param");
+  const patch = c.req.valid("json");
+  const updated = await updateAppMetadata({ tenantId, appId, patch });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "app.update",
+    resourceType: "app",
+    resourceId: appId,
+    payload: patch,
+  });
+  return c.json({ ok: true as const, data: toAppDto(updated) }, 200);
+});
+
+appsAdminApp.openapi(licenseUsageSpec, async (c) => {
+  const { tenantId, appId } = c.req.valid("param");
+  const usage = await getAppLicenseUsage({ tenantId, appId });
+  return c.json({ ok: true as const, data: usage }, 200);
 });
 
 appsAdminApp.openapi(deleteSpec, async (c) => {

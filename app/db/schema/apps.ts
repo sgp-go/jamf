@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -69,6 +70,17 @@ export const apps = pgTable(
     signedBy: text(),
     installArgs: text(),
     iTunesStoreId: bigint({ mode: "number" }),
+
+    // App 分類管理（PRD §5.3 — 例如 teaching / system_tools / office）
+    // 自由字串（前端做 dropdown），不強約束 enum 避免擴展受限
+    category: varchar({ length: 32 }),
+
+    // 授權數量管理（PRD §5.3）
+    // licenseCount=null 視為「無限制」；其它整數為總授權數
+    // 已派發數量由 app_assignments 計算（status IN installing/installed），不冗餘存
+    licenseCount: integer(),
+    licenseNotes: text(),
+
     metadata: jsonb().$type<Record<string, unknown>>(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
@@ -80,6 +92,7 @@ export const apps = pgTable(
     index("apps_tenant_idx").on(t.tenantId),
     index("apps_platform_kind_idx").on(t.platform, t.kind),
     index("apps_bundle_id_idx").on(t.bundleId),
+    index("apps_category_idx").on(t.category),
     uniqueIndex("apps_tenant_bundle_version_uq")
       .on(t.tenantId, t.bundleId, t.version)
       .where(sql`${t.bundleId} IS NOT NULL`),

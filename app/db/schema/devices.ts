@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -90,6 +92,14 @@ export const mdmDevices = pgTable(
     agentTokenIssuedAt: timestamp({ withTimezone: true }),
     agentInstalledAt: timestamp({ withTimezone: true }),
     agentAppId: uuid(),
+
+    // 採購 Inventory（PRD §5.7 — 設備生命週期管理用）
+    // purchasePriceCents：用 cents 整數避免浮點；purchaseCurrency 預設 TWD
+    purchaseDate: date(),
+    purchaseVendor: text(),
+    purchasePriceCents: bigint({ mode: "number" }),
+    purchaseCurrency: varchar({ length: 3 }),
+    warrantyEndDate: date(),
 
     selfMdmManaged: boolean().notNull().default(false),
     enrollmentType: varchar({ length: 32 }).default("dep"),

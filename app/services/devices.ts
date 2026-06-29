@@ -363,6 +363,72 @@ export interface UpdateDeviceInput {
  * - updated_at 由 schema $onUpdate 自動維護
  * - 用 .returning() 一次拿回更新後 row，404 由 returning 為空判定
  */
+/**
+ * 更新採購 Inventory（PRD §5.7：購買日期 / 廠商 / 金額 / 保固到期日）。
+ *
+ * 三態 patch 語意：欄位 undefined=不動 / null=清空 / 具體值=寫入。
+ * 金額用 cents 整數避免浮點;currency 是 ISO 4217 三字碼。
+ */
+export interface UpdateDeviceInventoryInput {
+  purchaseDate?: string | null;
+  purchaseVendor?: string | null;
+  purchasePriceCents?: number | null;
+  purchaseCurrency?: string | null;
+  warrantyEndDate?: string | null;
+}
+
+export async function updateDeviceInventory(opts: {
+  tenantId: string;
+  deviceId: string;
+  patch: UpdateDeviceInventoryInput;
+}): Promise<{
+  id: string;
+  purchaseDate: string | null;
+  purchaseVendor: string | null;
+  purchasePriceCents: number | null;
+  purchaseCurrency: string | null;
+  warrantyEndDate: string | null;
+}> {
+  const set: Record<string, unknown> = {};
+  const p = opts.patch;
+  if (p.purchaseDate !== undefined) set.purchaseDate = p.purchaseDate;
+  if (p.purchaseVendor !== undefined) set.purchaseVendor = p.purchaseVendor;
+  if (p.purchasePriceCents !== undefined) set.purchasePriceCents = p.purchasePriceCents;
+  if (p.purchaseCurrency !== undefined) set.purchaseCurrency = p.purchaseCurrency;
+  if (p.warrantyEndDate !== undefined) set.warrantyEndDate = p.warrantyEndDate;
+
+  if (Object.keys(set).length === 0) {
+    const existing = await getDeviceInTenant(opts);
+    return {
+      id: existing.id,
+      purchaseDate: existing.purchaseDate,
+      purchaseVendor: existing.purchaseVendor,
+      purchasePriceCents: existing.purchasePriceCents,
+      purchaseCurrency: existing.purchaseCurrency,
+      warrantyEndDate: existing.warrantyEndDate,
+    };
+  }
+
+  const [row] = await db
+    .update(mdmDevices)
+    .set(set)
+    .where(
+      and(eq(mdmDevices.id, opts.deviceId), eq(mdmDevices.tenantId, opts.tenantId)),
+    )
+    .returning({
+      id: mdmDevices.id,
+      purchaseDate: mdmDevices.purchaseDate,
+      purchaseVendor: mdmDevices.purchaseVendor,
+      purchasePriceCents: mdmDevices.purchasePriceCents,
+      purchaseCurrency: mdmDevices.purchaseCurrency,
+      warrantyEndDate: mdmDevices.warrantyEndDate,
+    });
+  if (!row) {
+    throw new AppError(404, "device_not_found", "Device not found");
+  }
+  return row;
+}
+
 export async function updateDeviceInTenant(opts: {
   tenantId: string;
   deviceId: string;

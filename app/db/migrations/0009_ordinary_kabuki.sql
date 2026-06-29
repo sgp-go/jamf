@@ -1,0 +1,9 @@
+ALTER TABLE "apps" ADD COLUMN "category" varchar(32);--> statement-breakpoint
+ALTER TABLE "apps" ADD COLUMN "license_count" integer;--> statement-breakpoint
+ALTER TABLE "apps" ADD COLUMN "license_notes" text;--> statement-breakpoint
+ALTER TABLE "mdm_devices" ADD COLUMN "purchase_date" date;--> statement-breakpoint
+ALTER TABLE "mdm_devices" ADD COLUMN "purchase_vendor" text;--> statement-breakpoint
+ALTER TABLE "mdm_devices" ADD COLUMN "purchase_price_cents" bigint;--> statement-breakpoint
+ALTER TABLE "mdm_devices" ADD COLUMN "purchase_currency" varchar(3);--> statement-breakpoint
+ALTER TABLE "mdm_devices" ADD COLUMN "warranty_end_date" date;--> statement-breakpoint
+CREATE INDEX "apps_category_idx" ON "apps" USING btree ("category");

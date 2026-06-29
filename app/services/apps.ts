@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { stat, unlink, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "~/db/client.ts";
-import { apps, type App } from "~/db/schema/apps.ts";
+import { apps, appAssignments, type App } from "~/db/schema/apps.ts";
 import { AppError } from "~/lib/errors.ts";
 
 /**
@@ -76,6 +76,12 @@ export interface AppDto {
   signedBy: string | null;
   installArgs: string | null;
   iTunesStoreId: number | null;
+  /** App 分類標籤（PRD §5.3），自由字串 */
+  category: string | null;
+  /** 已購買授權數;null = 無限制（PRD §5.3） */
+  licenseCount: number | null;
+  /** 授權備註（採購合同編號等） */
+  licenseNotes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,6 +105,9 @@ function toDto(row: App, publicBaseUrl?: string): AppDto {
     signedBy: row.signedBy,
     installArgs: row.installArgs,
     iTunesStoreId: row.iTunesStoreId,
+    category: row.category,
+    licenseCount: row.licenseCount,
+    licenseNotes: row.licenseNotes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -120,6 +129,12 @@ export interface UploadAppInput {
   installArgs?: string | null;
   /** 簽名者識別（如 "CoGrow Code Signing"），方便審計 */
   signedBy?: string | null;
+  /** App 分類（PRD §5.3） */
+  category?: string | null;
+  /** 已購買授權數;null = 無限制（PRD §5.3） */
+  licenseCount?: number | null;
+  /** 授權備註（採購合同編號等） */
+  licenseNotes?: string | null;
 }
 
 /**
@@ -186,6 +201,9 @@ export async function uploadApp(input: UploadAppInput): Promise<App> {
       fileSizeBytes: input.fileBytes.byteLength,
       installArgs: input.installArgs ?? null,
       signedBy: input.signedBy ?? null,
+      category: input.category ?? null,
+      licenseCount: input.licenseCount ?? null,
+      licenseNotes: input.licenseNotes ?? null,
     })
     .returning();
   if (!row) {
@@ -219,12 +237,116 @@ export async function uploadApp(input: UploadAppInput): Promise<App> {
 
 export async function listAppsByTenant(
   tenantId: string,
+  opts?: { category?: string },
 ): Promise<App[]> {
+  const conds = [eq(apps.tenantId, tenantId)];
+  if (opts?.category) {
+    conds.push(eq(apps.category, opts.category));
+  }
   return db
     .select()
     .from(apps)
-    .where(eq(apps.tenantId, tenantId))
+    .where(and(...conds))
     .orderBy(desc(apps.createdAt));
+}
+
+/**
+ * 更新 App metadata（不動檔案）— 分類、授權數、備註、displayName 等。
+ *
+ * 三態 patch 語意：
+ *   - undefined：不動
+ *   - null：清空（category=null / licenseCount=null）
+ *   - 具體值：寫入
+ *
+ * 注意：file / version / fileHash / kind 不可此處改（檔案邏輯不一致風險），
+ * 要換二進制請刪了重傳。
+ */
+export interface UpdateAppMetadataInput {
+  displayName?: string;
+  bundleId?: string | null;
+  installArgs?: string | null;
+  signedBy?: string | null;
+  category?: string | null;
+  licenseCount?: number | null;
+  licenseNotes?: string | null;
+}
+
+export async function updateAppMetadata(opts: {
+  tenantId: string;
+  appId: string;
+  patch: UpdateAppMetadataInput;
+}): Promise<App> {
+  const existing = await getAppById({ appId: opts.appId, tenantId: opts.tenantId });
+  if (existing.tenantId !== opts.tenantId) {
+    throw new AppError(403, "forbidden", "App belongs to another tenant");
+  }
+  const set: Record<string, unknown> = {};
+  const p = opts.patch;
+  if (p.displayName !== undefined) set.displayName = p.displayName;
+  if (p.bundleId !== undefined) set.bundleId = p.bundleId;
+  if (p.installArgs !== undefined) set.installArgs = p.installArgs;
+  if (p.signedBy !== undefined) set.signedBy = p.signedBy;
+  if (p.category !== undefined) set.category = p.category;
+  if (p.licenseCount !== undefined) set.licenseCount = p.licenseCount;
+  if (p.licenseNotes !== undefined) set.licenseNotes = p.licenseNotes;
+  if (Object.keys(set).length === 0) {
+    return existing;
+  }
+  const [updated] = await db
+    .update(apps)
+    .set(set)
+    .where(eq(apps.id, opts.appId))
+    .returning();
+  if (!updated) {
+    throw new AppError(404, "app_not_found", "App not found");
+  }
+  return updated;
+}
+
+/**
+ * 授權使用情況統計（PRD §5.3「平台追蹤已派發數量,超過授權數量時警示」）。
+ *
+ * - assigned：所有 active 派發（pending / installing / installed），代表「佔用授權」的數
+ * - installed：實際安裝完成（status=installed）
+ * - licenseCount：總授權數，null 視為無限制
+ * - overLimit：licenseCount 非 null 且 assigned > licenseCount
+ *
+ * 計算邏輯故意算 distinct device_id：同台設備同 app 多次 assignment（如重派）只算一個佔用。
+ */
+export interface AppLicenseUsage {
+  appId: string;
+  licenseCount: number | null;
+  assigned: number;
+  installed: number;
+  overLimit: boolean;
+  remaining: number | null;
+}
+
+export async function getAppLicenseUsage(opts: {
+  tenantId: string;
+  appId: string;
+}): Promise<AppLicenseUsage> {
+  const app = await getAppById({ appId: opts.appId, tenantId: opts.tenantId });
+  const rows = await db
+    .select({
+      assigned: sql<number>`COUNT(DISTINCT CASE WHEN ${appAssignments.status} IN ('pending','installing','installed') THEN ${appAssignments.deviceId} END)::int`,
+      installed: sql<number>`COUNT(DISTINCT CASE WHEN ${appAssignments.status} = 'installed' THEN ${appAssignments.deviceId} END)::int`,
+    })
+    .from(appAssignments)
+    .where(eq(appAssignments.appId, opts.appId));
+  const assigned = rows[0]?.assigned ?? 0;
+  const installed = rows[0]?.installed ?? 0;
+  const limit = app.licenseCount;
+  const overLimit = limit !== null && assigned > limit;
+  const remaining = limit === null ? null : Math.max(0, limit - assigned);
+  return {
+    appId: opts.appId,
+    licenseCount: limit,
+    assigned,
+    installed,
+    overLimit,
+    remaining,
+  };
 }
 
 export async function getAppById(opts: {
