@@ -18,6 +18,7 @@ import {
   buildLockState,
   buildReboot,
   buildRemoteWipe,
+  type WipeAction,
 } from "~/services/mdm/windows/csp.ts";
 import { upsertMdmDevice } from "~/services/mdm/devices.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
@@ -190,6 +191,13 @@ export async function sendCommandToDevice(opts: {
   lostModeMessage?: string;
   lostModePhone?: string;
   lostModeFootnote?: string;
+  /**
+   * 僅作用於 WIPE 命令的 Windows 路徑：選擇 RemoteWipe 動作。
+   * 預設 `doWipe`（連 PPKG + enrollment 一併抹除）；轉校場景傳
+   * `doWipePersistProvisionedData` 保留 PPKG → 重置後自動回管。
+   * Apple 路徑忽略此參數（ERASE_DEVICE 由 ADE 決定是否重新註冊）。
+   */
+  wipeAction?: WipeAction;
 }): Promise<unknown> {
   const device = await getDeviceInTenant(opts);
 
@@ -197,6 +205,7 @@ export async function sendCommandToDevice(opts: {
     return sendWindowsDeviceCommand(device, opts.command, {
       lostModeMessage: opts.lostModeMessage,
       lostModePhone: opts.lostModePhone,
+      wipeAction: opts.wipeAction,
     });
   }
 
@@ -256,7 +265,7 @@ function normalizeToJamfCommand(command: string): DeviceCommand {
 async function sendWindowsDeviceCommand(
   device: MdmDevice,
   command: string,
-  opts?: { lostModeMessage?: string; lostModePhone?: string },
+  opts?: { lostModeMessage?: string; lostModePhone?: string; wipeAction?: WipeAction },
 ): Promise<{ commandUuid: string }> {
   if (!device.udid) {
     throw new AppError(
@@ -294,7 +303,7 @@ async function sendWindowsDeviceCommand(
   let commandType: string;
   switch (command) {
     case "WIPE":
-      syncmlCmd = buildRemoteWipe();
+      syncmlCmd = buildRemoteWipe(opts?.wipeAction);
       commandType = "RemoteWipe";
       break;
     case "REBOOT":
@@ -393,10 +402,16 @@ export async function updateDeviceInTenant(opts: {
  * 硬轉校（轉組 + Wipe）：
  *   1. 校驗目標 device_group 屬同 tenant
  *   2. 立即標記 mdm_devices.deviceGroupId = target（不等 Wipe 完成）
- *   3. 派 Wipe（跨平台：Apple→ERASE_DEVICE / Windows→RemoteWipe）
+ *   3. 派「保留預配資料」的 Wipe：
+ *      - Windows→RemoteWipe/doWipePersistProvisionedData（保留 PPKG，
+ *        重置後自動重走 OOBE 佈建 → 自動重新 enroll）
+ *      - Apple→ERASE_DEVICE（ADE 設備抹除後自動重新註冊）
  *
- * 設備 Wipe 後重新 enroll 時，按 (tenantId, serialNumber) 找回此 row，
+ * 設備重置後重新 enroll 時，按 (tenantId, serialNumber) 找回此 row，
  * deviceGroupId 已是新的 → 自動歸新組（無須再次手動操作）。
+ *
+ * 與 retireDevice 的差異：轉校保留 PPKG 讓設備自動回管；退役走預設
+ * doWipe，連 PPKG + enrollment 一併抹除，設備不再自動回管。
  *
  * 失敗策略：deviceGroupId 標記先行（已 commit）；Wipe 派發失敗時錯誤冒泡，
  * deviceGroupId 不回滾——caller 可重試 transfer（update 冪等、Wipe 命令冪等）。
@@ -425,11 +440,13 @@ export async function transferDeviceToGroup(opts: {
     throw new AppError(404, "device_not_found", "Device not found");
   }
 
-  // 3. 派 Wipe（複用 sendCommandToDevice 的 platform 路由）
+  // 3. 派「保留預配」的 Wipe（複用 sendCommandToDevice 的 platform 路由）：
+  //    Windows 走 doWipePersistProvisionedData，PPKG 不被抹除 → 重置後自動回管。
   const wipe = await sendCommandToDevice({
     tenantId: opts.tenantId,
     deviceId: opts.deviceId,
     command: "WIPE",
+    wipeAction: "doWipePersistProvisionedData",
   });
 
   return {
@@ -437,6 +454,42 @@ export async function transferDeviceToGroup(opts: {
     newDeviceGroupId: updated.deviceGroupId!,
     wipe,
   };
+}
+
+/**
+ * 設備退役（徹底擦除 + 移除 MDM）：
+ *   1. 派預設 doWipe（跨平台：Windows→RemoteWipe/doWipe 工廠重置，連 PPKG +
+ *      enrollment 一併抹除；Apple→ERASE_DEVICE）。設備重置後不會自動回管。
+ *   2. 標記 mdm_devices.enrollmentStatus = unenrolled（軟刪，保留歷史）。
+ *
+ * 與 transferDeviceToGroup 的差異：退役用預設 doWipe（不保留 PPKG），設備不再
+ * 自動回管；轉校用 doWipePersistProvisionedData 保留 PPKG 讓設備自動歸新組。
+ *
+ * 與 hardDeleteDevice（救火工具，DELETE row + cascade）的差異：retire 是業務退役
+ * 流程（Wipe + 軟刪），保留設備歷史；hardDelete 僅當設備已用 reset-enrollment.ps1
+ * 強拆、留下孤兒 row 阻止重 enroll 時才用。
+ *
+ * 失敗策略：先派 Wipe（失敗則錯誤冒泡、不標記 unenrolled，caller 可重試）；
+ * Wipe 派發成功後才標記 DB，避免 row 標記與設備實際狀態不一致。
+ */
+export async function retireDevice(opts: {
+  tenantId: string;
+  deviceId: string;
+}): Promise<{ deviceId: string; wipe: unknown }> {
+  // 1. 派全量 Wipe（預設 doWipe，連 PPKG + enrollment 一併抹除）
+  const wipe = await sendCommandToDevice({
+    tenantId: opts.tenantId,
+    deviceId: opts.deviceId,
+    command: "WIPE",
+  });
+
+  // 2. 標記 DB unenrolled（複用軟刪，冪等）
+  await unenrollDeviceInTenant({
+    tenantId: opts.tenantId,
+    deviceId: opts.deviceId,
+  });
+
+  return { deviceId: opts.deviceId, wipe };
 }
 
 async function assertDeviceGroupBelongsToTenant(

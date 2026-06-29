@@ -3,7 +3,7 @@ import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
-import { hardDeleteDevice, transferDeviceToGroup } from "~/services/devices.ts";
+import { hardDeleteDevice, retireDevice, transferDeviceToGroup } from "~/services/devices.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/devices/*
@@ -47,6 +47,16 @@ const transferResultSchema = z
   })
   .openapi("DeviceTransferResult");
 
+const retireResultSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    wipe: z.unknown().openapi({
+      description:
+        "派發結果。Apple：Jamf API 原始 response；Windows：{commandUuid}",
+    }),
+  })
+  .openapi("DeviceRetireResult");
+
 const security = [{ BearerAuth: [] }];
 
 const transferSpec = createRoute({
@@ -79,6 +89,40 @@ const transferSpec = createRoute({
   },
 });
 
+const retireSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/retire",
+  tags: ["設備操作"],
+  security,
+  summary: "設備退役：徹底擦除 + 移除 MDM",
+  description: [
+    "將設備永久退役（畢業淘汰 / 報廢）。流程：",
+    "",
+    "1. 派預設 doWipe 工廠重置（Apple 走 Jamf / Windows 走自建 MDM）",
+    "2. 標記設備 `enrollmentStatus=unenrolled`（軟刪，保留歷史）",
+    "",
+    "**與轉校的差異**：退役**不保留** PPKG（連 enrollment 一併抹除），設備重置後",
+    "**不會**自動回管；轉校保留 PPKG 讓設備自動歸入新分組。",
+    "",
+    "**與 DELETE 硬刪的差異**：retire 是業務退役流程，保留設備歷史 row；",
+    "DELETE 硬刪是救火工具（reset-enrollment.ps1 配對），會 cascade 清掉所有子表。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**⚠️ 此操作會遠端擦除設備且不可逆**，確保已備份資料。",
+  ].join("\n"),
+  request: {
+    params: tenantDeviceParam,
+  },
+  responses: {
+    200: {
+      description: "退役已觸發，回傳設備 ID 及 Wipe 派發結果",
+      content: { "application/json": { schema: successSchema(retireResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 export const devicesAdminApp = new OpenAPIHono({ defaultHook: validationFailedHook });
 devicesAdminApp.use("/admin/*", adminAuth());
 
@@ -97,6 +141,19 @@ devicesAdminApp.openapi(transferSpec, async (c) => {
     resourceType: "device",
     resourceId: deviceId,
     payload: { targetDeviceGroupId },
+  });
+  return c.json({ ok: true as const, data: result }, 200);
+});
+
+devicesAdminApp.openapi(retireSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const result = await retireDevice({ tenantId, deviceId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.retire",
+    resourceType: "device",
+    resourceId: deviceId,
   });
   return c.json({ ok: true as const, data: result }, 200);
 });

@@ -27,7 +27,7 @@ export const ALL_TAGS: OpenApiTag[] = [
   { name: "Jamf 整合", description: "Jamf Pro 整合設定（憑據錄入 / 驗證 / 設備同步），支援多實例" },
 
   // ── 設備管理 ──
-  { name: "設備操作", description: "Admin 設備寫入（transfer 跨校轉移 + Wipe 觸發 + Agent 派發）" },
+  { name: "設備操作", description: "Admin 設備寫入（transfer 跨校轉移 + retire 退役 + Wipe 觸發 + Agent 派發）" },
   { name: "批次註冊", description: "Windows PPKG 批次註冊（customizations.xml 生成，含 WiFi / 本機帳號配置）" },
   { name: "Agent 派發", description: "Agent App 一鍵派發（EDA-CSP 遠端安裝 + 灰度升級 + 健康驗證）" },
   { name: "密碼託管（LAPS）", description: "本機管理員密碼託管 —— 查詢當前密碼 / 手動觸發輪換" },
@@ -37,8 +37,12 @@ export const ALL_TAGS: OpenApiTag[] = [
   { name: "策略預設", description: "高層 preset：網站黑名單 / Defender 強制 / Windows Update 策略（自動轉換為 CSP payload）" },
   { name: "合規評估", description: "合規政策即時評估（OS 版本下限 + 離線天數上限）" },
 
-  // ── 平台營運 ──
+  // ── 應用管理 ──
+  { name: "應用派發", description: "App 指派到設備或群組 / 卸載 / 安裝狀態追蹤 / 失敗重試" },
   { name: "應用套件管理", description: "App 安裝包上傳與管理（MSI / MSIX 二進位 + metadata）" },
+
+  // ── 平台營運 ──
+  { name: "設備策略", description: "WiFi / 桌布 / 密碼政策 / USB 管控 / 應用限制（AppLocker）推送到設備" },
   { name: "審計日誌", description: "審計日誌查詢（唯讀；寫入由各端點自動記錄）" },
   { name: "Webhook 端點", description: "Webhook 接收端自助註冊：CRUD + 軟刪 + 輪換 secret（secret 僅建立 / 輪換時回傳一次）" },
   { name: "Webhook 監控", description: "Webhook 可觀測性（唯讀）：事件日誌 + 投遞記錄（含重試 / 死信狀態）" },
@@ -52,7 +56,8 @@ export const ALL_TAG_GROUPS: OpenApiTagGroup[] = [
   { name: "租戶初始化", tags: ["租戶管理", "設備分組", "Jamf 整合"] },
   { name: "設備管理", tags: ["設備操作", "批次註冊", "Agent 派發", "密碼託管（LAPS）"] },
   { name: "策略與合規", tags: ["配置描述檔", "策略預設", "合規評估"] },
-  { name: "平台營運", tags: ["應用套件管理", "審計日誌", "Webhook 端點", "Webhook 監控"] },
+  { name: "應用管理", tags: ["應用派發", "應用套件管理"] },
+  { name: "平台營運", tags: ["設備策略", "審計日誌", "Webhook 端點", "Webhook 監控"] },
   { name: "已棄用", tags: ["Jamf 原始視圖（已棄用）"] },
 ];
 

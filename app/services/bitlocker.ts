@@ -129,6 +129,7 @@ export async function getBitLockerRecoveryKey(opts: {
     where: and(
       eq(mdmWindowsBitlocker.tenantId, opts.tenantId),
       eq(mdmWindowsBitlocker.deviceId, opts.deviceId),
+      eq(mdmWindowsBitlocker.status, "confirmed"),
     ),
     orderBy: [desc(mdmWindowsBitlocker.createdAt)],
   });
