@@ -1,7 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- 跟隨 main project TFM，避免 ProjectReference 跨 TFM 不相容警告/錯誤。
+         Tests 不直接調 WinRT API，在 Mac/Linux 跑 dotnet test 仍可（runtime 不會載 Geolocator）。 -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
 

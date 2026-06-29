@@ -32,6 +32,7 @@ public class Worker : BackgroundService
     private readonly JitterScheduler _scheduler;
     private readonly DeviceReporter _deviceReporter;
     private readonly UsageReporter _usageReporter;
+    private readonly GpsReporter _gpsReporter;
     private readonly IUsageStore _usageStore;
     private readonly DeviceFactsCollector _facts;
     private readonly IReportQueue _queue;
@@ -42,6 +43,7 @@ public class Worker : BackgroundService
         JitterScheduler scheduler,
         DeviceReporter deviceReporter,
         UsageReporter usageReporter,
+        GpsReporter gpsReporter,
         IUsageStore usageStore,
         DeviceFactsCollector facts,
         IReportQueue queue,
@@ -51,6 +53,7 @@ public class Worker : BackgroundService
         _scheduler = scheduler;
         _deviceReporter = deviceReporter;
         _usageReporter = usageReporter;
+        _gpsReporter = gpsReporter;
         _usageStore = usageStore;
         _facts = facts;
         _queue = queue;
@@ -211,6 +214,7 @@ public class Worker : BackgroundService
             {
                 ReportType.DeviceReport => await _deviceReporter.RetryAsync(item.Payload, ct),
                 ReportType.UsageReport => await _usageReporter.RetryAsync(item.Payload, ct),
+                ReportType.GpsReport => await _gpsReporter.RetryAsync(item.Payload, ct),
                 _ => false,
             };
 
@@ -227,7 +231,7 @@ public class Worker : BackgroundService
                     item.Id,
                     item.ReportType switch
                     {
-                        ReportType.DeviceReport or ReportType.UsageReport
+                        ReportType.DeviceReport or ReportType.UsageReport or ReportType.GpsReport
                             => "non-success http status on retry",
                         _ => $"unknown report_type: {item.ReportType}",
                     },

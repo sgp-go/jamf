@@ -31,6 +31,7 @@ public static class StartupSelfCheck
         ("JitterScheduler", typeof(JitterScheduler)),
         ("DeviceReporter", typeof(DeviceReporter)),
         ("UsageReporter", typeof(UsageReporter)),
+        ("GpsReporter", typeof(GpsReporter)),
         ("IReportQueue", typeof(IReportQueue)),
         ("IUsageStore", typeof(IUsageStore)),
         ("DeviceFactsCollector", typeof(DeviceFactsCollector)),

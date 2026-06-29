@@ -1,7 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- net8.0-windows10.0.19041.0：隱式引入 Microsoft.Windows.SDK.NET.Ref，
+         開放 Windows.Devices.Geolocation 等 WinRT API（GpsCollector 用）。
+         19041 = Win10 2004 SDK，向後兼容到 Win11，覆蓋甲方所有目標 OS。
+         保留 SupportedOSPlatform 5.0 是因為部分 P/Invoke 仍需平台抑制。 -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <!-- 允許在 Mac/Linux 跨平台 build 此 Windows TFM 項目（CI / dev 反饋用，
+         不影響 win-x64 publish；NETSDK1100 提示這條才繼續）。 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-CoGrowMDMAgent-5866c75c-57c8-48bb-9389-75682674986e</UserSecretsId>

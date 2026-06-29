@@ -2,6 +2,7 @@ using CoGrowMDMAgent;
 using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Diagnostics;
 using CoGrowMDMAgent.BitLocker;
+using CoGrowMDMAgent.Geolocation;
 using CoGrowMDMAgent.Laps;
 using CoGrowMDMAgent.Locking;
 using CoGrowMDMAgent.Queue;
@@ -64,9 +65,12 @@ builder.Services.AddSingleton<IUsageStore>(sp =>
 
 builder.Services.AddHttpClient<DeviceReporter>();
 builder.Services.AddHttpClient<UsageReporter>();
+builder.Services.AddHttpClient<GpsReporter>();
 builder.Services.AddHttpClient<StartupCheckinService>();
 builder.Services.AddHostedService<StartupCheckinService>();
 builder.Services.AddHostedService<Worker>();
+// GPS 採集：平時 24h、Lost Mode 30s；獨立 hosted service，與 Worker 並行；非 Windows no-op。
+builder.Services.AddHostedService<GpsCollector>();
 // 遠端鎖定：監控 Registry 鎖定旗標，在使用者 session 拉起全螢幕鎖定窗（[[windows-lock-design]]）。
 // 與上報 Worker 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<LockWatcher>();

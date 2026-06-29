@@ -19,4 +19,7 @@ public sealed record AgentConfig
 
     public string CheckinUrl =>
         $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/checkin";
+
+    public string GpsUrl =>
+        $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/gps";
 }
