@@ -71,6 +71,20 @@
       "when": 1782711666664,
       "tag": "0009_ordinary_kabuki",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1782712788797,
+      "tag": "0010_mighty_ted_forrester",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1782713039739,
+      "tag": "0011_acoustic_vivisector",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,7 @@
 | [07-device-policies.md](07-device-policies.md) | 設備策略推送（WiFi / VPN / 桌布 / 密碼 / USB / Camera / 防火牆 / 自動命名 / Settings 限制 / AppLocker，直推模式） |
 | [14-os-update.md](14-os-update.md) | OS 更新管理（排程 / 延後 / 暫停 / 強制更新策略） |
 | [13-defender-enforce.md](13-defender-enforce.md) | Windows Defender 強制啟用（全開 / 自訂防護項） |
+| [18-compliance-batch-history.md](18-compliance-batch-history.md) | 合規政策批量評估與歷史（CRUD → batch evaluate → 不合規清單 → 設備歷史趨勢） |
 
 ### D. App 管理
 
@@ -36,6 +37,7 @@
 |------|------|
 | [03-app-deployment.md](03-app-deployment.md) | App 派發與管理（上傳 → assign → MSI/MSIX 安裝 → 狀態追蹤 → 卸載） |
 | [04-agent-install-and-reporting.md](04-agent-install-and-reporting.md) | Agent App 安裝與數據上報（自動安裝 → 錯峰上報 → 灰度升級） |
+| [19-agent-gps-reporting.md](19-agent-gps-reporting.md) | Agent GPS 位置上報（每日 Inventory + Lost Mode 高頻；最新一筆無歷史） |
 | [12-app-blocklist.md](12-app-blocklist.md) | App 黑名單（AppLocker Deny 規則，路徑 / 簽名者兩種封鎖） |
 
 ### E. 安全性

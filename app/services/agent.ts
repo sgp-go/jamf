@@ -220,6 +220,114 @@ export async function upsertUsageStats(opts: {
   return { ids, anomalies };
 }
 
+// ============================================================
+// GPS 上報(PRD §5.2 Lost Mode + §5.7 地理位置 Inventory)
+// ============================================================
+//
+// Agent 上報 GPS 位置;設備一筆最新值(無歷史)。Lost Mode 啟用時 Agent 走高頻
+// 上報(由 Agent C# Watcher 控制,後端只接收)。
+
+export interface AgentGpsInput {
+  deviceId: string;
+  tenantId: string;
+  latitude: number;
+  longitude: number;
+  /** GPS / WiFi triangulation 誤差半徑(米);null 表示未知 */
+  accuracyMeters?: number | null;
+  /** 設備本地取位置的時間;省略則用 server now() */
+  capturedAt?: Date | string | null;
+}
+
+export async function updateDeviceGps(input: AgentGpsInput): Promise<{
+  deviceId: string;
+  latitude: string;
+  longitude: string;
+  accuracyMeters: number | null;
+  capturedAt: string;
+}> {
+  if (input.latitude < -90 || input.latitude > 90) {
+    throw new AppError(400, "invalid_latitude", "latitude must be in [-90, 90]");
+  }
+  if (input.longitude < -180 || input.longitude > 180) {
+    throw new AppError(400, "invalid_longitude", "longitude must be in [-180, 180]");
+  }
+  const capturedAt = input.capturedAt
+    ? input.capturedAt instanceof Date
+      ? input.capturedAt
+      : new Date(input.capturedAt)
+    : new Date();
+  if (Number.isNaN(capturedAt.getTime())) {
+    throw new AppError(400, "invalid_captured_at", "capturedAt is not a valid date");
+  }
+  const [row] = await db
+    .update(mdmDevices)
+    .set({
+      lastGpsLatitude: String(input.latitude),
+      lastGpsLongitude: String(input.longitude),
+      lastGpsAccuracyMeters: input.accuracyMeters ?? null,
+      lastGpsAt: capturedAt,
+    })
+    .where(
+      and(
+        eq(mdmDevices.id, input.deviceId),
+        eq(mdmDevices.tenantId, input.tenantId),
+      ),
+    )
+    .returning({
+      id: mdmDevices.id,
+      lat: mdmDevices.lastGpsLatitude,
+      lon: mdmDevices.lastGpsLongitude,
+      acc: mdmDevices.lastGpsAccuracyMeters,
+      at: mdmDevices.lastGpsAt,
+    });
+  if (!row) {
+    throw new AppError(404, "device_not_found", "Device not found");
+  }
+  return {
+    deviceId: row.id,
+    latitude: row.lat!,
+    longitude: row.lon!,
+    accuracyMeters: row.acc,
+    capturedAt: row.at!.toISOString(),
+  };
+}
+
+export async function getDeviceGps(opts: {
+  tenantId: string;
+  deviceId: string;
+}): Promise<{
+  deviceId: string;
+  latitude: string | null;
+  longitude: string | null;
+  accuracyMeters: number | null;
+  capturedAt: string | null;
+}> {
+  const row = await db
+    .select({
+      id: mdmDevices.id,
+      lat: mdmDevices.lastGpsLatitude,
+      lon: mdmDevices.lastGpsLongitude,
+      acc: mdmDevices.lastGpsAccuracyMeters,
+      at: mdmDevices.lastGpsAt,
+    })
+    .from(mdmDevices)
+    .where(
+      and(eq(mdmDevices.id, opts.deviceId), eq(mdmDevices.tenantId, opts.tenantId)),
+    )
+    .limit(1);
+  if (row.length === 0) {
+    throw new AppError(404, "device_not_found", "Device not found");
+  }
+  const r = row[0];
+  return {
+    deviceId: r.id,
+    latitude: r.lat,
+    longitude: r.lon,
+    accuracyMeters: r.acc,
+    capturedAt: r.at?.toISOString() ?? null,
+  };
+}
+
 export function listUsageStats(opts: {
   tenantId: string;
   deviceId: string;

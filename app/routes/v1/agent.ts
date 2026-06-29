@@ -3,11 +3,13 @@ import { commonErrorResponses, successSchema } from "~/lib/api.ts";
 import { AppError } from "~/lib/errors.ts";
 import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import {
+  getDeviceGps,
   getLatestAgentReport,
   listAgentReports,
   listUsageStats,
   resolveAgentDevice,
   saveAgentReport,
+  updateDeviceGps,
   upsertUsageStats,
 } from "~/services/agent.ts";
 import {
@@ -377,6 +379,105 @@ const listUsageRoute = createRoute({
 });
 
 // ============================================================
+// GPS 上報(PRD §5.2 Lost Mode + §5.7 地理位置 Inventory)
+// ============================================================
+
+const gpsBody = z
+  .object({
+    serialNumber: z.string().min(1).openapi({
+      description: "設備序號(用於 resolve 內部 device id)",
+      example: "PF5XSMN1",
+    }),
+    latitude: z.number().min(-90).max(90).openapi({
+      description: "緯度(WGS84,範圍 -90 ~ 90)",
+      example: 25.0330,
+    }),
+    longitude: z.number().min(-180).max(180).openapi({
+      description: "經度(WGS84,範圍 -180 ~ 180)",
+      example: 121.5654,
+    }),
+    accuracyMeters: z.number().int().nonnegative().nullable().optional().openapi({
+      description: "**【選填】** GPS / WiFi triangulation 誤差半徑(米);null=未知",
+      example: 30,
+    }),
+    capturedAt: z.string().datetime().nullable().optional().openapi({
+      description: "**【選填】** 設備本地取位置的時間(ISO 8601);省略則用 server now()",
+      example: "2026-06-29T14:30:00Z",
+    }),
+  })
+  .openapi("AgentGpsInput");
+
+const gpsSavedSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    latitude: z.string(),
+    longitude: z.string(),
+    accuracyMeters: z.number().int().nullable(),
+    capturedAt: z.string(),
+  })
+  .openapi("AgentGpsSaved");
+
+const gpsReportRoute = createRoute({
+  method: "post",
+  path: "/tenants/{tenantId}/agent/gps",
+  tags: ["Agent 上報"],
+  summary: "上報設備 GPS 位置(只保最新,無歷史)",
+  description: [
+    "Agent App 上報設備地理位置。一台設備只保最新一筆位置(舊位置不留歷史,符合 PRD「非即時追蹤」)。",
+    "",
+    "**鑑權**:同 `/agent/reports`,若 device 已簽發 token 則必須帶 Bearer。",
+    "",
+    "**上報頻率**:",
+    "- 平時:每日一次(daily inventory 用)",
+    "- Lost Mode 啟用時:Agent 切換高頻(30s / 1min)以追蹤遺失設備位置;後端不限頻率,",
+    "  由 Agent C# Watcher 端決定。",
+    "",
+    "**事件**:成功後觸發 webhook `agent.gps_reported`。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: { content: { "application/json": { schema: gpsBody } } },
+  },
+  responses: {
+    200: {
+      description: "GPS 已更新",
+      content: { "application/json": { schema: successSchema(gpsSavedSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const gpsQuerySchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    latitude: z.string().nullable(),
+    longitude: z.string().nullable(),
+    accuracyMeters: z.number().int().nullable(),
+    capturedAt: z.string().nullable(),
+  })
+  .openapi("DeviceGpsLatest");
+
+const gpsQueryRoute = createRoute({
+  method: "get",
+  path: "/tenants/{tenantId}/agent/devices/{serialNumber}/gps",
+  tags: ["Agent 上報"],
+  summary: "查詢設備最新 GPS 位置",
+  description: [
+    "回傳設備最後一次上報的位置。設備未啟用 GPS 或從未上報過,各欄位皆為 null。",
+    "",
+    "**鑑權**:無(同其它 agent 查詢端點)。",
+  ].join("\n"),
+  request: { params: tenantSerialParam },
+  responses: {
+    200: {
+      description: "GPS 物件",
+      content: { "application/json": { schema: successSchema(gpsQuerySchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ============================================================
 // App + handlers
 // ============================================================
 
@@ -701,4 +802,52 @@ agentApp.openapi(listUsageRoute, async (c) => {
     },
     200,
   );
+});
+
+// ── GPS handlers ──
+
+agentApp.openapi(gpsReportRoute, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
+
+  const device = await resolveAgentDevice({
+    tenantId,
+    serialNumber: body.serialNumber,
+    token,
+  });
+  await authorizeAgentReport({ device, token });
+
+  const saved = await updateDeviceGps({
+    deviceId: device.id,
+    tenantId,
+    latitude: body.latitude,
+    longitude: body.longitude,
+    accuracyMeters: body.accuracyMeters ?? null,
+    capturedAt: body.capturedAt ?? null,
+  });
+
+  void publishEvent({
+    tenantId,
+    eventType: "agent.gps_reported",
+    data: {
+      device_id: device.id,
+      serial_number: body.serialNumber,
+      latitude: saved.latitude,
+      longitude: saved.longitude,
+      accuracy_meters: saved.accuracyMeters,
+      captured_at: saved.capturedAt,
+    },
+  }).catch((err) => {
+    console.error("[agent.gps_reported] publishEvent failed", err);
+  });
+
+  return c.json({ ok: true as const, data: saved }, 200);
+});
+
+agentApp.openapi(gpsQueryRoute, async (c) => {
+  const { tenantId, serialNumber } = c.req.valid("param");
+  const deviceId = await resolveDeviceBySerial({ tenantId, serialNumber });
+  const gps = await getDeviceGps({ tenantId, deviceId });
+  return c.json({ ok: true as const, data: gps }, 200);
 });

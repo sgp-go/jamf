@@ -101,6 +101,14 @@ export const mdmDevices = pgTable(
     purchaseCurrency: varchar({ length: 3 }),
     warrantyEndDate: date(),
 
+    // GPS 最後一次上報位置(PRD §5.2 Lost Mode + §5.7 地理位置 Inventory)
+    // 一台設備只保最新位置(舊位置不留歷史,符合 PRD「非即時追蹤」)
+    // 精確緯度範圍 -90~90、經度 -180~180;accuracyMeters 是 GPS / WiFi triangulation 誤差半徑
+    lastGpsLatitude: text(),
+    lastGpsLongitude: text(),
+    lastGpsAccuracyMeters: integer(),
+    lastGpsAt: timestamp({ withTimezone: true }),
+
     selfMdmManaged: boolean().notNull().default(false),
     enrollmentType: varchar({ length: 32 }).default("dep"),
     enrollmentStatus: enrollmentStatusEnum().notNull().default("pending"),
