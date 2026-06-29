@@ -1,14 +1,12 @@
 /**
- * 合規政策評估引擎（W4）
+ * 合規政策評估引擎(W4 → Phase 2 §5.5 擴展)。
  *
- * 純函式：給定 device 摘要 + policy 規則 → 合規結果 + 違規清單。
+ * 純函式 evaluateCompliance 給定 device + policy 算合規結果。
+ * 上層 compliance-batch.ts 走 DB 持久化 + 批量評估 + 歷史查詢。
  *
- * MVP 規則（plan §5）：
- *   - min_os_version：device.osVersion 必須 >= policy.minOSVersion
- *   - max_offline_days：now - device.lastSeenAt 必須 <= policy.maxOfflineDays
- *
- * 不持久化規則表；admin 流程把 policy 物件存於應用層即可。等需要 admin CRUD
- * 時再補 DB schema（compliance_policies + device_compliance_status）。
+ * MVP 規則:
+ *   - min_os_version:device.osVersion 必須 >= policy.minOSVersion
+ *   - max_offline_days:now - device.lastSeenAt 必須 <= policy.maxOfflineDays
  */
 
 export interface CompliancePolicy {
