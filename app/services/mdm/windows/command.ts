@@ -25,6 +25,7 @@ import {
   getNextQueuedWindowsCommand,
   listMdmCommands,
   queueWindowsCommand,
+  queueWindowsCommandsBatch,
   updateMdmCommand,
 } from "~/services/mdm/commands.ts";
 import { isInternalCommandType } from "~/services/mdm/command-events.ts";
@@ -342,6 +343,60 @@ export async function enqueueWindowsCommand(opts: {
     });
   }
   return commandUuid;
+}
+
+/**
+ * 批次入隊多筆 Windows 命令（單一 transaction）+ 整批排完後觸發一次 WNS push。
+ *
+ * vs `enqueueWindowsCommand` 的差異：
+ * - 原子性：N 條命令在同一 transaction 內 insert，任一失敗整批 rollback。
+ *   避免「部分政策套用」的不一致狀態（如 password policy 只設了 minLength 沒
+ *   設 complexity）。
+ * - WNS 效率：N 條命令只觸發一次 WNS push（設備一次 OMA-DM session 即可拉走整批）。
+ *
+ * 排除 internal command type 的判斷沿用單筆版邏輯：若**整批**全為內部命令則不觸發 push。
+ *
+ * @returns 排入的 commandUuid 列表，順序與 input.commands 對應
+ */
+export async function enqueueWindowsCommandsBatch(opts: {
+  deviceUdid: string;
+  commands: Array<{
+    /** 命令類型標籤（如 "PasswordPolicy"、"UsbPolicy"） */
+    commandType: string;
+    command: SyncMLCommand;
+  }>;
+}): Promise<string[]> {
+  if (opts.commands.length === 0) return [];
+
+  const items = opts.commands.map((c) => ({
+    commandUuid: crypto.randomUUID(),
+    commandType: c.commandType,
+    cspPath: c.command.target,
+    syncmlVerb: c.command.verb,
+    syncmlData: c.command.data ?? null,
+    syncmlFormat: c.command.format ?? null,
+  }));
+
+  await queueWindowsCommandsBatch({
+    deviceUdid: opts.deviceUdid,
+    commands: items,
+  });
+
+  console.log(
+    `[Win MDM] 批次命令已排入: count=${items.length} udid=${opts.deviceUdid} types=[${items.map((i) => i.commandType).join(",")}]`,
+  );
+
+  // 整批不全為內部命令才觸發 WNS push（單次即可，設備一次 session 拉光整批）
+  const hasUserCommand = items.some((i) => !isInternalCommandType(i.commandType));
+  if (hasUserCommand) {
+    triggerWnsPush(opts.deviceUdid).catch((e) => {
+      console.warn(
+        `[Win MDM] WNS push 觸發失敗（不影響 enqueue）: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    });
+  }
+
+  return items.map((i) => i.commandUuid);
 }
 
 /**

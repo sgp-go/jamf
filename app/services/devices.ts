@@ -458,9 +458,11 @@ export async function transferDeviceToGroup(opts: {
 
 /**
  * 設備退役（徹底擦除 + 移除 MDM）：
- *   1. 派預設 doWipe（跨平台：Windows→RemoteWipe/doWipe 工廠重置，連 PPKG +
- *      enrollment 一併抹除；Apple→ERASE_DEVICE）。設備重置後不會自動回管。
- *   2. 標記 mdm_devices.enrollmentStatus = unenrolled（軟刪，保留歷史）。
+ *   1. 派預設 doWipe（連 PPKG + enrollment 一併抹除，設備重置後不會自動回管）
+ *      - Windows：RemoteWipe/doWipe 工廠重置
+ *      - Apple：ERASE_DEVICE（**要求 device 已綁定 jamfInstanceId + jamfManagementId**；
+ *        自建 MDM 直管的 Apple 設備不支援，會在第 1 步拋 409）
+ *   2. 標記 mdm_devices.enrollmentStatus = unenrolled（軟刪，保留歷史）
  *
  * 與 transferDeviceToGroup 的差異：退役用預設 doWipe（不保留 PPKG），設備不再
  * 自動回管；轉校用 doWipePersistProvisionedData 保留 PPKG 讓設備自動歸新組。
@@ -469,8 +471,10 @@ export async function transferDeviceToGroup(opts: {
  * 流程（Wipe + 軟刪），保留設備歷史；hardDelete 僅當設備已用 reset-enrollment.ps1
  * 強拆、留下孤兒 row 阻止重 enroll 時才用。
  *
- * 失敗策略：先派 Wipe（失敗則錯誤冒泡、不標記 unenrolled，caller 可重試）；
- * Wipe 派發成功後才標記 DB，避免 row 標記與設備實際狀態不一致。
+ * 失敗策略：
+ * - Wipe 派發失敗 → 直接冒泡 5xx，DB 不動，caller 可重試
+ * - Wipe 已派發但 DB 標記 unenrolled 失敗（極罕見的 DB 連線異常）→ 不冒泡，
+ *   僅 warn log；設備已被擦除，下次重 enroll 會建新 row，舊 row 留作歷史不影響運作
  */
 export async function retireDevice(opts: {
   tenantId: string;
@@ -483,11 +487,17 @@ export async function retireDevice(opts: {
     command: "WIPE",
   });
 
-  // 2. 標記 DB unenrolled（複用軟刪，冪等）
-  await unenrollDeviceInTenant({
-    tenantId: opts.tenantId,
-    deviceId: opts.deviceId,
-  });
+  // 2. 標記 DB unenrolled（best-effort：Wipe 已下，標記失敗不該回退整個操作）
+  try {
+    await unenrollDeviceInTenant({
+      tenantId: opts.tenantId,
+      deviceId: opts.deviceId,
+    });
+  } catch (e) {
+    console.warn(
+      `[retireDevice] Wipe 已派發但 DB 標記 unenrolled 失敗 (device=${opts.deviceId}): ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
 
   return { deviceId: opts.deviceId, wipe };
 }

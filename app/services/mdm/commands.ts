@@ -85,6 +85,67 @@ export async function queueWindowsCommand(
 }
 
 /**
+ * 批次排入多筆 Windows 命令（單一 transaction，原子性 all-or-nothing）。
+ *
+ * 用於策略推送等「一個業務操作對應 N 條 SyncML 命令」場景：任一條 insert 失敗
+ * → 整批 rollback，設備不會收到部分政策（避免 minLength 套用了但 complexity
+ * 沒套用這種設備被卡死的狀態）。
+ *
+ * @returns 新建的 row id (UUID) 列表，順序對應 input.commands 順序
+ * @throws Error 若 deviceUdid 找不到對應 device row（事務不會啟動）
+ */
+export async function queueWindowsCommandsBatch(input: {
+  deviceUdid: string;
+  commands: Array<Omit<QueueWindowsCommandInput, "deviceUdid">>;
+}): Promise<string[]> {
+  const device = await db.query.mdmDevices.findFirst({
+    where: eq(mdmDevices.udid, input.deviceUdid),
+    columns: { id: true, tenantId: true },
+  });
+  if (!device) {
+    throw new Error(
+      `queueWindowsCommandsBatch: device udid=${input.deviceUdid} not found`,
+    );
+  }
+
+  const rows = await db.transaction(async (tx) => {
+    return await tx
+      .insert(mdmCommands)
+      .values(
+        input.commands.map((c) => ({
+          tenantId: device.tenantId,
+          deviceId: device.id,
+          commandUuid: c.commandUuid,
+          platform: "windows" as const,
+          commandType: c.commandType,
+          status: "queued" as const,
+          requestPayload: {},
+          cspPath: c.cspPath,
+          syncmlVerb: c.syncmlVerb,
+          syncmlData: c.syncmlData ?? null,
+          syncmlFormat: c.syncmlFormat ?? null,
+        })),
+      )
+      .returning({ id: mdmCommands.id });
+  });
+
+  // Transaction commit 後逐條發 command.queued 事件（與單筆版一致語義）
+  for (const c of input.commands) {
+    publishCommandEvent({
+      tenantId: device.tenantId,
+      deviceId: device.id,
+      commandUuid: c.commandUuid,
+      commandType: c.commandType,
+      status: "queued",
+      platform: "windows",
+      cspPath: c.cspPath,
+    });
+  }
+
+  return rows.map((r) => r.id);
+}
+
+/**
  * 拉設備下一筆 queued 的 Windows 命令（FIFO by queuedAt）。
  */
 export async function getNextQueuedWindowsCommand(

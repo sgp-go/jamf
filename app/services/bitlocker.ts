@@ -119,13 +119,21 @@ export interface BitLockerRecoveryInfo {
 }
 
 /**
- * IT 查詢設備 BitLocker Recovery Password（取最新 confirmed 記錄，解密返回）。
+ * IT 查詢設備 BitLocker Recovery Password。
+ *
+ * 優先取最新 **confirmed** 記錄（已加密完成、含 recovery key）；若無 confirmed
+ * 但有 pending 記錄（正在加密中），回傳 pending 狀態（recoveryPassword=null）
+ * 讓 caller 能區分「設備加密中」vs「完全無加密記錄」。
+ *
+ * - 完全無記錄 → null（caller 回 404）
+ * - 有 pending 但尚無 confirmed → 回傳 status="pending"（caller 可顯示「加密中」）
+ * - 有 confirmed → 回傳最新一筆 confirmed 的 recovery key
  */
 export async function getBitLockerRecoveryKey(opts: {
   tenantId: string;
   deviceId: string;
 }): Promise<BitLockerRecoveryInfo | null> {
-  const row = await db.query.mdmWindowsBitlocker.findFirst({
+  const confirmed = await db.query.mdmWindowsBitlocker.findFirst({
     where: and(
       eq(mdmWindowsBitlocker.tenantId, opts.tenantId),
       eq(mdmWindowsBitlocker.deviceId, opts.deviceId),
@@ -133,6 +141,16 @@ export async function getBitLockerRecoveryKey(opts: {
     ),
     orderBy: [desc(mdmWindowsBitlocker.createdAt)],
   });
+
+  const row =
+    confirmed ??
+    (await db.query.mdmWindowsBitlocker.findFirst({
+      where: and(
+        eq(mdmWindowsBitlocker.tenantId, opts.tenantId),
+        eq(mdmWindowsBitlocker.deviceId, opts.deviceId),
+      ),
+      orderBy: [desc(mdmWindowsBitlocker.createdAt)],
+    }));
 
   if (!row) return null;
 
