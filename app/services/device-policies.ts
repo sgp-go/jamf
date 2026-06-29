@@ -41,6 +41,12 @@ import {
   type VpnProfileInput,
 } from "~/services/mdm/windows/csp-vpn.ts";
 import {
+  buildLostModeAdmxInstall,
+  buildLostModeEnable,
+  buildLostModeDisable,
+  type LostModeEnableInput,
+} from "~/services/mdm/windows/csp-lost-mode.ts";
+import {
   buildSettingsPageVisibility,
   type SettingsPageVisibilityInput,
 } from "~/services/mdm/windows/csp-experience.ts";
@@ -239,6 +245,40 @@ export async function pushCameraPolicyToDevice(
     command: buildCameraPolicy(allow),
   });
   return [id];
+}
+
+// ============================================================
+// Lost Mode（Windows Custom ADMX 推送）
+// ============================================================
+//
+// iOS Lost Mode 走 Apple MDM 命令（既有 app/services/devices.ts），與此模組無關。
+// Windows 沒有原生 Lost Mode 指令，靠 ADMX Policy CSP 推 Registry 信箱 →
+// Agent GpsCollector 監聽 Enabled 切換 GPS 採集頻率（平時 24h / Lost Mode 30s）。
+//
+// 每次推送都帶 ADMX install（idempotent Replace），新舊設備無差別；
+// 沒法依賴 enrollment hook（既有設備未必 ingest 過 LostMode ADMX）。
+
+export async function pushLostModeToDevice(
+  device: WindowsDevice,
+  input: LostModeEnableInput,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "LostMode",
+    [buildLostModeAdmxInstall(), ...buildLostModeEnable(input)],
+    "Lost Mode input is required",
+  );
+}
+
+export async function removeLostModeFromDevice(
+  device: WindowsDevice,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "LostMode",
+    [buildLostModeAdmxInstall(), ...buildLostModeDisable()],
+    "Lost Mode disable command build failed",
+  );
 }
 
 // ============================================================

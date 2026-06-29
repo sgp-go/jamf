@@ -25,6 +25,8 @@ import {
   buildBitLockerAdmxInstall,
   buildBitLockerEnable,
 } from "~/services/mdm/windows/csp-bitlocker.ts";
+import { buildLostModeAdmxInstall } from "~/services/mdm/windows/csp-lost-mode.ts";
+import { buildLetAppsAccessLocation } from "~/services/mdm/windows/csp-privacy.ts";
 
 /**
  * Agent App 一鍵安裝流程：把「給設備派 Agent App」這個業務動作封裝為單一 API。
@@ -195,6 +197,11 @@ export async function installAgentOnDevice(
     { commandType: "policy_admx_install", cmd: buildPpkgRemovalAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildSelfUninstallAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildBitLockerAdmxInstall(), commandUuid: crypto.randomUUID() },
+    // LostMode ADMX：信箱 HKLM\Software\CoGrow\Agent\LostMode，GpsCollector 讀 Enabled 切高頻
+    { commandType: "policy_admx_install", cmd: buildLostModeAdmxInstall(), commandUuid: crypto.randomUUID() },
+    // Privacy/LetAppsAccessLocation=1 強制啟用位置存取，防 Geolocator RequestAccessAsync 回 Denied
+    // 導致 GpsCollector 採不到位置（無此推送則需使用者手動開 Settings > Privacy > Location）
+    { commandType: "policy_set", cmd: buildLetAppsAccessLocation("force_allow"), commandUuid: crypto.randomUUID() },
     { commandType: "msi_install", cmd: msiInstall, commandUuid: crypto.randomUUID() },
     { commandType: "msi_install", cmd: msiInstallExec, commandUuid: crypto.randomUUID() },
     { commandType: "msi_status_query", cmd: msiStatus, commandUuid: crypto.randomUUID() },

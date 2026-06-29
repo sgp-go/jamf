@@ -26,8 +26,12 @@ import {
   pushFirewallPolicyToDevice,
   pushDeviceRenameToDevice,
   pushSettingsRestrictionToDevice,
+  pushLostModeToDevice,
+  removeLostModeFromDevice,
 } from "~/services/device-policies.ts";
 import { db } from "~/db/client.ts";
+import { mdmDevices } from "~/db/schema/devices.ts";
+import { and, eq } from "drizzle-orm";
 
 // ── Response schema ──
 
@@ -651,6 +655,81 @@ const pushSettingsRestrictionSpec = createRoute({
   },
 });
 
+// ── Lost Mode ──
+
+const pushLostModeBody = z
+  .object({
+    message: z.string().min(1).max(255).openapi({
+      description: "鎖屏顯示找回訊息（例如「請聯絡光復國小資訊組 02-1234-5678」）",
+      example: "請聯絡光復國小資訊組",
+    }),
+    phone: z.string().min(1).max(64).openapi({
+      description: "鎖屏顯示聯絡電話",
+      example: "02-1234-5678",
+    }),
+    footnote: z.string().max(255).optional().openapi({
+      description: "**【選填】** 鎖屏顯示輔助訊息（例如「拾獲者可獲報酬」）",
+      example: "拾獲者請聯絡校方",
+    }),
+  })
+  .openapi("PushLostModeInput");
+
+const pushLostModeSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-lost-mode",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "啟用設備 Lost Mode（遺失模式）",
+  description: [
+    "啟用 Windows 設備 Lost Mode：推送 ADMX Policy CSP → Agent 切換 GPS 採集頻率",
+    "（平時 24h → Lost Mode 30s），同時 Registry 落找回訊息供鎖屏顯示。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- iOS 設備 Lost Mode 走 Apple MDM 命令（既有獨立流程），不經此端點",
+    "- 反復啟用是 idempotent（ADMX Replace），會覆蓋之前的訊息",
+    "- 設備未在線時命令會在佇列裡等待，下次 checkin 拉取",
+    "",
+    "**事件**：成功觸發 webhook `device.lost_mode_enabled`（待 phase 3 接 webhook）。",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: pushLostModeBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入；mdm_devices.lostModeEnabled 已更新為 true",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const removeLostModeSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/remove-lost-mode",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "關閉設備 Lost Mode",
+  description: [
+    "關閉 Windows 設備 Lost Mode：推送 disable state → Agent 切回平時 24h GPS 頻率，",
+    "清空鎖屏找回訊息。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：iOS 設備走 Apple MDM 獨立流程，不經此端點。",
+  ].join("\n"),
+  request: { params: deviceIdParam },
+  responses: {
+    202: {
+      description: "命令已排入；mdm_devices.lostModeEnabled 已更新為 false",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 // ── App instance ──
 
 export const devicePoliciesAdminApp = new OpenAPIHono({
@@ -867,6 +946,58 @@ devicePoliciesAdminApp.openapi(pushSettingsRestrictionSpec, async (c) => {
     resourceType: "device",
     resourceId: deviceId,
     payload: { mode: body.mode, pageCount: body.pages.length, pages: body.pages },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Lost Mode
+devicePoliciesAdminApp.openapi(pushLostModeSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const lostModeId = crypto.randomUUID();
+  const commandIds = await pushLostModeToDevice(device, { ...body, lostModeId });
+
+  // 同步寫 mdm_devices.lostMode* — Apple/Windows 共用同一組欄位
+  await db.update(mdmDevices)
+    .set({
+      lostModeEnabled: true,
+      lostModeMessage: body.message,
+      lostModePhone: body.phone,
+      lostModeFootnote: body.footnote ?? null,
+      lostModeEnabledAt: new Date(),
+    })
+    .where(and(eq(mdmDevices.id, deviceId), eq(mdmDevices.tenantId, tenantId)));
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_lost_mode",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { lostModeId, phone: body.phone, footnoteLen: body.footnote?.length ?? 0 },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+devicePoliciesAdminApp.openapi(removeLostModeSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await removeLostModeFromDevice(device);
+
+  await db.update(mdmDevices)
+    .set({
+      lostModeEnabled: false,
+      lostModeEnabledAt: null,
+    })
+    .where(and(eq(mdmDevices.id, deviceId), eq(mdmDevices.tenantId, tenantId)));
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.remove_lost_mode",
+    resourceType: "device",
+    resourceId: deviceId,
   });
   return c.json({ ok: true as const, data: { commandIds } }, 202);
 });
