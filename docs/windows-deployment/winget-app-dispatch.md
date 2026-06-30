@@ -292,7 +292,7 @@ Agent 1.4.0.15+ 在 winget 兩層 fallback 都 fail 後讀 HKLM Registry 找 ARP
 
 **punt**：EXE installer silent flag 啟發式不一定對；後續可加 admin 上架時的 `uninstall_command_override` 欄位讓 admin 對已知坑包手填命令。
 
-### 5. 建議運維策略
+### 6. 建議運維策略
 
 **對 admin**：
 - 上架 winget App 時優先選 **MSI/MSIX installer 的包**（看 winget-pkgs manifest）
