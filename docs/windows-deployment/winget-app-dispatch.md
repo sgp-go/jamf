@@ -2,6 +2,20 @@
 
 > 透過 winget（Windows Package Manager）派發應用到設備，**不上傳二進制**——由設備端 Agent 跑 `winget install` 從公共 / 私有源拉取安裝。與既有 [EDA-CSP MSI 派發](agent-app-build-and-deploy.md) 並存不衝突，兩條獨立路徑各自管不同類型的軟體。
 
+## 🎯 職責邊界（重要）
+
+| 職責 | 由誰負責 |
+|---|---|
+| **派發能力**（OMA-DM 通道、Agent watcher、winget.exe 調度、回報鏈路、三層 fallback）| ✅ 我方提供（backend API + Agent） |
+| **API 文檔 + Schema**（POST /apps/winget 上架、POST /winget-install 派發等）| ✅ 我方提供 |
+| **「給學校管理員看哪些可派發 App」清單** | ❌ **台灣團隊自行維護** |
+| **App 中文名 / icon / 分類 / 排序的精選 metadata** | ❌ **台灣團隊自行維護** |
+| **公共源 winget-pkgs 倉庫本身** | 微軟維護，誰都不用管（社區 PR） |
+
+我方 API **不提供** App 清單管理 UI 或推薦數據——`POST /apps/winget` 只負責「把一個 winget App 註冊到該 tenant 的 apps 表」，至於要註冊哪些包、給管理員看什麼選單、UI 怎麼排版，是台灣團隊的後台範疇。
+
+「App 列表維護策略」見本文檔第十節（推薦給台灣團隊的實作方案）。
+
 ## 一、適用場景
 
 | 軟體類型 | 走哪條派發 | 範例 |
@@ -320,3 +334,175 @@ LAPS / 其他 actions 並列出現。Agent 按 `type` 分發。
 - [Push 基礎設施配置](push-infrastructure-setup.md)（WNS 設定）
 - [Trigger 機制](trigger-mechanism.md)（OMA-DM session 觸發）
 - [Troubleshooting](troubleshooting.md)
+
+---
+
+## 十、推薦給台灣團隊：App 列表維護方案
+
+> 我方 API 只提供「派發能力」——任意一個 `wingetId` 你都可以 `POST /apps/winget` 註冊上架。但**「給學校管理員看哪些 App 可選」是台灣團隊的後台範疇**。winget 公共源有 8000+ 包不可能全列，需要某種「精選策展」。
+
+下面給三種維護策略，按運維成本 / 體驗品質排序，**強烈推薦方案 B**。
+
+### 方案 A：純自由輸入（最低成本，不推薦）
+
+學校管理員自己在後台輸入 `wingetId`（如 `Microsoft.VisualStudioCode`），台灣後台呼叫我方 `POST /apps/winget` 註冊。
+
+- ✅ 零維護成本，無需精選資料庫
+- ❌ 管理員必須記得 winget ID 全名（沒人記得住）
+- ❌ 容易拼錯（`microsoft.VisualStudioCode` ≠ `Microsoft.VisualStudioCode`），派發後 winget 找不到包才發現
+- ❌ 沒中文名、沒分類、沒 icon，UX 很差
+
+僅適合內部測試或 PoC 階段。
+
+### ✅ 方案 B：後台精選清單（推薦）
+
+台灣後台維護一張**「教育場景推薦 App 表」**，例如 20-50 個包：
+
+```
+winget_id                        | display_name (中文) | category   | icon_url                    | description
+---------------------------------|---------------------|------------|-----------------------------|--------------------
+Microsoft.VisualStudioCode       | Visual Studio Code  | 開發工具    | https://.../vscode.png      | 程式碼編輯器
+Google.Chrome                    | Google Chrome       | 瀏覽器      | https://.../chrome.png      | 網頁瀏覽器
+Zoom.Zoom                        | Zoom Meeting        | 通訊軟體    | https://.../zoom.png        | 視訊會議
+Microsoft.Office                 | Microsoft Office    | 辦公軟體    | https://.../office.png      | 文書處理
+VideoLAN.VLC                     | VLC Media Player    | 多媒體      | https://.../vlc.png         | 影音播放
+7zip.7zip                        | 7-Zip               | 系統工具    | https://.../7zip.png        | 壓縮工具
+Notepad++.Notepad++              | Notepad++           | 文字編輯    | https://.../npp.png         | 進階記事本
+...
+```
+
+學校管理員 UI 看到的是中文選單 + icon 卡片，**點派發**台灣後台呼叫我方 `POST /apps/winget` 註冊 + `POST /winget-install` 派發。
+
+#### 為什麼推薦方案 B
+
+- ✅ **教育場景 90% 派發集中在 20-30 個軟體**（瀏覽器、Office、Zoom、VLC、輸入法、開發工具），維護一張小表完全可行
+- ✅ **中文名 / icon / 分類**對老師 / IT 管理員體驗很重要，winget 原生 manifest 是英文
+- ✅ **可控**——只列教育場景合適的軟體，避免管理員誤派發奇怪的包（如 BitTorrent 客戶端、惡意軟體 manifest）
+- ✅ **同樣是 per-backend**——跟現有 [Agent MSI 跨後端](agent-app-build-and-deploy.md) 規範一致，台灣團隊覺得「教育部標準軟體」是哪些，他們自己決定
+- ✅ 跟我方 API 解耦——精選清單在台灣後台 DB，我方完全不知道
+
+#### 建議的後台 schema
+
+台灣團隊在自己的後台 DB 加一張表（不需要動我方 backend）：
+
+```sql
+CREATE TABLE recommended_winget_apps (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  winget_id     VARCHAR(256) NOT NULL UNIQUE,          -- Microsoft.VisualStudioCode
+  display_name  TEXT NOT NULL,                          -- "Visual Studio Code" / 中文名
+  category      VARCHAR(32),                            -- "開發工具" / "瀏覽器" 等
+  icon_url      TEXT,                                   -- 自家 CDN 圖標
+  description   TEXT,                                   -- 1-2 句中文說明
+  sort_order    INTEGER DEFAULT 100,                    -- UI 排序
+  is_active     BOOLEAN DEFAULT TRUE,                   -- 軟下架
+  notes         TEXT,                                   -- 維運備註（uninstall 是否穩定等）
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_recommended_active_sort ON recommended_winget_apps(is_active, sort_order);
+```
+
+#### 建議的派發流程（台灣後台 → 我方 API）
+
+```
+[學校管理員在台灣後台選「Visual Studio Code」+ 選設備 → 點派發]
+        ↓
+[台灣後台 SELECT * FROM recommended_winget_apps WHERE id=$1]
+        ↓
+[台灣後台呼叫我方 POST /api/v1/admin/tenants/{tid}/apps/winget
+   body: { wingetId, displayName, category, ... }]
+        ↓ (回 201 含 appId；同 wingetId 重複會 409，台灣後台可忽略或 PATCH)
+[台灣後台呼叫我方 POST /api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/winget-install]
+        ↓
+[我方 backend 派發 → Agent 安裝 → 回報]
+        ↓
+[台灣後台訂閱我方 webhook `command.completed`，更新 UI 派發狀態]
+```
+
+#### 推薦的 30 個教育場景 App（初版清單給你們抄）
+
+```
+# 瀏覽器
+Google.Chrome
+Mozilla.Firefox
+Microsoft.Edge          # 預裝，但可顯式重裝/更新
+
+# 通訊
+Zoom.Zoom
+Microsoft.Teams
+Tencent.WeChat
+Tencent.WeCom
+
+# 辦公
+Microsoft.Office
+WPS.WPSOffice
+LibreOffice
+Notepad++.Notepad++
+
+# 開發 / 程式教學
+Microsoft.VisualStudioCode
+Python.Python.3.12      # 注意版本可能更新，建議用 latest
+Git.Git
+JetBrains.PyCharm.Community
+Scratch.Scratch         # 兒童程式教學
+
+# 多媒體
+VideoLAN.VLC
+GIMP.GIMP
+Audacity.Audacity
+
+# 系統工具
+7zip.7zip               # ⚠️ EXE installer，uninstall 走 ARP fallback
+WinRAR.WinRAR
+Foxit.FoxitReader
+
+# 輸入法
+Sogou.SogouInput        # 注意：搜狗有時 winget manifest 不穩，建議自家 MSI 派發
+
+# PDF / 閱讀
+SumatraPDF.SumatraPDF
+Adobe.Acrobat.Reader.64-bit
+
+# 螢幕錄影 / 截圖
+TechSmith.SnagIt
+OBSProject.OBSStudio    # 視訊製作
+
+# 教學 / 工具
+KhanAcademy.KhanAcademy
+GeoGebra.Classic        # 數學教學
+```
+
+⚠️ **每個包都應該手動驗證**：(1) wingetId 是否有效（`winget search <name>`）、(2) silent install 是否真的 silent、(3) uninstall 是否走得通（部分 EXE installer 需走 ARP fallback）。
+
+### 方案 C：即時搜尋 winget API（不推薦）
+
+UI 輸關鍵字 → 後台轉發 winget REST API 即時查詢。
+
+- ✅ 不用維護清單
+- ❌ winget public API 不保證對第三方開放（CDN 端點變動風險）
+- ❌ 8000+ 包無過濾，管理員可能誤派發奇怪的包
+- ❌ 中文化困難（winget manifest 全英文）
+
+僅作為方案 B 的補充，當管理員「想派發推薦清單外的包」時用即時搜尋兜底。
+
+### 推薦的演進路徑
+
+1. **第一階段（MVP）**：方案 B 30 個包，台灣團隊手動維護 SQL 表
+2. **第二階段（量大時）**：admin 後台加「審核流程」——學校 IT 提交新 winget App 需求，台灣團隊審核後加入清單
+3. **第三階段（多教育局）**：考慮**私有 winget REST source**（自家 host），對教學專用軟體統一管理（屆時需要更新本文檔）
+
+### 跟我方 API 的協作介面
+
+台灣後台只需呼叫我方這 3 個端點，App 列表內部完全自治：
+
+| 我方端點 | 何時呼叫 |
+|---|---|
+| `POST /api/v1/admin/tenants/{tid}/apps/winget` | 首次派發某個 wingetId 時（409 可忽略代表已註冊） |
+| `POST /api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/winget-install` | 學校管理員點「派發」 |
+| `POST /api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/winget-uninstall` | 學校管理員點「卸載」 |
+
+我方**不提供**：
+- `GET /apps/winget/recommended` 推薦清單 API（這是你們後台的範疇）
+- 圖標 CDN 或 metadata catalog（自己 host）
+- winget 包搜尋 / 自動補全（自己接 winget API 或維護精選清單）
