@@ -42,6 +42,14 @@ public sealed class WingetWatcher : BackgroundService
     private readonly AgentConfigProvider _configProvider;
     private readonly DeviceFactsCollector _facts;
     private readonly ILogger<WingetWatcher> _logger;
+
+    /// <summary>
+    /// 解析後的 winget.exe 絕對路徑。LocalSystem service 沒有 user profile，
+    /// winget.exe 不在 PATH（per-user MSIX 安裝到 `%LOCALAPPDATA%\Microsoft\WindowsApps\`）。
+    /// 需手動找 system-wide x64 binary 在 `C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_*_x64__*\winget.exe`。
+    /// 此值由 ResolveWingetExe() 啟動時一次性解析。
+    /// </summary>
+    private string? _wingetExePath;
     private readonly Channel<byte> _trigger = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1)
         {
@@ -89,11 +97,16 @@ public sealed class WingetWatcher : BackgroundService
             return;
         }
 
-        if (!await IsWingetAvailableAsync(stoppingToken))
+        _wingetExePath = ResolveWingetExe();
+        if (_wingetExePath is null)
         {
             _logger.LogWarning(
-                "winget.exe 不在 PATH 或不可執行。需 Win10 1809+ 預裝 App Installer。watcher 不退出，因為使用者後續可能裝上"
+                "找不到 winget.exe（PATH + WindowsApps glob 都失敗）。watcher 不退出，使用者後續裝上 App Installer 後可重啟 service 重新解析"
             );
+        }
+        else
+        {
+            _logger.LogInformation("winget.exe 路徑解析: {Path}", _wingetExePath);
         }
 
         _logger.LogInformation(
@@ -226,13 +239,20 @@ public sealed class WingetWatcher : BackgroundService
 
         var isInstall = action.Type == "winget_install";
         var args = BuildWingetArgs(isInstall, wingetId, source, scope);
+        var exe = _wingetExePath;
+        if (exe is null)
+        {
+            _logger.LogError(
+                "winget.exe 路徑未解析，跳過 cmd={Cmd}（service 重啟後重試）", commandId);
+            return;
+        }
 
         _logger.LogInformation(
-            "winget {Verb} 開始: id={Id} source={Src} cmd={Cmd}",
-            isInstall ? "install" : "uninstall", wingetId, source, commandId);
+            "winget {Verb} 開始: exe={Exe} id={Id} source={Src} cmd={Cmd}",
+            isInstall ? "install" : "uninstall", exe, wingetId, source, commandId);
 
         var sw = Stopwatch.StartNew();
-        var (exitCode, stdout, stderr) = await RunWingetAsync(args, ct);
+        var (exitCode, stdout, stderr) = await RunWingetAsync(exe, args, ct);
         sw.Stop();
 
         var status = ClassifyExitCode(exitCode);
@@ -315,11 +335,11 @@ public sealed class WingetWatcher : BackgroundService
 
     [SupportedOSPlatform("windows")]
     private static async Task<(int exitCode, string stdout, string stderr)> RunWingetAsync(
-        string args, CancellationToken ct)
+        string exe, string args, CancellationToken ct)
     {
         var psi = new ProcessStartInfo
         {
-            FileName = "winget.exe",
+            FileName = exe,
             Arguments = args,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -380,25 +400,50 @@ public sealed class WingetWatcher : BackgroundService
         }
     }
 
-    private static async Task<bool> IsWingetAvailableAsync(CancellationToken ct)
+    /// <summary>
+    /// 解析 winget.exe 絕對路徑。LocalSystem service 看不到 user-scope winget
+    /// （per-user MSIX 在 `%LOCALAPPDATA%\Microsoft\WindowsApps`），必須找
+    /// system-wide x64 binary：
+    ///   <c>C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_VERSION_x64__8wekyb3d8bbwe\winget.exe</c>
+    /// 同 DesktopAppInstaller 包名版本號隨 Microsoft Store 更新變，按字典序取最新。
+    /// 找不到回 null，watcher 啟動但 spawn 階段會跳過命令。
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static string? ResolveWingetExe()
     {
+        // 1) 先試 PATH（dev 機 / interactive context 通常有）
         try
         {
-            var psi = new ProcessStartInfo("winget.exe", "--version")
+            var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+            foreach (var dir in pathEnv.Split(Path.PathSeparator))
             {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var p = Process.Start(psi);
-            if (p is null) return false;
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, ct);
-            try { await p.WaitForExitAsync(linked.Token); }
-            catch { try { p.Kill(true); } catch { } return false; }
-            return p.ExitCode == 0;
+                if (string.IsNullOrWhiteSpace(dir)) continue;
+                var candidate = Path.Combine(dir, "winget.exe");
+                if (File.Exists(candidate)) return candidate;
+            }
         }
-        catch { return false; }
+        catch { /* fall through to glob */ }
+
+        // 2) WindowsApps glob — system-wide x64 binary 確定存在
+        try
+        {
+            var windowsApps = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                "WindowsApps");
+            if (!Directory.Exists(windowsApps)) return null;
+
+            // x64__8wekyb3d8bbwe 是真正含 winget.exe 的主包，scale-* / language-* 不含
+            var candidates = Directory
+                .EnumerateDirectories(windowsApps, "Microsoft.DesktopAppInstaller_*_x64__*")
+                .Select(dir => Path.Combine(dir, "winget.exe"))
+                .Where(File.Exists)
+                .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return candidates.FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
