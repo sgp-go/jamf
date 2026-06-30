@@ -280,6 +280,11 @@ public sealed class WingetWatcher : BackgroundService
             ct);
     }
 
+    // punt: uninstall 用 --id 在 winget tracking DB 找不到 ARP 反向映射時 exit 0x8A150014
+    //       NO_PACKAGES_FOUND（PF5XSMN1 真機 7zip.7zip uninstall 暴露；社區已知 winget
+    //       ARP 模糊匹配不可靠）。短期可選 fallback 試 --name=displayName；中長期 admin
+    //       上架時加 uninstallNameOverride 欄位。當前實作只走 --id，失敗回報後台
+    //       status=error，managed 端可手動補卸或改派 EDA-CSP MSI 卸載。
     private static string BuildWingetArgs(
         bool isInstall, string wingetId, string source, string scope)
     {
@@ -287,10 +292,17 @@ public sealed class WingetWatcher : BackgroundService
         sb.Append(isInstall ? "install" : "uninstall");
         sb.Append(" --id \"").Append(wingetId.Replace("\"", "\\\"")).Append('"');
         sb.Append(" --exact --silent");
+        // --disable-interactivity 關鍵：LocalSystem service context 跑 winget 時
+        // 即使帶 --accept-source-agreements，msstore source 偶爾仍會 prompt
+        // 「源要求在使用前查看以下协议」並阻塞等輸入（已知 winget-cli 行為）。
+        // disable-interactivity 強制所有 prompt 失敗回 exit code 而非等輸入。
+        // 真機 PF5XSMN1 1.4.0.11 uninstall 卡 15min 才暴露這條。
+        sb.Append(" --disable-interactivity");
+        sb.Append(" --accept-source-agreements");
         if (isInstall)
         {
             sb.Append(" --scope ").Append(scope);
-            sb.Append(" --accept-source-agreements --accept-package-agreements");
+            sb.Append(" --accept-package-agreements");
             if (!string.IsNullOrEmpty(source))
                 sb.Append(" --source \"").Append(source.Replace("\"", "\\\"")).Append('"');
         }
