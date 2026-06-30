@@ -78,6 +78,13 @@ builder.Services.AddHostedService<LapsWatcher>();
 builder.Services.AddHostedService<BitLockerWatcher>();
 builder.Services.AddHostedService<PpkgRemovalWatcher>();
 builder.Services.AddHostedService<SelfUninstallWatcher>();
+// winget App 派發：WingetWatcher 為 singleton（被 OmaDmEventLogWatcher 持有引用以觸發 RequestPoll），
+// 同時以 hosted service 身分跑後台 loop；OmaDmEventLogWatcher 監聽 EventLog 265 喚醒它。
+builder.Services.AddHttpClient(nameof(CoGrowMDMAgent.Winget.WingetWatcher));
+builder.Services.AddSingleton<CoGrowMDMAgent.Winget.WingetWatcher>();
+builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<CoGrowMDMAgent.Winget.WingetWatcher>());
+builder.Services.AddHostedService<CoGrowMDMAgent.Winget.OmaDmEventLogWatcher>();
 // 使用時長採集：每分鐘探測 active console session 在用狀態，累計並持久化到 usage.db。
 // 與 Worker / LockWatcher 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<SessionUsageMonitor>();

@@ -22,4 +22,7 @@ public sealed record AgentConfig
 
     public string GpsUrl =>
         $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/gps";
+
+    public string WingetResultUrl =>
+        $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/winget-result";
 }

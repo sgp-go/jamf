@@ -1,6 +1,7 @@
 import type { CheckinAction } from "~/services/laps.ts";
 import { handleLapsOnCheckin, handleLapsOnReport } from "~/services/laps.ts";
 import { handleBitLockerOnReport } from "~/services/bitlocker.ts";
+import { buildWingetCheckinActions } from "~/services/winget-deploy.ts";
 
 export type { CheckinAction };
 
@@ -46,7 +47,13 @@ export const directAgentReportHooks: AgentReportHooks = {
       console.error("[bitlocker] handleBitLockerOnReport failed", bitlocker.reason);
     }
   },
-  onCheckin(opts) {
-    return handleLapsOnCheckin(opts);
+  async onCheckin(opts) {
+    const [lapsActions, wingetActions] = await Promise.all([
+      handleLapsOnCheckin(opts),
+      buildWingetCheckinActions(opts.deviceId),
+    ]);
+    // CheckinAction 介面與 WingetCheckinAction 同形（type/priority/data），
+    // 直接 concat；Agent 按 type 分發處理
+    return [...lapsActions, ...wingetActions];
   },
 };

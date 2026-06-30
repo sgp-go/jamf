@@ -80,6 +80,7 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 | `/api/v1/tenants/{tid}/agent/devices/{serial}/reports/latest` | GET | 取得裝置最新上報 |
 | `/api/v1/tenants/{tid}/agent/usage` | POST | 上報裝置使用時長 |
 | `/api/v1/tenants/{tid}/agent/devices/{serial}/usage` | GET | 查詢使用時長（支援 date/startDate/endDate/limit 篩選） |
+| `/api/v1/tenants/{tid}/agent/winget-result` | POST | Agent 回報 winget 執行結果（exitCode/status/installedVersion/stdoutTail）。更新 mdm_commands + app_assignments 狀態，觸發 webhook `command.completed` |
 
 ### Admin API 端點（`/api/v1/admin/tenants/{tenantId}/...`）
 
@@ -95,6 +96,9 @@ Jamf Pro MDM 平台的 API 整合探索專案。實例地址：`cogrow.jamfcloud
 | `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/uninstall` | POST | 派發 MSI App 卸載命令（EDA-CSP `Delete /MSI/{ProductID}` 觸發 msiexec /x） |
 | `/api/v1/admin/tenants/{tid}/apps` | POST | 上傳普通 App 安裝包（教學軟體、OEM 工具等），multipart/form-data |
 | `/api/v1/admin/tenants/{tid}/apps/agent` | POST | **上傳 CoGrow MDM Agent MSI**（自動 set `agentAppId` 指針 → 新設備 enroll 後派發新版）。必須 .msi。跟 `/apps` 路徑分離避免誤觸發切指針 |
+| `/api/v1/admin/tenants/{tid}/apps/winget` | POST | **上架 winget App（不上傳二進制）**。body JSON：`wingetId`/`displayName` 必填，`wingetSource` 預設 `winget`（公共源）；同 tenant 同 wingetId 唯一（409）。派發走 `/winget-install` |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/winget-install` | POST | 派發 winget App（Agent 端跑 `winget install --id`，秒級觸發走 WNS push + Agent EventLog 265 監聽） |
+| `/api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/winget-uninstall` | POST | 派發 winget App 卸載命令 |
 
 ### 自建 MDM 端點（`/api/mdm`）
 

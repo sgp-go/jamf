@@ -5,6 +5,7 @@ import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { adminAuth } from "~/middleware/admin-auth.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
+  createWingetApp,
   deleteApp,
   getAppById,
   getAppLicenseUsage,
@@ -21,8 +22,16 @@ import {
  * iOS Custom App 不上傳二進制（走 ABM/ASM 派發），但仍可建 row 記錄 iTunesStoreID。
  */
 
-const appKindSchema = z.enum(["msi", "exe", "msix", "ipa_custom", "mobileconfig"]).openapi({
-  description: "msi / exe / msix → Windows；ipa_custom / mobileconfig → Apple",
+const appKindSchema = z.enum([
+  "msi",
+  "exe",
+  "msix",
+  "winget",
+  "ipa_custom",
+  "mobileconfig",
+]).openapi({
+  description:
+    "msi / exe / msix → Windows 二進制上傳；winget → Windows 由 Agent 端 winget.exe 安裝（不上傳）；ipa_custom / mobileconfig → Apple",
 });
 
 const appSchema = z
@@ -75,6 +84,15 @@ const appSchema = z
     }),
     licenseNotes: z.string().nullable().openapi({
       description: "**【選填】** 授權備註（採購合同編號等）",
+    }),
+    wingetId: z.string().nullable().openapi({
+      description: "**【選填】** winget 包 ID（kind=winget 時必填）",
+      example: "Microsoft.VisualStudioCode",
+    }),
+    wingetSource: z.string().nullable().openapi({
+      description:
+        "**【選填】** winget source 名稱：`winget`（公共）/ `msstore` / `cogrow-{tenantSlug}`（私有）；kind=winget 時必填",
+      example: "winget",
     }),
     createdAt: z.string().openapi({ description: "ISO 8601 UTC" }),
     updatedAt: z.string().openapi({ description: "ISO 8601 UTC" }),
@@ -212,6 +230,94 @@ const uploadAgentSpec = createRoute({
     201: {
       description: "上傳成功且 agentAppId 已切到新 app；回傳完整 App 物件",
       content: { "application/json": { schema: successSchema(appSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const uploadWingetSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/apps/winget",
+  tags: ["應用套件管理"],
+  security,
+  summary: "上架 winget App（不上傳二進制，由 Agent 端 winget.exe 安裝）",
+  description: [
+    "新增一個由 Windows Package Manager（winget）派發的 App。**不上傳二進制**——",
+    "派發時設備端 Agent 跑 `winget install --id {wingetId}` 自動從 source 拉取安裝。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**限制**：",
+    "- 同 tenant 同 `wingetId` 唯一（409 重複）",
+    "- platform 自動設為 `windows`，kind 自動設為 `winget`",
+    "- `wingetSource` 不填預設 `winget`（Microsoft 公共源）",
+    "",
+    "**派發鏈路**：上架後使用 `POST /admin/.../devices/{did}/apps/{appId}/winget-install`",
+    "下發。後端寫 `mdm_commands` + `triggerWnsPush` → Windows OMA-DM session 啟動 → ",
+    "Agent EventLogWatcher 監聽 Event ID 265 → `/agent/checkin` 拉取命令 → winget.exe 執行",
+    "→ POST `/agent/winget-result` 回報。",
+    "",
+    "上傳普通 MSI/EXE/MSIX 二進制請走 `POST /apps`；上傳 CoGrow Agent MSI 走 `POST /apps/agent`。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: {
+      content: {
+        "application/json": {
+          schema: z
+            .object({
+              wingetId: z.string().min(1).openapi({
+                description: "winget 包 ID（`winget search` 查到的 ID）",
+                example: "Microsoft.VisualStudioCode",
+              }),
+              displayName: z.string().min(1).openapi({
+                description: "顯示名稱（前端列表展示用，可中文）",
+                example: "Visual Studio Code",
+              }),
+              wingetSource: z.string().optional().openapi({
+                description:
+                  "**【選填】** 預設 `winget`（公共源）；可選 `msstore` 或 `cogrow-{tenantSlug}`（未來私有源）",
+                example: "winget",
+              }),
+              version: z.string().optional().openapi({
+                description:
+                  "**【選填】** 預設 `latest`（winget 自動裝最新）；填具體版本可釘版",
+                example: "latest",
+              }),
+              category: z.string().optional().openapi({
+                description: "**【選填】** App 分類（PRD §5.3），例 teaching / system_tools",
+                example: "teaching",
+              }),
+              licenseCount: z.number().int().nonnegative().optional().openapi({
+                description: "**【選填】** 已購買授權數;省略視為無限制",
+              }),
+              licenseNotes: z.string().optional().openapi({
+                description: "**【選填】** 授權備註",
+              }),
+            })
+            .openapi("UploadWingetAppInput"),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "上架成功，回傳完整 App 物件",
+      content: { "application/json": { schema: successSchema(appSchema) } },
+    },
+    409: {
+      description: "同 tenant 同 wingetId 已存在",
+      content: {
+        "application/json": {
+          schema: z.object({
+            ok: z.literal(false),
+            error: z.object({
+              code: z.literal("winget_app_already_exists"),
+              message: z.string(),
+            }),
+          }),
+        },
+      },
     },
     ...commonErrorResponses,
   },
@@ -456,6 +562,36 @@ appsAdminApp.openapi(uploadAgentSpec, async (c) => {
       fileSizeBytes: buf.length,
       agentAppIdSet,
       previousAgentAppId,
+    },
+  });
+  return c.json({ ok: true as const, data: toAppDto(row) }, 201);
+});
+
+// winget 必須註冊在 detailSpec（/apps/{appId}）之前，否則 "winget" 會被當 UUID 匹配 → 404
+appsAdminApp.openapi(uploadWingetSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const input = c.req.valid("json");
+  const row = await createWingetApp({
+    tenantId,
+    wingetId: input.wingetId,
+    displayName: input.displayName,
+    wingetSource: input.wingetSource,
+    version: input.version,
+    category: input.category ?? null,
+    licenseCount: input.licenseCount ?? null,
+    licenseNotes: input.licenseNotes ?? null,
+  });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "app.winget_upload",
+    resourceType: "app",
+    resourceId: row.id,
+    payload: {
+      wingetId: row.wingetId,
+      wingetSource: row.wingetSource,
+      displayName: row.displayName,
+      version: row.version,
     },
   });
   return c.json({ ok: true as const, data: toAppDto(row) }, 201);

@@ -21,6 +21,7 @@ import { deviceGroups, tenants } from "./tenants.ts";
  *   msi          - Windows .msi 安裝包，走 EnterpriseDesktopAppManagement CSP
  *   exe          - Windows .exe（通常包成 MSI Wrapper 後派發）
  *   msix         - Windows MSIX/AppX 包，走 EnterpriseModernAppManagement CSP
+ *   winget       - Windows 公共/私有源軟體，由 Agent 端 winget.exe 安裝（不上傳二進制）
  *   ipa_custom   - iOS Custom App via ABM/ASM，用 iTunesStoreID 派發
  *   mobileconfig - iOS Profile（.mobileconfig），這層只記錄安裝包，實際派發走 profiles 表
  */
@@ -28,6 +29,7 @@ export const appKindEnum = pgEnum("app_kind", [
   "msi",
   "exe",
   "msix",
+  "winget",
   "ipa_custom",
   "mobileconfig",
 ]);
@@ -81,6 +83,12 @@ export const apps = pgTable(
     licenseCount: integer(),
     licenseNotes: text(),
 
+    // winget 派發專用（kind=winget 時必填，其他 kind 留 null）
+    // wingetId 例：`Microsoft.VisualStudioCode`、`7zip.7zip`
+    // wingetSource 預設 `winget`（公共 source）；可選 `msstore` 或 `cogrow-{tenantSlug}`（未來私有 REST source）
+    wingetId: varchar({ length: 256 }),
+    wingetSource: varchar({ length: 64 }),
+
     metadata: jsonb().$type<Record<string, unknown>>(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true })
@@ -93,9 +101,14 @@ export const apps = pgTable(
     index("apps_platform_kind_idx").on(t.platform, t.kind),
     index("apps_bundle_id_idx").on(t.bundleId),
     index("apps_category_idx").on(t.category),
+    index("apps_winget_id_idx").on(t.wingetId),
     uniqueIndex("apps_tenant_bundle_version_uq")
       .on(t.tenantId, t.bundleId, t.version)
       .where(sql`${t.bundleId} IS NOT NULL`),
+    // 同 tenant 內同 wingetId 唯一（避免同個包重複上架）
+    uniqueIndex("apps_tenant_winget_id_uq")
+      .on(t.tenantId, t.wingetId)
+      .where(sql`${t.wingetId} IS NOT NULL`),
   ],
 );
 

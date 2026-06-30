@@ -23,6 +23,7 @@ import {
 import { touchDeviceLastSeen } from "~/services/mdm/devices.ts";
 import { verifyUsageSignature } from "~/services/usage-signature.ts";
 import { publishEvent } from "~/services/webhooks/index.ts";
+import { recordWingetResult } from "~/services/winget-deploy.ts";
 
 /**
  * /api/v1/tenants/{tenantId}/agent/*
@@ -170,6 +171,55 @@ const usageQuery = z.object({
   }),
 });
 
+const wingetResultBody = z
+  .object({
+    commandId: z.string().uuid().openapi({
+      description: "checkin 拿到的 winget command ID",
+      example: "5c1234ab-cd56-78ef-9012-3456789abcde",
+    }),
+    exitCode: z.number().int().openapi({
+      description: "winget.exe 退出碼（0=success；其他=失敗，見 winget returnCodes.md）",
+      example: 0,
+    }),
+    status: z.enum(["success", "failed", "already-installed", "not-found"]).openapi({
+      description: "Agent 端依 exitCode 分類後的結果摘要",
+    }),
+    installedVersion: z.string().optional().openapi({
+      description: "**【選填】** 安裝成功時的實際版本（從 winget stdout 提取，盡力解析）",
+      example: "1.95.0",
+    }),
+    stdoutTail: z.string().optional().openapi({
+      description: "**【選填】** winget stdout 末 2KB（除錯用，避免過大）",
+    }),
+    stderrTail: z.string().optional().openapi({
+      description: "**【選填】** winget stderr 末 2KB",
+    }),
+    durationMs: z.number().int().nonnegative().openapi({
+      description: "winget.exe 執行耗時（毫秒）",
+      example: 45000,
+    }),
+    serialNumber: z.string().min(1).openapi({
+      description: "設備序號（用於後端反查 device，與 commandId 交叉驗證歸屬）",
+      example: "F2L1234567",
+    }),
+  })
+  .openapi("WingetResultInput");
+
+const wingetResultResponseSchema = z
+  .object({
+    commandId: z.string().uuid(),
+    commandStatus: z.enum(["acknowledged", "error"]).openapi({
+      description: "後端記錄的最終 mdm_commands.status",
+    }),
+    assignmentStatus: z
+      .enum(["installed", "failed", "removed"])
+      .nullable()
+      .openapi({
+        description: "更新後的 app_assignments.status（uninstall 對應 removed）",
+      }),
+  })
+  .openapi("WingetResultResponse");
+
 const reportsQuery = z.object({
   limit: z.coerce.number().int().positive().max(500).default(50),
   offset: z.coerce.number().int().nonnegative().default(0),
@@ -282,6 +332,38 @@ const checkinRoute = createRoute({
         "application/json": {
           schema: successSchema(checkinResponseSchema),
         },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const wingetResultRoute = createRoute({
+  method: "post",
+  path: "/tenants/{tenantId}/agent/winget-result",
+  tags: ["Agent 上報"],
+  summary: "Agent 回報 winget 命令執行結果",
+  description: [
+    "Agent 端跑完 `winget install/uninstall` 後 POST 此端點回報結果。",
+    "後端據此更新：",
+    "  1. `mdm_commands.status = acknowledged | error` + `responsePayload` 寫結果",
+    "  2. `app_assignments.status = installed | failed | removed`",
+    "  3. 觸發 webhook `command.completed`",
+    "",
+    "**鑑權**：同 `/agent/reports`，若 device 已簽發 token 則必須帶 `Authorization: Bearer <agent_token>`。",
+    "",
+    "**約束**：commandId 必須對應 commandType in (winget_install, winget_uninstall)，且該",
+    "命令屬於 serialNumber 對應的 device（防越權）。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: { content: { "application/json": { schema: wingetResultBody } } },
+  },
+  responses: {
+    200: {
+      description: "結果已記錄；回傳最終狀態",
+      content: {
+        "application/json": { schema: successSchema(wingetResultResponseSchema) },
       },
     },
     ...commonErrorResponses,
@@ -619,6 +701,36 @@ agentApp.openapi(checkinRoute, async (c) => {
     { ok: true as const, data: { deviceId: device.id, actions } },
     200,
   );
+});
+
+agentApp.openapi(wingetResultRoute, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
+
+  const device = await resolveAgentDevice({
+    tenantId,
+    serialNumber: body.serialNumber,
+    udid: null,
+    token,
+  });
+
+  await authorizeAgentReport({ device, token });
+  await touchDeviceLastSeen(device.id);
+
+  const result = await recordWingetResult({
+    tenantId,
+    deviceId: device.id,
+    commandId: body.commandId,
+    exitCode: body.exitCode,
+    status: body.status,
+    installedVersion: body.installedVersion,
+    stdoutTail: body.stdoutTail,
+    stderrTail: body.stderrTail,
+    durationMs: body.durationMs,
+  });
+
+  return c.json({ ok: true as const, data: result }, 200);
 });
 
 agentApp.openapi(listReportsRoute, async (c) => {

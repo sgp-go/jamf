@@ -183,6 +183,36 @@ public sealed record AgentCheckinResponseData
     public IReadOnlyList<AgentCheckinAction>? Actions { get; init; }
 }
 
+// ---- winget result payload (POST /agent/winget-result) ----
+
+public sealed record WingetResultPayload
+{
+    [JsonPropertyName("serialNumber")]
+    public required string SerialNumber { get; init; }
+
+    [JsonPropertyName("commandId")]
+    public required string CommandId { get; init; }
+
+    [JsonPropertyName("exitCode")]
+    public required int ExitCode { get; init; }
+
+    /// <summary>success | failed | already-installed | not-found</summary>
+    [JsonPropertyName("status")]
+    public required string Status { get; init; }
+
+    [JsonPropertyName("installedVersion")]
+    public string? InstalledVersion { get; init; }
+
+    [JsonPropertyName("stdoutTail")]
+    public string? StdoutTail { get; init; }
+
+    [JsonPropertyName("stderrTail")]
+    public string? StderrTail { get; init; }
+
+    [JsonPropertyName("durationMs")]
+    public required long DurationMs { get; init; }
+}
+
 // ---- Usage payload ----
 
 public sealed record UsageStatsPayload

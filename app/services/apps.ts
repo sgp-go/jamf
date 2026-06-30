@@ -58,6 +58,10 @@ function extensionFromKind(kind: App["kind"]): string {
       return "mobileconfig";
     case "ipa_custom":
       return "ipa";
+    case "winget":
+      // winget 不存本地檔案，但 extensionFromKind 在 deleteApp 路徑會被呼叫；
+      // 回傳 dummy 值，呼叫端配合 row.fileUrl=null 判斷跳過 unlink
+      return "winget";
   }
 }
 
@@ -82,6 +86,10 @@ export interface AppDto {
   licenseCount: number | null;
   /** 授權備註（採購合同編號等） */
   licenseNotes: string | null;
+  /** winget 包 ID（kind=winget 時必填），例 `Microsoft.VisualStudioCode` */
+  wingetId: string | null;
+  /** winget source 名稱：`winget`（公共）/ `msstore` / `cogrow-{tenantSlug}`（私有） */
+  wingetSource: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -108,6 +116,8 @@ function toDto(row: App, publicBaseUrl?: string): AppDto {
     category: row.category,
     licenseCount: row.licenseCount,
     licenseNotes: row.licenseNotes,
+    wingetId: row.wingetId,
+    wingetSource: row.wingetSource,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -233,6 +243,75 @@ export async function uploadApp(input: UploadAppInput): Promise<App> {
     .where(eq(apps.id, row.id))
     .returning();
   return updated ?? row;
+}
+
+/**
+ * winget App 上架（不上傳二進制）。
+ *
+ * 跟 uploadApp 的差異：
+ * - 無 file binary、無 SHA-256、無 storage path
+ * - kind 強制 `winget`、platform 強制 `windows`
+ * - wingetId + wingetSource 必填（source 預設 `winget` 公共源）
+ * - 同 tenant 同 wingetId 唯一（由 DB unique index 強制）
+ *
+ * 版本字串 `version` 接受 `latest`（winget 預設裝最新）或具體版本（`1.95.0`）。
+ */
+export interface CreateWingetAppInput {
+  tenantId: string;
+  wingetId: string;
+  displayName: string;
+  /** 預設 `winget` 公共源 */
+  wingetSource?: string;
+  /** 預設 `latest`，winget 不需固定版本 */
+  version?: string;
+  category?: string | null;
+  licenseCount?: number | null;
+  licenseNotes?: string | null;
+}
+
+export async function createWingetApp(input: CreateWingetAppInput): Promise<App> {
+  if (!input.wingetId || input.wingetId.trim().length === 0) {
+    throw new AppError(400, "missing_winget_id", "wingetId is required");
+  }
+  if (!input.displayName || input.displayName.trim().length === 0) {
+    throw new AppError(400, "missing_display_name", "displayName is required");
+  }
+
+  const wingetId = input.wingetId.trim();
+  const wingetSource = (input.wingetSource ?? "winget").trim();
+  const version = (input.version ?? "latest").trim();
+
+  try {
+    const [row] = await db
+      .insert(apps)
+      .values({
+        tenantId: input.tenantId,
+        platform: "windows",
+        kind: "winget",
+        displayName: input.displayName,
+        version,
+        wingetId,
+        wingetSource,
+        category: input.category ?? null,
+        licenseCount: input.licenseCount ?? null,
+        licenseNotes: input.licenseNotes ?? null,
+      })
+      .returning();
+    if (!row) {
+      throw new Error("Insert apps returned no row");
+    }
+    return row;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("apps_tenant_winget_id_uq")) {
+      throw new AppError(
+        409,
+        "winget_app_already_exists",
+        `winget app "${wingetId}" already exists for this tenant`,
+      );
+    }
+    throw err;
+  }
 }
 
 export async function listAppsByTenant(

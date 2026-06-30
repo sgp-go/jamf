@@ -15,6 +15,7 @@ import { profilesAdminApp } from "~/routes/v1/admin/profiles.ts";
 import { tenantsAdminApp } from "~/routes/v1/admin/tenants.ts";
 import { webhooksAdminApp } from "~/routes/v1/admin/webhooks.ts";
 import { webhookEndpointsAdminApp } from "~/routes/v1/admin/webhook-endpoints.ts";
+import { wingetDeployAdminApp } from "~/routes/v1/admin/winget-deploy.ts";
 import { agentApp } from "~/routes/v1/agent.ts";
 import { appsApp } from "~/routes/v1/apps.ts";
 import { devicesApp } from "~/routes/v1/devices.ts";
@@ -43,6 +44,7 @@ export const controlApiMounts: Mount[] = [
   { basePath: "/api/v1", app: jamfInstancesAdminApp },
   { basePath: "/api/v1", app: appsAdminApp },
   { basePath: "/api/v1", app: appDeployAdminApp },
+  { basePath: "/api/v1", app: wingetDeployAdminApp },
   { basePath: "/api/v1", app: installAgentAdminApp },
   { basePath: "/api/v1", app: enrollmentPpkgAdminApp },
   { basePath: "/api/v1", app: profilesAdminApp },
