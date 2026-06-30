@@ -202,6 +202,82 @@ Layer 2: winget uninstall --name "<displayName>" --source winget   ← 通過 ma
 Layer 3: ARP UninstallString （讀 HKLM Uninstall）   ← winget 完全認不出時的兜底
 ```
 
+### Uninstall 三層 fallback 決策樹
+
+```
+                ┌─────────────────────────────────────┐
+                │ Agent 收到 winget_uninstall action  │
+                │ { commandId, wingetId, displayName }│
+                └─────────────────┬───────────────────┘
+                                  │
+                                  ▼
+                ┌─────────────────────────────────────┐
+                │ Layer 1                             │
+                │ winget uninstall --id <wingetId>    │
+                │ --exact --silent                    │
+                │ --disable-interactivity             │
+                │ --accept-source-agreements          │
+                └─────────────────┬───────────────────┘
+                                  │
+                       ┌──────────┼──────────────┐
+                       │          │              │
+                       ▼          ▼              ▼
+                  exit=0      exit=0x8A15002B   exit=0x8A150011
+                              already-installed  0x8A150014
+                  success      ← 回報 success     NO_PACKAGES_FOUND
+                       │          │              │
+                       ▼          ▼              ▼
+                   ──> ack    ──> ack          [有 displayName?]
+                                                  │
+                                          ┌───────┴───────┐
+                                          │               │
+                                       否 ▼            是 ▼
+                                       ──> error    ┌──────────────────────────┐
+                                                    │ Layer 2                  │
+                                                    │ winget uninstall --name  │
+                                                    │ "<displayName>"          │
+                                                    │ --source winget          │
+                                                    │ --silent                 │
+                                                    │ --disable-interactivity  │
+                                                    └─────────┬────────────────┘
+                                                              │
+                                                  ┌───────────┴───────────┐
+                                                  │                       │
+                                                  ▼                       ▼
+                                              exit=0               exit=0x8A150011
+                                              success             0x8A150014
+                                                  │                       │
+                                                  ▼                       ▼
+                                              ──> ack          ┌──────────────────────────┐
+                                                               │ Layer 3                  │
+                                                               │ 讀 HKLM Uninstall +      │
+                                                               │   WOW6432Node            │
+                                                               │ 找 DisplayName StartsWith│
+                                                               │   "<displayName>"        │
+                                                               └─────────┬────────────────┘
+                                                                         │
+                                                              ┌──────────┼──────────┐
+                                                              │          │          │
+                                                              ▼          ▼          ▼
+                                                       未找到       MsiExec     EXE installer
+                                                       entry        模式        (QuietUninstallString)
+                                                          │           │              │
+                                                          ▼           ▼              ▼
+                                                       ──> error  重寫為 msiexec    優先用
+                                                                   /x {GUID} /qn   QuietUninstallString
+                                                                  /norestart       否則 UninstallString
+                                                                                   + 啟發式 /S
+                                                                       │              │
+                                                                       └──────┬───────┘
+                                                                              ▼
+                                                                    cmd /c <command>
+                                                                              │
+                                                                              ▼
+                                                                          ──> exit code 回報
+```
+
+實測結果參考第四節「真機驗證對比」表。
+
 ### 5. ARP fallback 細節
 
 Agent 1.4.0.15+ 在 winget 兩層 fallback 都 fail 後讀 HKLM Registry 找 ARP entry，按優先級執行：
@@ -403,22 +479,105 @@ CREATE TABLE recommended_winget_apps (
 CREATE INDEX idx_recommended_active_sort ON recommended_winget_apps(is_active, sort_order);
 ```
 
-#### 建議的派發流程（台灣後台 → 我方 API）
+#### 建議的派發流程（台灣後台 ↔ 我方 API ↔ 設備）完整時序圖
 
 ```
-[學校管理員在台灣後台選「Visual Studio Code」+ 選設備 → 點派發]
-        ↓
-[台灣後台 SELECT * FROM recommended_winget_apps WHERE id=$1]
-        ↓
-[台灣後台呼叫我方 POST /api/v1/admin/tenants/{tid}/apps/winget
-   body: { wingetId, displayName, category, ... }]
-        ↓ (回 201 含 appId；同 wingetId 重複會 409，台灣後台可忽略或 PATCH)
-[台灣後台呼叫我方 POST /api/v1/admin/tenants/{tid}/devices/{did}/apps/{appId}/winget-install]
-        ↓
-[我方 backend 派發 → Agent 安裝 → 回報]
-        ↓
-[台灣後台訂閱我方 webhook `command.completed`，更新 UI 派發狀態]
+┌──────────┐        ┌──────────┐        ┌──────────┐        ┌──────────┐
+│ 學校管理員 │        │ 台灣後台  │        │ 我方 API   │        │  設備     │
+│ (UI)      │        │ (Web/DB) │        │ (backend)│        │ (Agent)  │
+└─────┬────┘        └─────┬────┘        └─────┬────┘        └─────┬────┘
+      │ ① 進派發頁面     │                    │                    │
+      │─────────────────>│                    │                    │
+      │                  │ SELECT * FROM     │                    │
+      │                  │ recommended_      │                    │
+      │                  │ winget_apps       │                    │
+      │                  │ WHERE is_active   │                    │
+      │ ② 顯示精選清單   │                    │                    │
+      │   (中文+icon+分類)│                   │                    │
+      │<─────────────────│                    │                    │
+      │                  │                    │                    │
+      │ ③ 選 App+設備    │                    │                    │
+      │   點「派發」      │                   │                    │
+      │─────────────────>│                    │                    │
+      │                  │                    │                    │
+      │                  │ ④ POST /apps/winget                     │
+      │                  │   { wingetId, displayName, ... }        │
+      │                  │───────────────────>│                    │
+      │                  │                    │ INSERT apps        │
+      │                  │                    │ (kind=winget)      │
+      │                  │ 201 { appId }      │                    │
+      │                  │   或 409（已存在直接 PATCH 或忽略）       │
+      │                  │<───────────────────│                    │
+      │                  │                    │                    │
+      │                  │ ⑤ POST /winget-install                  │
+      │                  │   for each device {did}                 │
+      │                  │───────────────────>│                    │
+      │                  │                    │ INSERT mdm_commands │
+      │                  │                    │ INSERT app_assignments│
+      │                  │ 202 { commandIds } │ (status=pending)   │
+      │                  │<───────────────────│                    │
+      │                  │                    │ triggerWnsPush     │
+      │                  │                    │───────────────────────────>
+      │                  │                    │                    │ ⑥ WNS push 喚醒
+      │                  │                    │                    │   dmwappushsvc
+      │                  │                    │                    │  OMA-DM session
+      │                  │                    │                    │  EventLog 265 fire
+      │                  │                    │                    │
+      │                  │                    │                    │ ⑦ OmaDmEventLogWatcher
+      │                  │                    │                    │   → POST /agent/checkin
+      │                  │                    │<───────────────────│
+      │                  │                    │ wingetCommands[]   │
+      │                  │                    │───────────────────>│
+      │                  │                    │                    │
+      │                  │                    │                    │ ⑧ spawn winget.exe
+      │                  │                    │                    │   install --id X
+      │                  │                    │                    │   --silent --scope machine
+      │                  │                    │                    │   --disable-interactivity
+      │                  │                    │                    │   --accept-source-agreements
+      │                  │                    │                    │   --accept-package-agreements
+      │                  │                    │                    │
+      │                  │                    │                    │ ⑨ winget 下載 + 跑
+      │                  │                    │                    │   silent installer
+      │                  │                    │                    │   (10-30 秒視包大小)
+      │                  │                    │                    │
+      │                  │                    │ ⑩ POST /agent/winget-result
+      │                  │                    │   { exitCode, status,
+      │                  │                    │     installedVersion, ... }
+      │                  │                    │<───────────────────│
+      │                  │                    │ UPDATE mdm_commands │
+      │                  │                    │   status=acknowledged
+      │                  │                    │ UPDATE app_assignments
+      │                  │                    │   status=installed │
+      │                  │                    │                    │
+      │                  │                    │ ⑪ webhook          │
+      │                  │                    │   command.completed│
+      │                  │ <══════════════════│                    │
+      │                  │ (含 commandId,     │                    │
+      │                  │  exitCode, status) │                    │
+      │                  │                    │                    │
+      │ ⑫ UI 顯示「派發  │                    │                    │
+      │    成功」+ 安裝   │                    │                    │
+      │    版本號         │                    │                    │
+      │<─────────────────│                    │                    │
+      │                  │                    │                    │
+
+時序：
+  ① ② ③         < 1s（UI 操作）
+  ④ ⑤           < 1s（API 呼叫）
+  ⑥             派發後 ~4s（WNS push 延遲）
+  ⑦             < 1s（EventLog → Agent 喚醒）
+  ⑧⑨            10-30s（winget 下載 + 安裝視包大小）
+  ⑩ ⑪ ⑫        < 1s（result 回報 + webhook）
+
+實測 install 7-Zip：22s 端到端（派發 → ack）；uninstall 7-Zip：6s 端到端
 ```
+
+關鍵協作點：
+
+- **步驟 ④**：同 wingetId 重複上架返 **409**，台灣後台應**忽略 409** 直接用既有 appId（或 PATCH 更新 displayName/metadata）
+- **步驟 ⑤**：派發多台設備時逐設備呼叫；命令間獨立、無前後依賴
+- **步驟 ⑪**：台灣後台需配置 webhook 接收 `command.completed`（含 `command.queued` / `command.failed`），別輪詢
+- **步驟 ⑩**：Agent 端 winget 失敗（如 EXE installer 不認），三層 fallback 內部處理，台灣後台只看最終 result
 
 #### 推薦的 30 個教育場景 App（初版清單給你們抄）
 
