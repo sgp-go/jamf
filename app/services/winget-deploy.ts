@@ -32,6 +32,12 @@ interface WingetCommandPayload {
   acceptAgreements: boolean;
   version?: string;
   appId: string;
+  /**
+   * App displayName，給 Agent uninstall 失敗時 fallback `--name` 匹配 ARP DisplayName。
+   * 派發 install/uninstall 時固定從 apps.displayName 帶上（reslove 在 service 層）。
+   * winget tracking DB 對 ARP 模糊反向映射不穩，社區已知坑——詳見 wiki。
+   */
+  displayName?: string;
 }
 
 async function resolveDeviceAndWingetApp(opts: {
@@ -180,6 +186,7 @@ export async function installWingetAppOnDevice(
     acceptAgreements: true,
     version: app.version === "latest" ? undefined : app.version,
     appId: app.id,
+    displayName: app.displayName,
   };
 
   const commandId = await enqueueWingetCommand({
@@ -221,6 +228,7 @@ export async function uninstallWingetAppOnDevice(
     scope: "machine",
     acceptAgreements: true,
     appId: app.id,
+    displayName: app.displayName,
   };
 
   const commandId = await enqueueWingetCommand({
@@ -273,6 +281,8 @@ export interface WingetCheckinAction {
     scope: "machine" | "user";
     acceptAgreements: boolean;
     version?: string;
+    /** App displayName，給 Agent uninstall `--id` 失敗時 fallback `--name` 用 */
+    displayName?: string;
   };
 }
 
@@ -449,6 +459,7 @@ export async function buildWingetCheckinActions(
         scope: payload.scope ?? "machine",
         acceptAgreements: payload.acceptAgreements ?? true,
         version: payload.version,
+        displayName: payload.displayName,
       },
     };
   });

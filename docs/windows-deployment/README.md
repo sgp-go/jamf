@@ -19,6 +19,7 @@
 |---|---|
 | [device-provisioning-guide.md](device-provisioning-guide.md) | 設備初始化配置指南：新租戶初始化 → PPKG 生成 → OOBE 套用 → 驗證納管 → 帳戶與密碼策略 → 故障排除 |
 | [agent-app-build-and-deploy.md](agent-app-build-and-deploy.md) | Agent App 構建與部署：MSI 構建 → 上傳 → EDA-CSP 自動下發 → 文件下載 URL 配置（publicBaseUrl / appDownloadBaseUrl） |
+| [winget-app-dispatch.md](winget-app-dispatch.md) | **winget App 派發**（不上傳二進制，由 Agent 端跑 `winget install`）：公共軟體零維護、秒級觸發走 EventLog 265、admin API 上架/派發/卸載、**winget uninstall 已知不可靠**（含完整限制清單）|
 | [laps-password-management.md](laps-password-management.md) | LAPS 密碼託管：自動改密流程 → IT 查詢密碼 → 手動輪換 → 安全須知 |
 | [bitlocker-management.md](bitlocker-management.md) | BitLocker 磁碟加密：ADMX 信箱靜默加密 → Recovery Key 捕獲 → 加密狀態查詢 → 故障排除 |
 | [agent-upgrade-rollback-strategy.md](agent-upgrade-rollback-strategy.md) | Agent 升級與回滾：灰度分階段推送 → 健康驗證指標 → 回滾操作 → 自我保護注意事項 |

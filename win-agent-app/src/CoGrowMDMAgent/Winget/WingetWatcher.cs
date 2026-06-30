@@ -229,6 +229,7 @@ public sealed class WingetWatcher : BackgroundService
         var wingetId = TryGetString(action.Data, "wingetId");
         var source = TryGetString(action.Data, "source") ?? "winget";
         var scope = TryGetString(action.Data, "scope") ?? "machine";
+        var displayName = TryGetString(action.Data, "displayName");
 
         if (string.IsNullOrEmpty(commandId) || string.IsNullOrEmpty(wingetId))
         {
@@ -254,6 +255,60 @@ public sealed class WingetWatcher : BackgroundService
         var sw = Stopwatch.StartNew();
         var (exitCode, stdout, stderr) = await RunWingetAsync(exe, args, ct);
         sw.Stop();
+
+        // Uninstall fallback 鏈：
+        //   Layer 1: winget --id          ← 對 EXE installer 反向映射不穩，常 NO_PACKAGES_FOUND
+        //   Layer 2: winget --name        ← 撞 manifest DisplayName
+        //   Layer 3: ARP UninstallString  ← winget upstream 已知 LocalSystem context 限制
+        //                                   (winget-cli #4271 / #5752)，社區共識繞 winget
+        //                                   直接讀 HKLM Uninstall 跑 QuietUninstallString
+        //                                   PF5XSMN1 真機 7zip.7zip 暴露：winget tracking
+        //                                   DB 對 EXE installer 反向映射不認，但
+        //                                   `"C:\Program Files\7-Zip\Uninstall.exe" /S`
+        //                                   就放在 HKLM 等著被直接調用
+        if (!isInstall && IsWingetIdNotFound(exitCode) && !string.IsNullOrEmpty(displayName))
+        {
+            _logger.LogWarning(
+                "winget uninstall --id {Id} 找不到包(exit={Exit:X})，fallback Layer 2: --name {Name}",
+                wingetId, exitCode, displayName);
+            var fallbackArgs = BuildWingetUninstallByName(displayName);
+            sw.Restart();
+            var (exit2, stdout2, stderr2) = await RunWingetAsync(exe, fallbackArgs, ct);
+            sw.Stop();
+            exitCode = exit2;
+            stdout = stdout + "\n--- fallback --name ---\n" + stdout2;
+            stderr = stderr + "\n--- fallback --name ---\n" + stderr2;
+
+            if (IsWingetIdNotFound(exitCode))
+            {
+                _logger.LogWarning(
+                    "winget --name {Name} 仍找不到(exit={Exit:X})，fallback Layer 3: ARP UninstallString",
+                    displayName, exitCode);
+                var arp = TryFindArpUninstallEntry(displayName);
+                if (arp is not null)
+                {
+                    sw.Restart();
+                    var (exit3, stdout3, stderr3) = await RunArpUninstallAsync(arp, ct);
+                    sw.Stop();
+                    exitCode = exit3;
+                    stdout = stdout +
+                        "\n--- fallback ARP ---\n" +
+                        $"DisplayName: {arp.DisplayName}\n" +
+                        $"Command: {arp.UninstallCommand}\n" +
+                        $"IsQuiet: {arp.IsQuiet}\n" +
+                        stdout3;
+                    stderr = stderr + "\n--- fallback ARP ---\n" + stderr3;
+                    _logger.LogInformation(
+                        "ARP fallback 完成: cmd={Cmd} exit={Exit} dur={Dur}ms",
+                        arp.UninstallCommand, exit3, sw.ElapsedMilliseconds);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "ARP 查無 DisplayName like {Name}* — 三層 fallback 全 fail", displayName);
+                }
+            }
+        }
 
         var status = ClassifyExitCode(exitCode);
         var version = isInstall && status == "success"
@@ -316,9 +371,30 @@ public sealed class WingetWatcher : BackgroundService
     {
         0 => "success",
         unchecked((int)0x8A150011) => "not-found", // APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
+        unchecked((int)0x8A150014) => "not-found", // APPINSTALLER_CLI_ERROR_NO_PACKAGES_FOUND
         unchecked((int)0x8A15002B) => "already-installed",
         _ => "failed",
     };
+
+    /// <summary>winget uninstall --id 找不到包的兩種錯誤碼。</summary>
+    private static bool IsWingetIdNotFound(int code) =>
+        code == unchecked((int)0x8A150011) || code == unchecked((int)0x8A150014);
+
+    /// <summary>
+    /// uninstall fallback：用 --name 撞 ARP DisplayName，繞 winget tracking DB
+    /// 對 winget-pkgs ID 反向映射的不穩定。--name 是 winget 的模糊匹配（contains）。
+    /// 限定 --source winget 避免 msstore source 返回 0x8A150039 Invalid data returned by rest source。
+    /// </summary>
+    private static string BuildWingetUninstallByName(string displayName)
+    {
+        var sb = new StringBuilder();
+        sb.Append("uninstall --name \"")
+          .Append(displayName.Replace("\"", "\\\""))
+          .Append('"');
+        sb.Append(" --silent --disable-interactivity --accept-source-agreements");
+        sb.Append(" --source winget");
+        return sb.ToString();
+    }
 
     private static readonly Regex VersionRegex = new(
         @"(?:Version|版本)\s*[:：]?\s*([^\s\r\n]+)",
@@ -410,6 +486,119 @@ public sealed class WingetWatcher : BackgroundService
         {
             _logger.LogError(ex, "POST /winget-result HTTP failure");
         }
+    }
+
+    private sealed record ArpUninstallEntry(
+        string DisplayName, string UninstallCommand, bool IsQuiet);
+
+    /// <summary>
+    /// 從 HKLM\SOFTWARE\...\Uninstall（兩個 64/32 hive）找 DisplayName 前綴匹配的 entry。
+    /// 優先 QuietUninstallString（廠商給的 silent 命令，最穩）；
+    /// 沒有則 fallback UninstallString + msi 模式重寫成 `msiexec /x {GUID} /qn /norestart`。
+    /// EXE installer 的 UninstallString 沒 silent 屬性時直接用原樣（部分 EXE uninstaller
+    /// 本身就 silent 行為），上層執行時失敗 admin 後台手動處理。
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static ArpUninstallEntry? TryFindArpUninstallEntry(string displayNamePrefix)
+    {
+        var roots = new[]
+        {
+            @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            @"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        };
+
+        foreach (var root in roots)
+        {
+            using var rootKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(root);
+            if (rootKey is null) continue;
+
+            foreach (var subName in rootKey.GetSubKeyNames())
+            {
+                using var sub = rootKey.OpenSubKey(subName);
+                if (sub is null) continue;
+                var dn = sub.GetValue("DisplayName") as string;
+                if (string.IsNullOrEmpty(dn)) continue;
+                if (!dn.StartsWith(displayNamePrefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var quiet = sub.GetValue("QuietUninstallString") as string;
+                if (!string.IsNullOrEmpty(quiet))
+                    return new ArpUninstallEntry(dn, quiet, IsQuiet: true);
+
+                var us = sub.GetValue("UninstallString") as string;
+                if (string.IsNullOrEmpty(us)) continue;
+
+                // MsiExec.exe /I{GUID} 或 /X{GUID} → 重寫成 silent
+                // 形如:  MsiExec.exe /X{ABC-...}   或   "C:\Windows\System32\MsiExec.exe" /X{...}
+                var msiMatch = MsiExecRegex.Match(us);
+                if (msiMatch.Success)
+                {
+                    var guid = msiMatch.Groups["guid"].Value;
+                    return new ArpUninstallEntry(
+                        dn,
+                        $"msiexec.exe /x {guid} /qn /norestart",
+                        IsQuiet: true);
+                }
+
+                // 非 MSI、無 QuietUninstallString — 嘗試啟發式 silent flag（NSIS /S、InnoSetup
+                // /VERYSILENT /SUPPRESSMSGBOXES）。沒辦法 100% 正確，admin 後台知道有風險。
+                // punt: 啟發式 silent flag 不一定對；後續可加 admin 上架時的
+                //       uninstall_command_override 欄位，讓 admin 對已知坑包手填命令
+                return new ArpUninstallEntry(dn, us, IsQuiet: false);
+            }
+        }
+        return null;
+    }
+
+    private static readonly Regex MsiExecRegex = new(
+        @"MsiExec(?:\.exe)?\s+/[XI]\s*(?<guid>\{[0-9A-Fa-f-]+\})",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// 跑 ARP UninstallString。用 cmd /c 包裝以處理引號 + 空白路徑。
+    /// 不是 quiet entry 時，附加 /S（NSIS 慣例）作後備——錯了會無害失敗。
+    /// </summary>
+    [SupportedOSPlatform("windows")]
+    private static async Task<(int exitCode, string stdout, string stderr)> RunArpUninstallAsync(
+        ArpUninstallEntry entry, CancellationToken ct)
+    {
+        var cmdline = entry.UninstallCommand;
+        if (!entry.IsQuiet && !cmdline.Contains(" /S", StringComparison.OrdinalIgnoreCase)
+                           && !cmdline.Contains(" /quiet", StringComparison.OrdinalIgnoreCase))
+        {
+            cmdline = cmdline + " /S";
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = "cmd.exe",
+            Arguments = "/c " + cmdline,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+
+        using var proc = Process.Start(psi);
+        if (proc is null) return (-1, "", "Process.Start returned null");
+
+        using var timeout = new CancellationTokenSource(WingetExecTimeout);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, ct);
+
+        var stdoutTask = proc.StandardOutput.ReadToEndAsync(linked.Token);
+        var stderrTask = proc.StandardError.ReadToEndAsync(linked.Token);
+
+        try
+        {
+            await proc.WaitForExitAsync(linked.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(true); } catch { }
+            return (-1, await SafeAwait(stdoutTask), "ARP TIMEOUT after " + WingetExecTimeout);
+        }
+        return (proc.ExitCode, await SafeAwait(stdoutTask), await SafeAwait(stderrTask));
     }
 
     /// <summary>
