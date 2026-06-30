@@ -18,6 +18,7 @@
 | 文件 | 說明 |
 |------|------|
 | [05-remote-lock-wipe-reboot.md](05-remote-lock-wipe-reboot.md) | 遠端鎖定 / 清除 / 重啟（三條獨立流程，含 ADMX 信箱 + Agent 配合） |
+| [20-lost-mode.md](20-lost-mode.md) | 遺失模式（push/remove-lost-mode admin 端點 + LegalNotice 登入屏顯示 + GpsCollector 切 30s + LetAppsAccessLocation 配套策略） |
 | [08-laps-password.md](08-laps-password.md) | LAPS 密碼託管（自動改密 → 密碼查詢 → 手動輪換） |
 | [09-bitlocker.md](09-bitlocker.md) | BitLocker 磁碟加密（靜默加密 → Recovery Key 捕獲 → 狀態查詢） |
 

@@ -23,8 +23,8 @@ sequenceDiagram
     後端->>DB: SELECT last_gps_* WHERE serial
     後端-->>管理員: 200 OK { 經緯度 + accuracy + 時間 }
 
-    Note over 設備,DB: Lost Mode 啟用 → Agent 切高頻
-    管理員->>設備: (透過既有 LOCK / ENABLE_LOST_MODE 命令)
+    Note over 設備,DB: Lost Mode 啟用 → Agent 切高頻<br/>(完整流程見 20-lost-mode.md)
+    管理員->>設備: POST /devices/{did}/push-lost-mode → ADMX 信箱
     設備->>設備: Watcher 切 30s / 1min 上報
     loop 高頻
         設備->>後端: POST /agent/gps
