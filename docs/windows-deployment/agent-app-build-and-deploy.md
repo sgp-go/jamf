@@ -158,6 +158,8 @@ curl -X PATCH /api/v1/admin/tenants/{tid}/mdm-config \
 
 > ⚠️ `appDownloadBaseUrl` 指向的服務必須能響應 `/api/v1/apps/{id}/download/...` 路徑（部署同一份後端，或用反代映射）。設備 BITS 會發 HEAD + Range GET 請求。
 
+> 🚨 **強烈建議教育場景走 LAN（模型 B）**：BITS 下載 80MB agent MSI 若走慢速公網需 10+ 分鐘，期間 Windows `dmwappushservice`（EDA-CSP callback dispatcher）會被 SCM idle-stop（實測 3-6 min 停一次），BITS 完成通知丟失 → EDA-CSP job 卡在 `Status=20` 派發廢。LAN 下同樣 80MB 通常秒級，撞不上 SCM 停 dmwapp 的窗口。詳見 [troubleshooting.md § EDA-CSP MSI 派發類](troubleshooting.md#eda-csp-msi-派發類agent-升級--首次-enroll-install-agent)。Agent 側 keepalive（v1.4.0.20+）+ PPKG scheduled task 是防禦性兜底，不是可靠的一線方案。
+
 ---
 
 ## 6. 版本升級

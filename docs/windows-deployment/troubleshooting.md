@@ -217,6 +217,61 @@ device 拉了 .msix 但安裝失敗：
 
 ---
 
+## EDA-CSP MSI 派發類（agent 升級 / 首次 enroll install-agent）
+
+### Bug：EDA-CSP job 卡 `Status=20 (Downloading)` 永不推進
+
+**症狀**：`install-agent` 或普通 MSI App 派發後 `mdm_commands.msi_install` ack 200，但設備上 agent 版本不變。查 EDA-CSP registry：
+
+```powershell
+Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\EnterpriseDesktopAppManagement\S-0-0-00-0000000000-0000000000-000000000-000\MSI\{ProductCode}"
+# Status=20 DownloadInstall=InProgress，但 BITS 那邊 bitsadmin /list /allusers 顯示 0 job
+```
+
+檔案已下載完 (`C:\Windows\system32\config\systemprofile\AppData\Local\mdm\{GUID}.msi` 是完整大小)，但 EDA-CSP 認為還在下載。BITS 90min 後把 orphan job 清掉 → 派發徹底廢。
+
+**Root cause**：`dmwappushservice`（OMA-DM push dispatcher）是 trigger-start service，Win11 24H2 SCM idle 3-6 min 就停一次。**BITS 下載完成通知那一瞬間若 dmwapp 是 Stopped → EDA-CSP 收不到 callback → job 就這樣卡死**。80MB agent MSI 慢速下載 10+ min，中間必撞上 dmwapp 停的窗口。
+
+**修法（已內建，不用手動）**：
+- Agent 側 `DmwappushKeepaliveService` 每 30s 檢查 + Start（v1.4.0.20+）
+- 首次 enroll 期 PPKG `ProvisioningCommands` 建 `CoGrowDmwappKeepalive` scheduled task 每 1min 拉起，Agent 裝完自動接管
+
+**根治：提升下載速度**——把 `self_mdm_configs.app_download_base_url` 指向校內 LAN 或 CDN，80MB 幾秒下完就不會撞上 SCM 停 dmwapp 的窗口，keepalive 只是兜底。配置見 [agent-app-build-and-deploy.md § 5](agent-app-build-and-deploy.md#5-文件下載-url-配置)。
+
+**手動 unblock 卡住的 job**：
+
+```powershell
+# 1. 拉起 dmwapp
+Start-Service dmwappushservice
+
+# 2. 觸發 EDA-CSP 重新掃 job（讓它 pickup 已完成的 BITS）
+Start-ScheduledTask -TaskPath "\Microsoft\Windows\EnterpriseMgmt\DesktopAppCSP\" -TaskName "Resume App Installation Actions"
+
+# 3. 等 30s~2min 觀察 registry Status 是否推進；若不動，最壞情況等 BITS 清 orphan
+#    後 backend 重派 install-agent 走一遍新 job
+```
+
+### 附：EDA-CSP `Status` enum 對照
+
+| 值 | 含義 |
+|---|---|
+| 0 | idle |
+| 10 | download request received |
+| 20 | downloading |
+| 25 | downloaded |
+| 30 | downloaded but not verified |
+| 40 | downloaded and verified |
+| 48 | pending user session |
+| 50 | installing |
+| 55 | enforcement paused |
+| 60 | **completed (成功終態)** |
+| 70 | pending retry |
+| 80 | **failed (失敗終態)** |
+
+派發後 poll `MSI/{ProductCode}/Status`；只有 60/80 是終態，其他都在中間。
+
+---
+
 ## WNS Push 類
 
 ### Bug：push 200 received 但 device 不觸發
