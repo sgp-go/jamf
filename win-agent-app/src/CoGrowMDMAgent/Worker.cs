@@ -69,6 +69,13 @@ public class Worker : BackgroundService
         // 啟動先 drain 一次：上次 service crash/重啟前累積的失敗報告先嘗試送出
         await DrainQueueAsync(stoppingToken);
 
+        // 啟動即上報一次：覆蓋 新安裝 / MSI 升級 / service 重啟三個場景，
+        // 讓 backend 立刻拿到當前機器 inventory（deviceName / model / osVersion / battery / storage），
+        // 不必等下一個 daily slot（最壞情況 ~24h 才有新資料）。
+        // Report 端點是冪等 upsert，多報一次無副作用；下次 daily slot 照常跑。
+        _configProvider.TryReload();
+        await RunReportCycleAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             // 每 cycle 起點 reload Registry → AgentConfig，使 MDM 推送 Registry CSP

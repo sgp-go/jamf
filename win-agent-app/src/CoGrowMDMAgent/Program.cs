@@ -9,6 +9,7 @@ using CoGrowMDMAgent.Queue;
 using CoGrowMDMAgent.Reporting;
 using CoGrowMDMAgent.Reporting.Usage;
 using CoGrowMDMAgent.Scheduling;
+using CoGrowMDMAgent.OsServices;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -88,6 +89,10 @@ builder.Services.AddHostedService<CoGrowMDMAgent.Winget.OmaDmEventLogWatcher>();
 // 使用時長採集：每分鐘探測 active console session 在用狀態，累計並持久化到 usage.db。
 // 與 Worker / LockWatcher 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<SessionUsageMonitor>();
+// dmwappushservice keepalive：EDA-CSP 派發依賴此服務 route OMA-DM callbacks，
+// Win11 24H2 上它 idle 會被 SCM 停掉導致 BITS 完成通知丟失、job orphan
+// （2026-07-02 真機抓到 1.4.0.17 派發卡 Status=20 的 root cause）。
+builder.Services.AddHostedService<DmwappushKeepaliveService>();
 
 var host = builder.Build();
 

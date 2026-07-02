@@ -32,5 +32,8 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
     <PackageReference Include="System.Management" Version="8.0.0" />
+    <!-- ServiceController：DmwappushKeepaliveService 用它保 dmwappushservice running（EDA-CSP 派發依賴）。
+         版本對齊 Microsoft.Extensions.Hosting.WindowsServices 8.0.1 的 transitive 依賴，避免 NU1605 downgrade。 -->
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.1" />
   </ItemGroup>
 </Project>
