@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import { mdmCommands, mdmDevices, mdmWindowsApps } from "~/db/schema/devices.ts";
 import type { MdmCommand, MdmDevice } from "~/db/schema/devices.ts";
@@ -59,7 +59,41 @@ export async function listDevicesInTenant(opts: {
       .offset((opts.page - 1) * opts.limit),
     db.select({ value: count() }).from(mdmDevices).where(where),
   ]);
-  return { rows, total };
+
+  // 每台設備最新一筆 agent_reports（電量 / 儲存 / osVersion）— DISTINCT ON 一次查完。
+  // 主表 mdm_devices.osVersion 在 Windows 路徑下常為 null（enrollment SOAP 不帶），
+  // agent_reports.osVersion 是唯一有值來源。
+  const deviceIds = rows.map((r) => r.id);
+  const latestReports = deviceIds.length === 0
+    ? []
+    : await db
+      .selectDistinctOn([agentReports.deviceId], {
+        deviceId: agentReports.deviceId,
+        batteryLevel: agentReports.batteryLevel,
+        storageTotalMb: agentReports.storageTotalMb,
+        storageAvailableMb: agentReports.storageAvailableMb,
+        osVersion: agentReports.osVersion,
+        reportedAt: agentReports.reportedAt,
+      })
+      .from(agentReports)
+      .where(inArray(agentReports.deviceId, deviceIds))
+      .orderBy(agentReports.deviceId, desc(agentReports.reportedAt));
+
+  const reportByDevice = new Map(latestReports.map((r) => [r.deviceId, r]));
+  const enrichedRows = rows.map((row) => {
+    const rpt = reportByDevice.get(row.id);
+    return {
+      ...row,
+      // agent_reports 有值就覆蓋主表 null；主表非 null（Apple 走 Jamf sync 寫過）保留原值
+      osVersion: row.osVersion ?? rpt?.osVersion ?? null,
+      batteryLevel: rpt?.batteryLevel ?? null,
+      storageTotalMb: rpt?.storageTotalMb ?? null,
+      storageAvailableMb: rpt?.storageAvailableMb ?? null,
+      lastReportAt: rpt?.reportedAt ?? null,
+    };
+  });
+
+  return { rows: enrichedRows, total };
 }
 
 export async function getDeviceInTenant(opts: {

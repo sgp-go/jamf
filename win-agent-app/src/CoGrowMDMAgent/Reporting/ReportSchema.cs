@@ -35,6 +35,14 @@ public sealed record AgentReportPayload
     [JsonPropertyName("appVersion")]
     public string? AppVersion { get; init; }
 
+    /// <summary>Windows hostname; backend writes it to mdm_devices.device_name.</summary>
+    [JsonPropertyName("deviceName")]
+    public string? DeviceName { get; init; }
+
+    /// <summary>"Manufacturer Model" (Win32_ComputerSystem); backend writes to mdm_devices.model.</summary>
+    [JsonPropertyName("model")]
+    public string? Model { get; init; }
+
     [JsonPropertyName("extraData")]
     public WindowsExtraData? ExtraData { get; init; }
 

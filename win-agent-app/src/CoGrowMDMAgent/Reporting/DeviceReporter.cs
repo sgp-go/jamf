@@ -61,6 +61,8 @@ public sealed class DeviceReporter
             BatteryLevel = facts.BatteryLevel,
             NetworkType = facts.NetworkType,
             NetworkSsid = facts.NetworkSsid,
+            DeviceName = facts.DeviceName,
+            Model = facts.Model,
             ExtraData = facts.Windows is null
                 ? null
                 : new WindowsExtraData { Windows = facts.Windows },

@@ -65,9 +65,40 @@ const deviceItemSchema = z
     }),
     deviceName: z.string().nullable().openapi({ example: "guangfu-es-001" }),
     model: z.string().nullable().openapi({ example: "iPhone15,3" }),
-    osVersion: z.string().nullable().openapi({ example: "17.5" }),
+    osVersion: z.string().nullable().openapi({
+      example: "17.5",
+      description:
+        "Windows 走 agent_reports 最新一筆補值（enrollment SOAP 常不含）；Apple 走 Jamf sync 寫主表",
+    }),
     jamfDeviceId: z.string().nullable(),
     jamfManagementId: z.string().nullable(),
+    enrollmentStatus: z
+      .enum(["pending", "enrolled", "unenrolled", "failed"])
+      .openapi({
+        description: "納管狀態；enrolled = 正常受列管",
+        example: "enrolled",
+      }),
+    enrolledAt: z.string().nullable().openapi({
+      description: "首次註冊時間（ISO 8601 UTC）",
+      example: "2026-05-28T10:30:00Z",
+    }),
+    batteryLevel: z.number().int().nullable().openapi({
+      description:
+        "**【選填】** 最新 agent_reports 的電量百分比（0-100）；未上報則 null",
+      example: 87,
+    }),
+    storageTotalMb: z.number().int().nullable().openapi({
+      description: "**【選填】** 最新 agent_reports 的儲存空間總量（MB）",
+      example: 500000,
+    }),
+    storageAvailableMb: z.number().int().nullable().openapi({
+      description: "**【選填】** 最新 agent_reports 的儲存空間剩餘量（MB）",
+      example: 128000,
+    }),
+    lastReportAt: z.string().nullable().openapi({
+      description:
+        "**【選填】** 最新 agent_reports 上報時間（ISO 8601 UTC）；判斷電量/儲存新鮮度用",
+    }),
     lastSyncedAt: z.string().nullable().openapi({
       example: "2026-05-28T10:30:00Z",
       description: "ISO 8601 UTC 時間戳",
@@ -248,8 +279,15 @@ function toItem(row: {
   osVersion: string | null;
   jamfDeviceId: string | null;
   jamfManagementId: string | null;
+  enrollmentStatus: "pending" | "enrolled" | "unenrolled" | "failed";
+  enrolledAt: Date | null;
   lastSyncedAt: Date | null;
   lastSeenAt: Date | null;
+  // list 端點 enrich 出來的 agent_reports 最新一筆；detail/update/delete 路徑沒 JOIN → undefined
+  batteryLevel?: number | null;
+  storageTotalMb?: number | null;
+  storageAvailableMb?: number | null;
+  lastReportAt?: Date | null;
 }) {
   return {
     id: row.id,
@@ -264,6 +302,12 @@ function toItem(row: {
     osVersion: row.osVersion,
     jamfDeviceId: row.jamfDeviceId,
     jamfManagementId: row.jamfManagementId,
+    enrollmentStatus: row.enrollmentStatus,
+    enrolledAt: row.enrolledAt?.toISOString() ?? null,
+    batteryLevel: row.batteryLevel ?? null,
+    storageTotalMb: row.storageTotalMb ?? null,
+    storageAvailableMb: row.storageAvailableMb ?? null,
+    lastReportAt: row.lastReportAt?.toISOString() ?? null,
     lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
     lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
   };

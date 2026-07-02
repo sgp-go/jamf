@@ -60,6 +60,16 @@ const reportBody = z
     screenBrightness: z.number().min(0).max(1).optional(),
     osVersion: z.string().optional(),
     appVersion: z.string().optional(),
+    deviceName: z.string().max(200).optional().openapi({
+      description:
+        "**【選填】** Windows hostname / Apple 裝置名。回寫 mdm_devices.device_name 供列表顯示；Windows enrollment SOAP 常不帶此字段，Agent 是主要來源。",
+      example: "GRT-LAB-PC-001",
+    }),
+    model: z.string().max(200).optional().openapi({
+      description:
+        "**【選填】** 硬體型號（Windows: Manufacturer + Model；Apple: iPhone15,3 等）。回寫 mdm_devices.model。",
+      example: "LENOVO ThinkPad X1 Carbon Gen 11",
+    }),
     extraData: z.record(z.unknown()).optional(),
     reportedAt: z.string().datetime().optional().openapi({
       example: "2026-05-28T10:30:00Z",
@@ -616,6 +626,8 @@ agentApp.openapi(reportRoute, async (c) => {
     screenBrightness: body.screenBrightness,
     osVersion: body.osVersion,
     appVersion: body.appVersion,
+    deviceName: body.deviceName,
+    model: body.model,
     extraData: body.extraData,
     reportedAt: body.reportedAt,
   });

@@ -46,8 +46,45 @@ public sealed class DeviceFactsCollector
             BatteryLevel = GetBatteryLevel(),
             NetworkType = network.Type,
             NetworkSsid = network.Ssid,
+            DeviceName = Environment.MachineName,
+            Model = GetModel(),
             Windows = OperatingSystem.IsWindows() ? CollectWindowsFacts() : null,
         };
+    }
+
+    /// <summary>
+    /// 讀 Win32_ComputerSystem Manufacturer + Model 拼成型號串。
+    /// 例："LENOVO 21HM007NCD" / "Dell Inc. Latitude 5540"。
+    /// 讀不到（非 Windows / WMI 失敗）回 null，不阻斷上報。
+    /// </summary>
+    private string? GetModel()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            return WindowsModel();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to read Win32_ComputerSystem model");
+            return null;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string? WindowsModel()
+    {
+        using var searcher = new System.Management.ManagementObjectSearcher(
+            "SELECT Manufacturer, Model FROM Win32_ComputerSystem");
+        foreach (var obj in searcher.Get())
+        {
+            var manufacturer = obj["Manufacturer"]?.ToString()?.Trim();
+            var model = obj["Model"]?.ToString()?.Trim();
+            if (string.IsNullOrEmpty(model)) return manufacturer;
+            if (string.IsNullOrEmpty(manufacturer)) return model;
+            return $"{manufacturer} {model}";
+        }
+        return null;
     }
 
     /// <summary>序號採集對外暴露（usage 上報只需序號，不必跑完整 Collect）。</summary>
@@ -429,6 +466,8 @@ public sealed record DeviceFacts
     public int? BatteryLevel { get; init; }
     public string? NetworkType { get; init; }
     public string? NetworkSsid { get; init; }
+    public string? DeviceName { get; init; }
+    public string? Model { get; init; }
     public WindowsFacts? Windows { get; init; }
 }
 

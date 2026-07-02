@@ -101,6 +101,10 @@ export interface AgentReportInput {
   screenBrightness?: number;
   osVersion?: string;
   appVersion?: string;
+  /** Windows hostname / Apple 裝置名；回寫 mdm_devices.device_name */
+  deviceName?: string;
+  /** 硬體型號（Windows: Manufacturer + Model）；回寫 mdm_devices.model */
+  model?: string;
   extraData?: Record<string, unknown>;
   reportedAt?: string;
 }
@@ -128,6 +132,17 @@ export async function saveAgentReport(input: AgentReportInput): Promise<{ id: st
     throw new AppError(500, "report_save_failed", "Failed to save agent report");
   }
   await touchDeviceLastSeen(input.deviceId);
+  // 回寫主表 inventory 字段：Windows enrollment SOAP 只帶 DeviceID/HWDevID，OS/name/model
+  // 從來沒被寫進 mdm_devices（見 windows-mdm.ts:221 只取 DeviceName/OSVersion 且常為 null，
+  // model 完全沒寫）。Agent 上報是這三個字段的唯一可靠來源。
+  // 只在有值時寫，避免 null 覆蓋 Apple sync 已寫入的值。
+  const patch: Partial<{ osVersion: string; deviceName: string; model: string }> = {};
+  if (input.osVersion) patch.osVersion = input.osVersion;
+  if (input.deviceName) patch.deviceName = input.deviceName;
+  if (input.model) patch.model = input.model;
+  if (Object.keys(patch).length > 0) {
+    await db.update(mdmDevices).set(patch).where(eq(mdmDevices.id, input.deviceId));
+  }
   return row;
 }
 
