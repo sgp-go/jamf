@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.ServiceProcess;
 using Microsoft.Extensions.Hosting;
@@ -29,6 +30,11 @@ namespace CoGrowMDMAgent.OsServices;
 public sealed class DmwappushKeepaliveService : BackgroundService
 {
     private const string ServiceName = "dmwappushservice";
+    /// <summary>PPKG ProvisioningCommands 建的 fallback scheduled task 名，
+    /// Agent 起來後由 keepalive service 接管，刪掉此 task 避免雙寫。
+    /// 名字必須跟 <c>app/services/admin/enrollment-ppkg.ts</c>
+    /// <c>renderProvisioningCommandsSection</c> 裡 <c>schtasks /Create /TN ...</c> 保持一致。</summary>
+    private const string PpkgFallbackTaskName = "CoGrowDmwappKeepalive";
     private static readonly TimeSpan CheckInterval = TimeSpan.FromSeconds(30);
 
     private readonly ILogger<DmwappushKeepaliveService> _logger;
@@ -49,6 +55,12 @@ public sealed class DmwappushKeepaliveService : BackgroundService
         _logger.LogInformation(
             "DmwappushKeepalive started; check interval = {Interval}",
             CheckInterval);
+
+        // 首次啟動接管 PPKG 建的 fallback scheduled task（首次 enroll 場景 Agent 未裝時
+        // PPKG ProvisioningCommands 建立此 task 每 1min 拉起 dmwapp，Agent 裝完後由本
+        // BackgroundService 接管更即時的 30s check，刪掉 task 避免雙寫）。
+        // 失敗（task 不存在）靜默忽略——正常 EDA-CSP 派發升級路徑本來就沒這個 task。
+        TryDeletePpkgFallbackTask();
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -97,5 +109,34 @@ public sealed class DmwappushKeepaliveService : BackgroundService
         sc.Start();
         sc.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(15));
         _logger.LogInformation("{Service} started successfully", ServiceName);
+    }
+
+    private void TryDeletePpkgFallbackTask()
+    {
+        try
+        {
+            var psi = new ProcessStartInfo("schtasks.exe", $"/Delete /TN {PpkgFallbackTaskName} /F")
+            {
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            using var proc = Process.Start(psi);
+            if (proc is null) return;
+            if (!proc.WaitForExit(5000)) { proc.Kill(); return; }
+            if (proc.ExitCode == 0)
+            {
+                _logger.LogInformation(
+                    "Deleted PPKG fallback scheduled task '{Task}'; keepalive service now owns dmwapp check",
+                    PpkgFallbackTaskName);
+            }
+            // ExitCode != 0（task 不存在）預期常見——EDA-CSP 派發升級路徑沒此 task，
+            // 靜默忽略避免 log 噪音。
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "TryDeletePpkgFallbackTask ignored (probe failure)");
+        }
     }
 }

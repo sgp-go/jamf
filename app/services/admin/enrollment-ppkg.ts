@@ -280,16 +280,17 @@ export function renderCustomizationsXml(ctx: RenderContext): string {
     lines.push(renderOobeSection());
   }
 
-  // 可選 ProvisioningCommands —— 從帶 forceChangePasswordAtNextLogon=true 的
-  // localAccount 自動組 `net user <u> /logonpasswordchg:yes` 命令鏈。
-  if (input.localAccounts && input.localAccounts.length > 0) {
-    const forced = input.localAccounts.filter(
-      (a) => a.forceChangePasswordAtNextLogon,
-    );
-    if (forced.length > 0) {
-      lines.push(renderProvisioningCommandsSection(forced));
-    }
-  }
+  // ProvisioningCommands —— 永遠輸出：
+  // 1. dmwappushservice keepalive scheduled task（每 1 min 拉起，Agent 裝完後 keepalive
+  //    service 接管並刪掉此 task）——覆蓋首次 enroll 期間 Agent 未裝的窗口，避免
+  //    BITS 下載 agent MSI 時 dmwapp 被 SCM 停導致 callback 丟、job 卡 Status=20
+  //    （2026-07-02 真機 PF5XSMN1 root cause，見 brain [[dmwappushservice-keepalive-hack]]）。
+  // 2. 帶 forceChangePasswordAtNextLogon=true 的 localAccount → net user 強制改密。
+  //
+  // ICD schema 限制：DeviceContext 下 CommandLine 只能有一條，故合併成一行 cmd batch。
+  const forcedAccounts =
+    input.localAccounts?.filter((a) => a.forceChangePasswordAtNextLogon) ?? [];
+  lines.push(renderProvisioningCommandsSection(forcedAccounts));
 
   lines.push(`      </Common>`);
   lines.push(`    </Customizations>`);
@@ -492,15 +493,18 @@ const SAFE_NET_USER_NAME = /^[A-Za-z0-9._-]{1,20}$/;
  *
  *   <ProvisioningCommands>
  *     <DeviceContext>
- *       <CommandLine>cmd /c net user student /logonpasswordchg:yes</CommandLine>
+ *       <CommandLine>cmd /c &lt;batch&gt;</CommandLine>
  *     </DeviceContext>
  *   </ProvisioningCommands>
  *
  * DeviceContext 段下 ICD 只暴露 `CommandFiles` 與 `CommandLine` 兩個葉子節點
  * （不是列表，每個 PPKG 一條），CommandLine 以 SYSTEM 身分執行，OOBE 完成前跑。
  *
- * 多個 user 要強制改密 → 用 `&&` 串成一行（前一條失敗後續不跑；改 `&` 會無條件繼續，
- * 教育場景失敗應暴露不應吞，故用 `&&`）。
+ * 命令拼接規則：
+ * - dmwapp keepalive 段用 `&`（失敗不阻斷後續）：schtasks 已存在時 /F 會覆蓋，
+ *   sc start 若服務已在跑會回非零，都不算問題。
+ * - net user 之間用 `&&`（前一條失敗後續不跑；教育場景失敗應暴露）。
+ * - keepalive 段和 net user 段之間也用 `&`（互相獨立）。
  */
 function renderProvisioningCommandsSection(
   forcedAccounts: LocalAccountCustomization[],
@@ -515,10 +519,21 @@ function renderProvisioningCommandsSection(
     }
   }
 
+  // dmwapp keepalive：先 start 一次覆蓋當下 enrollment 窗口，再建 1min scheduled
+  // task 覆蓋 BITS 下載 agent MSI 期間（Agent 未裝所以 keepalive service 不存在）。
+  // Agent 裝完首次啟動時 DmwappushKeepaliveService 會刪掉此 task 接管。
+  const keepaliveCmds = [
+    `sc start dmwappushservice`,
+    `schtasks /Create /TN CoGrowDmwappKeepalive /TR "sc start dmwappushservice" /SC MINUTE /MO 1 /RU SYSTEM /F`,
+  ].join(" & ");
+
   const netUserCmds = forcedAccounts
     .map((a) => `net user ${a.username} /logonpasswordchg:yes`)
     .join(" && ");
-  const commandLine = `cmd /c ${netUserCmds}`;
+
+  const batchParts = [keepaliveCmds];
+  if (netUserCmds) batchParts.push(netUserCmds);
+  const commandLine = `cmd /c ${batchParts.join(" & ")}`;
 
   return [
     `        <ProvisioningCommands>`,
