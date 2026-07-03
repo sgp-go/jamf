@@ -98,6 +98,18 @@ Deno.test("buildLapsRotation: 產出正確 XML 片段", () => {
   assertMatch(cmds[0].data!, /id="NewPassword" value="Test!Pass123"/);
   assertMatch(cmds[0].data!, /id="AdminAccount" value="CogrowAdmin"/);
   assertMatch(cmds[0].data!, /id="RotationId" value="aaaabbbb-cccc-dddd-eeee-ffffffffffff"/);
+  // RequireChange 是 ADMX required element，未傳預設 "0"
+  assertMatch(cmds[0].data!, /id="RequireChange" value="0"/);
+});
+
+Deno.test("buildLapsRotation: requireChangeOnFirstLogon=true → RequireChange value=1", () => {
+  const cmds = buildLapsRotation({
+    newPassword: "Test!Pass123",
+    adminAccount: "student",
+    rotationId: "test-id",
+    requireChangeOnFirstLogon: true,
+  });
+  assertMatch(cmds[0].data!, /id="RequireChange" value="1"/);
 });
 
 Deno.test("buildLapsRotation: escapeAttr 處理特殊字元", () => {

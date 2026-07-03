@@ -179,7 +179,9 @@ export async function installAgentOnDevice(
   const lapsPassword = generateLapsPassword();
   const lapsPasswordEnc = encryptSecret(lapsPassword);
   const lapsRotationId = crypto.randomUUID();
-  const lapsAdminAccount = "Administrator";
+  // 從 tenant self_mdm_configs.admin_account_name 讀（預設 ITAdmin）；
+  // 空字串 fallback 走 config default 'ITAdmin'（migration 已寫入所有既有 row）。
+  const lapsAdminAccount = config.adminAccountName?.trim() || "ITAdmin";
   const lapsCmd = buildLapsRotation({
     newPassword: lapsPassword,
     adminAccount: lapsAdminAccount,
@@ -284,6 +286,7 @@ export async function installAgentOnDevice(
     deviceId: device.id,
     rotationId: lapsRotationId,
     adminAccount: lapsAdminAccount,
+    accountType: "admin",
     passwordEnc: lapsPasswordEnc,
     status: "pending",
     commandUuid: lapsCommandUuid,

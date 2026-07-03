@@ -1102,6 +1102,7 @@ const LAPS_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
         <text id="NewPassword" valueName="NewPassword" />
         <text id="AdminAccount" valueName="AdminAccount" />
         <text id="RotationId" valueName="RotationId" />
+        <text id="RequireChange" valueName="RequireChange" />
       </elements>
     </policy>
   </policies>
@@ -1126,22 +1127,34 @@ export interface LapsRotationInput {
   newPassword: string;
   adminAccount: string;
   rotationId: string;
+  /**
+   * true = 附帶 RequireChange=1，Agent 改密後額外跑 `net user <acct> /logonpasswordchg:yes`
+   * 強制帳號下次登入必須改密（教育場景學生自訂密碼）。
+   * 預設 false（LAPS admin 自動輪換不強制改密）。
+   */
+  requireChangeOnFirstLogon?: boolean;
 }
 
 /**
  * 下發 LAPS 改密指令：啟用 LapsRotation 策略，Agent 讀到 Pending=1 後執行。
  *
- * 值落 HKLM\Software\CoGrow\Agent\Laps\{Pending=1, NewPassword, AdminAccount, RotationId}。
+ * 值落 HKLM\Software\CoGrow\Agent\Laps\{Pending=1, NewPassword, AdminAccount, RotationId, RequireChange}。
  * Agent 改完密碼後清 NewPassword + 設 Pending=0，並透過 report 帶 rotationId 確認。
+ *
+ * ⚠️ ADMX required elements 語意（見 memory [[admx_required_elements]]）：
+ * data 段**必須**送 4 個 elements（NewPassword/AdminAccount/RotationId/RequireChange），
+ * 缺任一 → SyncML 500 + Event 856。RequireChange 用 "0"/"1" 對應 boolean。
  */
 export function buildLapsRotation(input: LapsRotationInput): SyncMLCommand[] {
   const pwd = escapeAttr(input.newPassword);
   const account = escapeAttr(input.adminAccount);
   const rotId = escapeAttr(input.rotationId);
+  const requireChange = input.requireChangeOnFirstLogon ? "1" : "0";
   const data = `<enabled/>` +
     `<data id="NewPassword" value="${pwd}"/>` +
     `<data id="AdminAccount" value="${account}"/>` +
-    `<data id="RotationId" value="${rotId}"/>`;
+    `<data id="RotationId" value="${rotId}"/>` +
+    `<data id="RequireChange" value="${requireChange}"/>`;
   return [{
     cmdId: "0",
     verb: "Replace",

@@ -40,6 +40,13 @@ export const selfMdmConfigs = pgTable(
      * 循環依賴。FK 約束本身在 DB 層仍生效。
      */
     agentAppId: uuid(),
+    /**
+     * LAPS 自動輪換的目標本機管理員帳號。預設 "ITAdmin" —— 對齊 PPKG
+     * 常見預配的日常 admin 帳號（Win11 內建 Administrator 預設禁用不可用）。
+     * 若 PPKG 建的 admin 帳號名不同，tenant 建配置時（或 PATCH mdm-config）改成該名。
+     * 空字串或 NULL 都當作 "ITAdmin"（服務層 fallback）。
+     */
+    adminAccountName: varchar({ length: 64 }).notNull().default("ITAdmin"),
     apnsTopic: text(),
     apnsCertPem: text(),
     apnsKeyPemEnc: text(),

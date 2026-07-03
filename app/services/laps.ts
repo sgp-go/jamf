@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { db } from "~/db/client.ts";
-import { mdmDevices, mdmWindowsLaps } from "~/db/schema/index.ts";
+import { mdmDevices, mdmWindowsLaps, selfMdmConfigs } from "~/db/schema/index.ts";
 import { encryptSecret, decryptSecret } from "~/lib/secrets.ts";
 import {
   buildLapsClear,
@@ -17,7 +17,13 @@ import {
 } from "~/services/mdm/windows/csp.ts";
 import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
 
-const DEFAULT_ADMIN_ACCOUNT = "Administrator";
+/**
+ * LAPS 未指定目標帳號時的兜底值。優先讀 tenant self_mdm_configs.admin_account_name
+ * （PPKG 通常建 ITAdmin，Win11 內建 Administrator 預設禁用）。此常數僅在 tenant
+ * 配置查不到時的最後 fallback。
+ */
+const FALLBACK_ADMIN_ACCOUNT = "ITAdmin";
+export type AccountType = "admin" | "student" | "other";
 const DEFAULT_PASSWORD_LENGTH = 20;
 const STALE_PENDING_HOURS = 24;
 
@@ -67,6 +73,7 @@ export function generateLapsPassword(length = DEFAULT_PASSWORD_LENGTH): string {
 export interface RotateLapsInput {
   tenantId: string;
   deviceId: string;
+  /** 目標帳號名；省略 → 從 tenant self_mdm_configs.admin_account_name 讀 */
   adminAccount?: string;
   triggeredBy?: "auto" | "manual";
 }
@@ -77,31 +84,115 @@ export interface RotateLapsResult {
 }
 
 /**
- * 為指定設備觸發一次密碼輪換：生成密碼 → 加密存 DB → 排 CSP 命令。
+ * 讀 tenant self_mdm_configs.admin_account_name（自動輪換用）。若未設或空 → fallback "ITAdmin"。
+ */
+async function resolveTenantAdminAccount(tenantId: string): Promise<string> {
+  const cfg = await db.query.selfMdmConfigs.findFirst({
+    where: eq(selfMdmConfigs.tenantId, tenantId),
+    columns: { adminAccountName: true },
+  });
+  const name = cfg?.adminAccountName?.trim();
+  return name && name.length > 0 ? name : FALLBACK_ADMIN_ACCOUNT;
+}
+
+/**
+ * 為指定設備觸發一次 admin 密碼輪換（LAPS 語意）：生成密碼 → 加密存 DB → 排 CSP 命令。
+ * 目標帳號從 tenant 配置讀；語意固定為 accountType='admin'、requireChange=false。
  */
 export async function rotateLapsPassword(
   input: RotateLapsInput,
 ): Promise<RotateLapsResult> {
-  const adminAccount = input.adminAccount ?? DEFAULT_ADMIN_ACCOUNT;
-  const plainPassword = generateLapsPassword();
+  const adminAccount = input.adminAccount ??
+    (await resolveTenantAdminAccount(input.tenantId));
+  return await runUserPasswordReset({
+    tenantId: input.tenantId,
+    deviceId: input.deviceId,
+    targetAccount: adminAccount,
+    accountType: "admin",
+    mode: "random",
+    triggeredBy: input.triggeredBy ?? "auto",
+    requireChangeOnFirstLogon: false,
+  });
+}
+
+// ── 通用密碼重設（admin 自動輪換 / student 手動重設共用）────────────────────
+
+export interface ResetUserPasswordInput {
+  tenantId: string;
+  deviceId: string;
+  /** 目標本機帳號名（如 "ITAdmin" / "student"） */
+  targetAccount: string;
+  /** 'admin' | 'student' | 'other'；決定表 row 的 account_type 分類 */
+  accountType: AccountType;
+  /** 'random' = 系統生成隨機；'explicit' = 使用 explicitPassword */
+  mode: "random" | "explicit";
+  /** mode='explicit' 時必填 */
+  explicitPassword?: string;
+  /** true = 附帶 net user /logonpasswordchg:yes；預設 false */
+  requireChangeOnFirstLogon?: boolean;
+  triggeredBy?: string;
+}
+
+/**
+ * 通用密碼重設入口：admin 自動輪換與 student 手動重設共用同一通道（同一 ADMX policy + 同一 registry
+ * mailbox + 同一 Agent LapsWatcher）。差別只在 accountType 分類 + 是否強制首登改密。
+ */
+export async function resetUserPassword(
+  input: ResetUserPasswordInput,
+): Promise<RotateLapsResult> {
+  return await runUserPasswordReset({
+    tenantId: input.tenantId,
+    deviceId: input.deviceId,
+    targetAccount: input.targetAccount,
+    accountType: input.accountType,
+    mode: input.mode,
+    explicitPassword: input.explicitPassword,
+    requireChangeOnFirstLogon: input.requireChangeOnFirstLogon ?? false,
+    triggeredBy: input.triggeredBy ?? "manual",
+  });
+}
+
+async function runUserPasswordReset(opts: {
+  tenantId: string;
+  deviceId: string;
+  targetAccount: string;
+  accountType: AccountType;
+  mode: "random" | "explicit";
+  explicitPassword?: string;
+  requireChangeOnFirstLogon: boolean;
+  triggeredBy: string;
+}): Promise<RotateLapsResult> {
+  if (opts.mode === "explicit") {
+    if (!opts.explicitPassword || opts.explicitPassword.length < 4) {
+      throw new Error(
+        "resetUserPassword: mode=explicit 時 explicitPassword 必填且至少 4 字元",
+      );
+    }
+  }
+  const plainPassword = opts.mode === "explicit"
+    ? opts.explicitPassword!
+    : generateLapsPassword();
   const passwordEnc = encryptSecret(plainPassword);
   const rotationId = crypto.randomUUID();
 
   const device = await db.query.mdmDevices.findFirst({
     where: and(
-      eq(mdmDevices.id, input.deviceId),
-      eq(mdmDevices.tenantId, input.tenantId),
+      eq(mdmDevices.id, opts.deviceId),
+      eq(mdmDevices.tenantId, opts.tenantId),
     ),
     columns: { udid: true },
   });
   if (!device?.udid) {
-    throw new Error(`rotateLapsPassword: device ${input.deviceId} 無 udid，無法排命令`);
+    throw new Error(
+      `resetUserPassword: device ${opts.deviceId} 無 udid，無法排命令`,
+    );
   }
 
   const cmds = buildLapsRotation({
     newPassword: plainPassword,
-    adminAccount,
+    adminAccount: opts.targetAccount,
     rotationId,
+    requireChangeOnFirstLogon: opts.requireChangeOnFirstLogon,
   });
 
   const commandUuid = await enqueueWindowsCommand({
@@ -111,18 +202,20 @@ export async function rotateLapsPassword(
   });
 
   await db.insert(mdmWindowsLaps).values({
-    tenantId: input.tenantId,
-    deviceId: input.deviceId,
+    tenantId: opts.tenantId,
+    deviceId: opts.deviceId,
     rotationId,
-    adminAccount,
+    adminAccount: opts.targetAccount,
+    accountType: opts.accountType,
+    requireChangeOnFirstLogon: opts.requireChangeOnFirstLogon,
     passwordEnc,
     status: "pending",
     commandUuid,
-    triggeredBy: input.triggeredBy ?? "auto",
+    triggeredBy: opts.triggeredBy,
   });
 
   console.log(
-    `[LAPS] 密碼輪換已排入: device=${input.deviceId} rotation=${rotationId} trigger=${input.triggeredBy ?? "auto"}`,
+    `[LAPS] 密碼重設已排入: device=${opts.deviceId} account=${opts.targetAccount} type=${opts.accountType} rotation=${rotationId}`,
   );
   return { rotationId, commandUuid };
 }
@@ -137,18 +230,19 @@ export async function confirmLapsRotation(opts: {
   deviceId: string;
   rotationId: string;
 }): Promise<boolean> {
-  const latest = await db.query.mdmWindowsLaps.findFirst({
+  // 按 rotationId 精確找（跨 admin/student 通用，避免同設備多 pending 混淆）
+  const row = await db.query.mdmWindowsLaps.findFirst({
     where: and(
       eq(mdmWindowsLaps.deviceId, opts.deviceId),
+      eq(mdmWindowsLaps.rotationId, opts.rotationId),
       eq(mdmWindowsLaps.status, "pending"),
     ),
-    orderBy: [desc(mdmWindowsLaps.createdAt)],
-    columns: { id: true, rotationId: true },
+    columns: { id: true },
   });
 
-  if (!latest || latest.rotationId !== opts.rotationId) {
+  if (!row) {
     console.warn(
-      `[LAPS] 確認失敗: device=${opts.deviceId} 提交的 rotationId=${opts.rotationId} 不匹配最新 pending`,
+      `[LAPS] 確認失敗: device=${opts.deviceId} rotationId=${opts.rotationId} 找不到對應 pending row`,
     );
     return false;
   }
@@ -156,9 +250,9 @@ export async function confirmLapsRotation(opts: {
   await db
     .update(mdmWindowsLaps)
     .set({ status: "confirmed", confirmedAt: new Date(), updatedAt: new Date() })
-    .where(eq(mdmWindowsLaps.id, latest.id));
+    .where(eq(mdmWindowsLaps.id, row.id));
 
-  console.log(`[LAPS] 密碼輪換已確認: device=${opts.deviceId} rotation=${opts.rotationId}`);
+  console.log(`[LAPS] 密碼重設已確認: device=${opts.deviceId} rotation=${opts.rotationId}`);
   return true;
 }
 
@@ -170,10 +264,14 @@ export interface LapsPasswordInfo {
   rotatedAt: string;
   rotationId: string;
   status: string;
+  accountType: string;
+  requireChangeOnFirstLogon: boolean;
 }
 
 /**
- * IT 查詢設備當前管理員密碼（取最新 confirmed 記錄，解密返回）。
+ * IT 查詢設備當前 admin 密碼：取最新 confirmed + accountType='admin' 記錄，解密返回。
+ * 保持向後兼容：若 tenant/device 有多個 admin 帳號記錄，回最新一筆（跨帳號）。
+ * 若需要指定帳號名查詢，用 getUserPassword。
  */
 export async function getLapsPassword(opts: {
   tenantId: string;
@@ -183,19 +281,52 @@ export async function getLapsPassword(opts: {
     where: and(
       eq(mdmWindowsLaps.tenantId, opts.tenantId),
       eq(mdmWindowsLaps.deviceId, opts.deviceId),
+      eq(mdmWindowsLaps.accountType, "admin"),
       eq(mdmWindowsLaps.status, "confirmed"),
     ),
     orderBy: [desc(mdmWindowsLaps.createdAt)],
   });
+  return row ? rowToInfo(row) : null;
+}
 
-  if (!row) return null;
+/**
+ * IT 查詢設備上「指定帳號」的最新 confirmed 密碼（跨 admin/student/other 通用）。
+ */
+export async function getUserPassword(opts: {
+  tenantId: string;
+  deviceId: string;
+  targetAccount: string;
+}): Promise<LapsPasswordInfo | null> {
+  const row = await db.query.mdmWindowsLaps.findFirst({
+    where: and(
+      eq(mdmWindowsLaps.tenantId, opts.tenantId),
+      eq(mdmWindowsLaps.deviceId, opts.deviceId),
+      eq(mdmWindowsLaps.adminAccount, opts.targetAccount),
+      eq(mdmWindowsLaps.status, "confirmed"),
+    ),
+    orderBy: [desc(mdmWindowsLaps.createdAt)],
+  });
+  return row ? rowToInfo(row) : null;
+}
 
+function rowToInfo(row: {
+  passwordEnc: string;
+  adminAccount: string;
+  confirmedAt: Date | null;
+  createdAt: Date;
+  rotationId: string;
+  status: string;
+  accountType: string;
+  requireChangeOnFirstLogon: boolean;
+}): LapsPasswordInfo {
   return {
     password: decryptSecret(row.passwordEnc),
     adminAccount: row.adminAccount,
     rotatedAt: (row.confirmedAt ?? row.createdAt).toISOString(),
     rotationId: row.rotationId,
     status: row.status,
+    accountType: row.accountType,
+    requireChangeOnFirstLogon: row.requireChangeOnFirstLogon,
   };
 }
 
@@ -209,8 +340,12 @@ export async function getLapsPassword(opts: {
  *   - 最新 pending 未超時 → false（等 Agent 回覆）
  */
 export async function shouldTriggerLaps(deviceId: string): Promise<boolean> {
+  // 只判斷 admin 帳號的輪換狀態；student 手動重設不影響自動 LAPS 決策
   const latest = await db.query.mdmWindowsLaps.findFirst({
-    where: eq(mdmWindowsLaps.deviceId, deviceId),
+    where: and(
+      eq(mdmWindowsLaps.deviceId, deviceId),
+      eq(mdmWindowsLaps.accountType, "admin"),
+    ),
     orderBy: [desc(mdmWindowsLaps.createdAt)],
     columns: { status: true, createdAt: true },
   });
