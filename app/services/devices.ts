@@ -557,6 +557,43 @@ export async function transferDeviceToGroup(opts: {
 }
 
 /**
+ * 遠端重新部署（PRD §5.1）：Wipe 但保留 PPKG，設備自動重走完整佈建流程 →
+ * 重新 enroll 到**同一** tenant + device_group（跟 transferDeviceToGroup 差異
+ * 在於後者會改 group_id）。
+ *
+ * 適用場景：
+ *   - 設備疑似被本地 admin 惡搞（policy 被拆、Agent 被卸），透過 wipe 強制刷回
+ *   - 學期末 / 學年末統一還原到出廠 PPKG 佈建狀態
+ *   - 政策亂了，一鍵回歸乾淨基線
+ *
+ * 實作：完全複用 sendCommandToDevice + `doWipePersistProvisionedData`，跟 transfer
+ * 走同一條命令鏈路，只是**不動** device_group_id。
+ *
+ * 與 transferDeviceToGroup / retireDevice / hardDeleteDevice 分工：
+ *   - redeploy：同 group、保留 PPKG、自動回管（本函式）
+ *   - transfer：換 group、保留 PPKG、自動歸新組
+ *   - retire：doWipe 徹底、不保留 PPKG、不自動回管
+ *   - hardDelete：救火工具，DELETE row + cascade
+ *
+ * 失敗策略：Wipe 派發失敗直接冒泡；設備狀態不動（未 wipe），caller 可重試。
+ */
+export async function redeployDevice(opts: {
+  tenantId: string;
+  deviceId: string;
+}): Promise<{ deviceId: string; wipe: unknown }> {
+  const wipe = await sendCommandToDevice({
+    tenantId: opts.tenantId,
+    deviceId: opts.deviceId,
+    command: "WIPE",
+    wipeAction: "doWipePersistProvisionedData",
+  });
+  return {
+    deviceId: opts.deviceId,
+    wipe,
+  };
+}
+
+/**
  * 設備退役（徹底擦除 + 移除 MDM）：
  *   1. 派預設 doWipe（連 PPKG + enrollment 一併抹除，設備重置後不會自動回管）
  *      - Windows：RemoteWipe/doWipe 工廠重置

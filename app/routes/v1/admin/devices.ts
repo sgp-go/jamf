@@ -5,6 +5,7 @@ import { validationFailedHook } from "~/lib/openapi-hook.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import {
   hardDeleteDevice,
+  redeployDevice,
   retireDevice,
   transferDeviceToGroup,
   updateDeviceInventory,
@@ -61,6 +62,16 @@ const retireResultSchema = z
     }),
   })
   .openapi("DeviceRetireResult");
+
+const redeployResultSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    wipe: z.unknown().openapi({
+      description:
+        "派發結果。Apple：Jamf API 原始 response；Windows：{commandUuid}",
+    }),
+  })
+  .openapi("DeviceRedeployResult");
 
 const security = [{ BearerAuth: [] }];
 
@@ -128,6 +139,45 @@ const retireSpec = createRoute({
   },
 });
 
+const redeploySpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/redeploy",
+  tags: ["設備操作"],
+  security,
+  summary: "遠端重新部署：Wipe 保留 PPKG，設備自動回同一分組（PRD §5.1）",
+  description: [
+    "重置設備並自動走完整佈建流程回到**同一** tenant / device_group。適用場景：",
+    "",
+    "- 設備疑似被本地 admin 惡搞（policy 被拆、Agent 被卸），一鍵刷回乾淨基線",
+    "- 學期末統一還原到出廠 PPKG 佈建狀態",
+    "- 政策層混亂，回歸出廠 + 自動重跑 enrollment hook",
+    "",
+    "**流程**：",
+    "1. 派 Wipe / `doWipePersistProvisionedData`（Windows）或 ERASE_DEVICE（Apple）",
+    "2. **不動** `deviceGroupId`（跟 transfer 唯一差異）",
+    "3. 設備重置後 PPKG 保留 → 自動重跑 OOBE → enrollment 落回原 (tenant, device_group)",
+    "",
+    "**與其他端點差異**：",
+    "- vs `/transfer`：redeploy **不改分組**；transfer 換到新 group",
+    "- vs `/retire`：redeploy 保留 PPKG 自動回管；retire 徹底 doWipe 不回管",
+    "- vs `DELETE`（hardDelete）：redeploy 是業務流程；hardDelete 是救火工具",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**⚠️ 遠端擦除設備**，Windows 設備上使用者資料 / 已裝軟體都會被清除；PPKG 定義的初始帳號 / WiFi / Agent 會自動佈建回來。",
+  ].join("\n"),
+  request: { params: tenantDeviceParam },
+  responses: {
+    200: {
+      description: "重新部署已觸發，回傳設備 ID 及 Wipe 派發結果",
+      content: {
+        "application/json": { schema: successSchema(redeployResultSchema) },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 export const devicesAdminApp = new OpenAPIHono({ defaultHook: validationFailedHook });
 devicesAdminApp.use("/admin/*", adminAuth());
 
@@ -157,6 +207,19 @@ devicesAdminApp.openapi(retireSpec, async (c) => {
     ...extractAuditMeta(c),
     tenantId,
     action: "device.retire",
+    resourceType: "device",
+    resourceId: deviceId,
+  });
+  return c.json({ ok: true as const, data: result }, 200);
+});
+
+devicesAdminApp.openapi(redeploySpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const result = await redeployDevice({ tenantId, deviceId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.redeploy",
     resourceType: "device",
     resourceId: deviceId,
   });
