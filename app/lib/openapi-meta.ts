@@ -32,6 +32,7 @@ export const ALL_TAGS: OpenApiTag[] = [
   { name: "批次註冊", description: "Windows PPKG 批次註冊（customizations.xml 生成，含 WiFi / 本機帳號配置）" },
   { name: "Agent 派發", description: "Agent App 一鍵派發（EDA-CSP 遠端安裝 + 灰度升級 + 健康驗證）" },
   { name: "密碼託管（LAPS）", description: "本機管理員密碼託管 —— 查詢當前密碼 / 手動觸發輪換" },
+  { name: "Admin: Firewall", description: "Windows Firewall Rules 管理（tenant + device_group 兩層並集）+ 派發到設備（PRD §5.4）" },
 
   // ── 策略與合規 ──
   { name: "配置描述檔", description: "配置描述檔 CRUD + 指派到設備或分組 + 套用狀態追蹤" },
@@ -54,7 +55,7 @@ export const ALL_TAGS: OpenApiTag[] = [
 export const ALL_TAG_GROUPS: OpenApiTagGroup[] = [
   { name: "公開 API", tags: ["設備查詢與操作", "Agent 上報", "應用下載"] },
   { name: "租戶初始化", tags: ["租戶管理", "設備分組", "Jamf 整合"] },
-  { name: "設備管理", tags: ["設備操作", "設備策略", "批次註冊", "Agent 派發", "密碼託管（LAPS）"] },
+  { name: "設備管理", tags: ["設備操作", "設備策略", "批次註冊", "Agent 派發", "密碼託管（LAPS）", "Admin: Firewall"] },
   { name: "策略與合規", tags: ["配置描述檔", "策略預設", "合規評估"] },
   { name: "應用管理", tags: ["應用派發", "應用套件管理"] },
   { name: "平台營運", tags: ["審計日誌", "Webhook 端點", "Webhook 監控"] },

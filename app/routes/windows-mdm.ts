@@ -56,6 +56,7 @@ import {
 import { buildSetAllowRestore, buildSetManualUnenroll } from "~/services/mdm/windows/csp-experience.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { setupDevicePush } from "~/services/mdm/windows/push-setup.ts";
+import { applyFirewallToDevice } from "~/services/firewall.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
 import { getWnsClient, WnsAuthError } from "~/services/wns/client.ts";
 import {
@@ -281,6 +282,24 @@ async function handleEnrollmentRequest(c: Context, slug: string, groupCode?: str
     }
   } catch (e) {
     console.warn(`[Win MDM] 自動 install-agent 失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Firewall enforce-enabled + 當前 tenant∪group rules（PRD §5.4 保持防火牆開 + 派 rules）
+  try {
+    const enrolledDevice = await getMdmDevice(udid);
+    if (enrolledDevice) {
+      const fwResult = await applyFirewallToDevice({
+        deviceId: enrolledDevice.id,
+        enforceEnabled: true,
+      });
+      console.log(
+        `[Win MDM] 已自動排入 firewall udid=${udid} rules=${fwResult.effectiveRuleCount} cmds=${fwResult.commandUuids.length}${fwResult.skipped ? " (skipped)" : ""}`,
+      );
+    }
+  } catch (e) {
+    console.warn(
+      `[Win MDM] 自動 firewall 派發失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   setSoapHeaders(c, SOAP_ENROLLMENT_RESP, result.soapResponse);
