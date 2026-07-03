@@ -11,10 +11,7 @@ import { and, desc, eq, lt, or } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import { mdmDevices, mdmWindowsLaps, selfMdmConfigs } from "~/db/schema/index.ts";
 import { encryptSecret, decryptSecret } from "~/lib/secrets.ts";
-import {
-  buildLapsClear,
-  buildLapsRotation,
-} from "~/services/mdm/windows/csp.ts";
+import { buildLapsRotation } from "~/services/mdm/windows/csp.ts";
 import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
 
 /**
@@ -362,32 +359,27 @@ export async function shouldTriggerLaps(deviceId: string): Promise<boolean> {
   return true;
 }
 
-// ── 確認 + 清 registry（report / checkin 共用）────────────────────────────────
+// ── 確認 ─────────────────────────────────────────────────────────────────────
 
 /**
- * 確認某次輪換成功，成功則排 buildLapsClear 清 registry 殘留。
- * 回傳 confirmLapsRotation 的結果。
+ * 確認某次輪換成功。
+ *
+ * ⚠️ 2026-07-03 移除 LapsClear 派發：原本 confirm 後派 `<disabled/>` 想清 registry
+ * 殘留，但當多條 rotation 短時間內排隊（v1.4.0.23+ 主動 checkin 讓 confirm 變秒級）
+ * 時，Clear 命令會撞到後續新 rotate 的 policy —— dmclient 處理順序不保證 batch 內
+ * 命令的相對順序，Clear 可能把新 rotation 的 element 全清掉，導致 LapsWatcher
+ * 只見 Pending=0 從來沒觸發。
+ *
+ * Agent 側 LapsWatcher.TickWindows 已經 `key.DeleteValue("NewPassword")` + 設
+ * Pending=0，密碼明文已清；registry 剩下的 AdminAccount / RotationId / RequireChange
+ * 不是 secret，留著無害且成為「上次已處理」的自然標記（Agent 見 Pending=0 就跳過）。
+ * unenroll 時仍會派 LapsClear（`windows-mdm.ts` route），確保設備歸還前狀態乾淨。
  */
 async function confirmAndClearLaps(opts: {
   deviceId: string;
   rotationId: string;
 }): Promise<boolean> {
-  const confirmed = await confirmLapsRotation(opts);
-  if (!confirmed) return false;
-
-  const device = await db.query.mdmDevices.findFirst({
-    where: eq(mdmDevices.id, opts.deviceId),
-    columns: { udid: true },
-  });
-  if (device?.udid) {
-    const cmds = buildLapsClear();
-    await enqueueWindowsCommand({
-      deviceUdid: device.udid,
-      commandType: "LapsClearPolicy",
-      command: cmds[0],
-    });
-  }
-  return true;
+  return await confirmLapsRotation(opts);
 }
 
 // ── Report Hook ─────────────────────────────────────────────────────────────
@@ -396,7 +388,7 @@ async function confirmAndClearLaps(opts: {
  * Agent report 後的非阻塞 LAPS 處理。
  *
  * 兩條路：
- *   1. 有 laps 確認 → confirmLapsRotation + 排 buildLapsClear 清 registry
+ *   1. 有 laps 確認 → confirmLapsRotation（Agent 已清 registry NewPassword，不再派 LapsClear）
  *   2. 無確認 → shouldTriggerLaps → rotateLapsPassword
  */
 export async function handleLapsOnReport(opts: {

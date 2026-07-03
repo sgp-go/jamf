@@ -75,6 +75,7 @@ builder.Services.AddHostedService<GpsCollector>();
 // 遠端鎖定：監控 Registry 鎖定旗標，在使用者 session 拉起全螢幕鎖定窗（[[windows-lock-design]]）。
 // 與上報 Worker 並行的獨立 hosted service；非 Windows 平台 no-op。
 builder.Services.AddHostedService<LockWatcher>();
+builder.Services.AddHttpClient<LapsWatcher>();
 builder.Services.AddHostedService<LapsWatcher>();
 builder.Services.AddHostedService<BitLockerWatcher>();
 builder.Services.AddHostedService<PpkgRemovalWatcher>();

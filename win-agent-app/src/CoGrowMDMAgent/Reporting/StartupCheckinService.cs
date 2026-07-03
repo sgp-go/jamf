@@ -87,6 +87,13 @@ public sealed class StartupCheckinService : BackgroundService
             _logger.LogInformation(
                 "Startup checkin accepted: deviceId={DeviceId} actions={Count} (observational; execution via Registry watchers)",
                 parsed?.Data?.DeviceId, actions?.Count ?? 0);
+
+            // 若本次 checkin 帶了 lapsRotationId（tail 補確認），成功後清 registry
+            // 防止下次 startup 重複上報同一 rotation
+            if (!string.IsNullOrEmpty(lapsRotationId))
+            {
+                ClearConfirmedRotationIdRegistry();
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
@@ -101,6 +108,9 @@ public sealed class StartupCheckinService : BackgroundService
     /// <summary>
     /// 若 LapsWatcher 上次啟動已完成改密但 Agent 被殺/重啟前未 report，
     /// 從 Registry 確認檔讀取已完成的 rotationId，帶入 checkin 作確認。
+    ///
+    /// 寫入端在 `LapsWatcher.WriteConfirmedRotationIdRegistry`（改密成功後）；
+    /// 這裡是「Agent restart 兜底」路徑（主路徑是 LapsWatcher.NotifyBackendCheckinAsync 立即 checkin）。
     /// </summary>
     private static string? ReadPendingLapsRotationId()
     {
@@ -118,6 +128,24 @@ public sealed class StartupCheckinService : BackgroundService
         catch
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Startup checkin 帶 lapsRotationId 上報成功後清 registry；防止下次啟動再次上報同一 rotation。
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private void ClearConfirmedRotationIdRegistry()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine
+                .OpenSubKey(@"SOFTWARE\CoGrow\Agent\Laps", writable: true);
+            key?.DeleteValue("ConfirmedRotationId", throwOnMissingValue: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Startup checkin: 清 ConfirmedRotationId 失敗（無害）");
         }
     }
 

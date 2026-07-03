@@ -1,6 +1,10 @@
 using System.Diagnostics;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using CoGrowMDMAgent.Config;
+using CoGrowMDMAgent.Reporting;
 using Microsoft.Win32;
 
 namespace CoGrowMDMAgent.Laps;
@@ -27,10 +31,26 @@ public sealed class LapsWatcher : BackgroundService
 {
     private const string LapsKeyPath = @"SOFTWARE\CoGrow\Agent\Laps";
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization
+            .JsonIgnoreCondition.WhenWritingNull,
+    };
 
     private readonly ILogger<LapsWatcher> _logger;
+    private readonly HttpClient _http;
+    private readonly AgentConfigProvider _configProvider;
 
-    public LapsWatcher(ILogger<LapsWatcher> logger) => _logger = logger;
+    public LapsWatcher(
+        ILogger<LapsWatcher> logger,
+        HttpClient http,
+        AgentConfigProvider configProvider)
+    {
+        _logger = logger;
+        _http = http;
+        _configProvider = configProvider;
+        _http.Timeout = TimeSpan.FromSeconds(15);
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -115,12 +135,119 @@ public sealed class LapsWatcher : BackgroundService
         {
             _logger.LogInformation("LAPS 密碼已變更: account={Account}", account);
             StoreConfirmation(rotationId);
+            // 寫 registry ConfirmedRotationId 兜底：Agent crash / 主動 checkin 失敗時，
+            // 下次 StartupCheckinService 讀該 registry 帶 rotationId 補確認。
+            WriteConfirmedRotationIdRegistry(rotationId);
+            // 主動立即 POST /agent/checkin 讓 backend 秒級 confirm（不必等 daily report slot）。
+            // 失敗不影響本地改密結果（file + registry 已寫，兜底路徑仍會補確認）。
+            _ = Task.Run(() => NotifyBackendCheckinAsync(rotationId));
         }
         else
         {
             _logger.LogError("LAPS 密碼變更失敗: account={Account}", account);
             StoreFailure(rotationId);
         }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void WriteConfirmedRotationIdRegistry(string rotationId)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(LapsKeyPath, writable: true)
+                ?? Registry.LocalMachine.CreateSubKey(LapsKeyPath);
+            key.SetValue("ConfirmedRotationId", rotationId, RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LAPS: 寫 ConfirmedRotationId 到 registry 失敗（不影響改密）");
+        }
+    }
+
+    /// <summary>
+    /// 主動 POST /agent/checkin 讓 backend 秒級 confirm rotation（不等 daily report slot）。
+    /// 失敗只警告；registry `ConfirmedRotationId` 是兜底 —— 下次 Agent startup 或
+    /// daily report cycle 上報 laps-confirmation.json 都會補確認。
+    /// </summary>
+    private async Task NotifyBackendCheckinAsync(string rotationId)
+    {
+        try
+        {
+            var config = _configProvider.Current;
+            if (string.IsNullOrEmpty(config.AgentToken))
+            {
+                _logger.LogDebug("LAPS: agent token 未配置，跳過主動 checkin");
+                return;
+            }
+            var serial = TryReadSerialNumber();
+            if (string.IsNullOrEmpty(serial))
+            {
+                _logger.LogDebug(
+                    "LAPS: 讀 SerialNumber 失敗，跳過主動 checkin（下次 daily report 兜底）");
+                return;
+            }
+
+            var payload = new AgentCheckinPayload
+            {
+                SerialNumber = serial,
+                LapsRotationId = rotationId,
+            };
+
+            _http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", config.AgentToken);
+
+            using var resp = await _http.PostAsJsonAsync(
+                config.CheckinUrl, payload, JsonOptions);
+            if (resp.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "LAPS: 主動 checkin 已確認 rotation={RotationId}", rotationId);
+                // 成功後清 ConfirmedRotationId，避免下次 startup 重複確認同一 rotation
+                ClearConfirmedRotationIdRegistry();
+            }
+            else
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                _logger.LogWarning(
+                    "LAPS: 主動 checkin 失敗（兜底路徑會補）status={Status} body={Body}",
+                    resp.StatusCode, body);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "LAPS: 主動 checkin 異常（兜底路徑會補）");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void ClearConfirmedRotationIdRegistry()
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(LapsKeyPath, writable: true);
+            key?.DeleteValue("ConfirmedRotationId", throwOnMissingValue: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "LAPS: 清 ConfirmedRotationId 失敗（無害）");
+        }
+    }
+
+    private static string? TryReadSerialNumber()
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT SerialNumber FROM Win32_BIOS");
+            foreach (var obj in searcher.Get())
+            {
+                var sn = obj["SerialNumber"] as string;
+                if (!string.IsNullOrEmpty(sn)) return sn;
+            }
+        }
+        catch { /* WMI 失敗返回 null，backend 從 token hash 解析 device */ }
+        return null;
     }
 
     [SupportedOSPlatform("windows")]
