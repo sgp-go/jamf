@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "~/db/client.ts";
 import { agentReports, deviceUsageStats } from "~/db/schema/agent.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
@@ -31,6 +31,52 @@ export type { UsageAnomaly, UsageStatItemInput };
  * Windows Agent 第一次上報前一定先走 install-agent，row 已存在 + token 已設，
  * 不會走 insert 分支。
  */
+/**
+ * Wipe → PPKG 自動重 enroll 場景下，把同 tenant 舊 row 佔用的 (serial) / (udid) unique
+ * 欄位清 null（disown），釋放給當前 token 命中的新 row 做 backfill。不刪 row，保留
+ * agent_reports/mdm_commands/audit_log 等 FK 歷史；只解除 unique 佔位。
+ *
+ * 安全條件：只 disown 「agent_token_issued_at IS NULL 或早於當前 row」的舊 row —
+ * token-first 命中的一定是最新 install-agent 簽發的物理設備身份，其他 row 一定過期。
+ */
+async function disownStaleUniqueRows(opts: {
+  tenantId: string;
+  keepId: string;
+  keepIssuedAt: Date | null;
+  serialNumber?: string;
+  udid?: string;
+}): Promise<void> {
+  // keepIssuedAt 為 null 時（token-first 命中但當前 row 沒 issuedAt，理論不該發生）
+  // 只清 issuedAt IS NULL 的舊 row，防止誤傷已簽發 token 的活 row。
+  const olderThanKeep = opts.keepIssuedAt
+    ? or(
+      isNull(mdmDevices.agentTokenIssuedAt),
+      lte(mdmDevices.agentTokenIssuedAt, opts.keepIssuedAt),
+    )
+    : isNull(mdmDevices.agentTokenIssuedAt);
+
+  if (opts.serialNumber) {
+    await db.update(mdmDevices)
+      .set({ serialNumber: null, updatedAt: new Date() })
+      .where(and(
+        eq(mdmDevices.tenantId, opts.tenantId),
+        eq(mdmDevices.serialNumber, opts.serialNumber),
+        ne(mdmDevices.id, opts.keepId),
+        olderThanKeep,
+      ));
+  }
+  if (opts.udid) {
+    await db.update(mdmDevices)
+      .set({ udid: null, updatedAt: new Date() })
+      .where(and(
+        eq(mdmDevices.tenantId, opts.tenantId),
+        eq(mdmDevices.udid, opts.udid),
+        ne(mdmDevices.id, opts.keepId),
+        olderThanKeep,
+      ));
+  }
+}
+
 export async function resolveAgentDevice(opts: {
   tenantId: string;
   serialNumber: string;
@@ -44,7 +90,13 @@ export async function resolveAgentDevice(opts: {
     const byToken = await db.query.mdmDevices.findFirst({
       where: (t, { and: andOp, eq: eqOp }) =>
         andOp(eqOp(t.tenantId, opts.tenantId), eqOp(t.agentTokenHash, tokenHash)),
-      columns: { id: true, agentTokenHash: true, serialNumber: true, udid: true },
+      columns: {
+        id: true,
+        agentTokenHash: true,
+        agentTokenIssuedAt: true,
+        serialNumber: true,
+        udid: true,
+      },
     });
     if (byToken) {
       // backfill：row 缺 serial / udid 時順手補上，下次 serial-only lookup 也走得通。
@@ -52,6 +104,19 @@ export async function resolveAgentDevice(opts: {
       if (!byToken.serialNumber) patch.serialNumber = opts.serialNumber;
       if (!byToken.udid && opts.udid) patch.udid = opts.udid;
       if (Object.keys(patch).length > 0) {
+        // wipe 後 PPKG 自動重 enroll 建的新 row 拿到新 token，但舊 row 仍佔著同 tenant 的
+        // (serial) / (udid) unique index → 直接 UPDATE 撞 unique violation → 500。
+        // 修法：backfill 前把 stale 舊 row 的 serial/udid 清 null（disown 不 delete，
+        // 保留 agent_reports/mdm_commands 等 FK 歷史）。stale 判據：token-first 命中的
+        // 是最新 install-agent 簽發的物理設備身份，其他 row 只要 agent_token_issued_at
+        // 早於當前 row（或 NULL）就一定是過期的，安全 disown。
+        await disownStaleUniqueRows({
+          tenantId: opts.tenantId,
+          keepId: byToken.id,
+          keepIssuedAt: byToken.agentTokenIssuedAt,
+          serialNumber: patch.serialNumber,
+          udid: patch.udid,
+        });
         await db.update(mdmDevices).set({ ...patch, updatedAt: new Date() })
           .where(eq(mdmDevices.id, byToken.id));
       }
