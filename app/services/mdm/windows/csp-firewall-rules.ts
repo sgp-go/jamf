@@ -3,10 +3,12 @@
  *
  * LocURI 樹：./Vendor/MSFT/Firewall/MdmStore/FirewallRules/{RuleId}/{Prop}
  *
- * Verb 語義（微軟 CSP 限制）：
- *   - Add：每個 rule 一組 Add 平鋪（每個 Prop 一條 SyncMLCommand）—— 首次或 diff 新增
+ * Verb 語義（真機驗證 2026-07-03 PF5XSMN1 修正）：
+ *   - **各 Prop 一律用 Replace**：Windows Firewall CSP 對 dynamic rule 節點會
+ *     自動 initialize 預設值（Direction=In / Action=Block / Enabled=true / Profiles=all），
+ *     用 Add 到有預設值的節點會撞 SyncML status=418 "Already Exists"。
+ *     Replace 才是設定屬性值的正確 verb；Windows 會依需要 auto-create rule root。
  *   - Delete：對 `.../FirewallRules/{RuleId}` 整個節點發，刪整條 rule
- *   - Replace（部分屬性）：**不支援**；修改 rule 必須 Delete + Add
  *
  * 大小寫敏感：
  *   - Direction："In" / "Out"
@@ -77,37 +79,40 @@ export function buildFirewallRuleAdd(rule: FirewallRuleInput): SyncMLCommand[] {
   assertRuleId(rule.ruleId);
   const base = `${FIREWALL_RULES_BASE}/${rule.ruleId}`;
   const cmds: SyncMLCommand[] = [];
-  const addChr = (path: string, val: string) =>
-    cmds.push({ cmdId: "0", verb: "Add", target: path, format: "chr", data: val });
-  const addInt = (path: string, val: string) =>
-    cmds.push({ cmdId: "0", verb: "Add", target: path, format: "int", data: val });
-  const addBool = (path: string, val: boolean) =>
+  // 一律用 Replace：Windows Firewall CSP 對 dynamic rule 節點自動 initialize
+  // 預設值，用 Add 到 Direction/Action/Enabled/Profiles 等會撞 418 "Already Exists"。
+  // Replace 是設定屬性值的正確 verb；Windows 依需要 auto-create rule root。
+  const setChr = (path: string, val: string) =>
+    cmds.push({ cmdId: "0", verb: "Replace", target: path, format: "chr", data: val });
+  const setInt = (path: string, val: string) =>
+    cmds.push({ cmdId: "0", verb: "Replace", target: path, format: "int", data: val });
+  const setBool = (path: string, val: boolean) =>
     cmds.push({
       cmdId: "0",
-      verb: "Add",
+      verb: "Replace",
       target: path,
       format: "bool",
       data: val ? "true" : "false",
     });
 
   // Name（必填）
-  addChr(`${base}/Name`, rule.name);
+  setChr(`${base}/Name`, rule.name);
   // Direction
-  addChr(`${base}/Direction`, rule.direction === "in" ? "In" : "Out");
+  setChr(`${base}/Direction`, rule.direction === "in" ? "In" : "Out");
   // Action.Type：0=Block，1=Allow（微軟 spec 用 int）
-  addInt(`${base}/Action/Type`, rule.action === "allow" ? "1" : "0");
+  setInt(`${base}/Action/Type`, rule.action === "allow" ? "1" : "0");
   // Protocol（tcp=6, udp=17, any=省略）
   const proto = protocolToNumber(rule.protocol ?? "any");
-  if (proto !== null) addInt(`${base}/Protocol`, proto);
+  if (proto !== null) setInt(`${base}/Protocol`, proto);
   // Ports
-  if (rule.localPortRanges) addChr(`${base}/LocalPortRanges`, rule.localPortRanges);
-  if (rule.remotePortRanges) addChr(`${base}/RemotePortRanges`, rule.remotePortRanges);
+  if (rule.localPortRanges) setChr(`${base}/LocalPortRanges`, rule.localPortRanges);
+  if (rule.remotePortRanges) setChr(`${base}/RemotePortRanges`, rule.remotePortRanges);
   // Addresses
   if (rule.localAddressRanges) {
-    addChr(`${base}/LocalAddressRanges`, rule.localAddressRanges);
+    setChr(`${base}/LocalAddressRanges`, rule.localAddressRanges);
   }
   if (rule.remoteAddressRanges) {
-    addChr(`${base}/RemoteAddressRanges`, rule.remoteAddressRanges);
+    setChr(`${base}/RemoteAddressRanges`, rule.remoteAddressRanges);
   }
   // App target（Win32 exe 或 UWP PFN 互斥）
   if (rule.appFilePath && rule.appPackageFamilyName) {
@@ -115,14 +120,14 @@ export function buildFirewallRuleAdd(rule: FirewallRuleInput): SyncMLCommand[] {
       `buildFirewallRule: appFilePath 與 appPackageFamilyName 互斥（rule=${rule.name}）`,
     );
   }
-  if (rule.appFilePath) addChr(`${base}/App/FilePath`, rule.appFilePath);
+  if (rule.appFilePath) setChr(`${base}/App/FilePath`, rule.appFilePath);
   if (rule.appPackageFamilyName) {
-    addChr(`${base}/App/PackageFamilyName`, rule.appPackageFamilyName);
+    setChr(`${base}/App/PackageFamilyName`, rule.appPackageFamilyName);
   }
   // Profiles bitmask（預設 7 = Domain+Private+Public）
-  addInt(`${base}/Profiles`, String(rule.profiles ?? 7));
+  setInt(`${base}/Profiles`, String(rule.profiles ?? 7));
   // Enabled（預設 true）
-  addBool(`${base}/Enabled`, rule.enabled ?? true);
+  setBool(`${base}/Enabled`, rule.enabled ?? true);
   return cmds;
 }
 

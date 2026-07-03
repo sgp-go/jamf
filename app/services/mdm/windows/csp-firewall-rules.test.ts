@@ -27,7 +27,7 @@ Deno.test("buildFirewallRuleAdd: 最小輸入生成必要 Prop 命令組", () =>
   const base = `./Vendor/MSFT/Firewall/MdmStore/FirewallRules/${RULE_ID}`;
 
   // 每 cmd 都是 Add
-  for (const c of cmds) assertEquals(c.verb, "Add");
+  for (const c of cmds) assertEquals(c.verb, "Replace");
   // 必含 Name / Direction / Action.Type / Profiles / Enabled
   const targets = cmds.map((c) => c.target);
   assertEquals(targets.includes(`${base}/Name`), true);
@@ -177,7 +177,7 @@ Deno.test("buildFirewallRulesDiff: 全新（old 空 + new 兩條）→ 全 Add�
   const r2 = baseRule({ ruleId: "bbbbbbbb-0000-4000-8000-000000000002", name: "R2" });
   const cmds = buildFirewallRulesDiff([], [r1, r2]);
   const deletes = cmds.filter((c) => c.verb === "Delete");
-  const adds = cmds.filter((c) => c.verb === "Add");
+  const adds = cmds.filter((c) => c.verb === "Replace");
   assertEquals(deletes.length, 0);
   // 每條 rule 至少 5 個 Add（Name/Direction/Action.Type/Profiles/Enabled）
   assertEquals(adds.length >= 10, true);
@@ -189,7 +189,7 @@ Deno.test("buildFirewallRulesDiff: 全刪（old 兩條 + new 空）→ 兩條 De
     [],
   );
   const deletes = cmds.filter((c) => c.verb === "Delete");
-  const adds = cmds.filter((c) => c.verb === "Add");
+  const adds = cmds.filter((c) => c.verb === "Replace");
   assertEquals(deletes.length, 2);
   assertEquals(adds.length, 0);
 });
@@ -202,7 +202,7 @@ Deno.test("buildFirewallRulesDiff: 增刪同時 → Delete 排在 Add 之前（�
   });
   const cmds = buildFirewallRulesDiff([oldId], [newRule]);
   const firstDeleteIdx = cmds.findIndex((c) => c.verb === "Delete");
-  const firstAddIdx = cmds.findIndex((c) => c.verb === "Add");
+  const firstAddIdx = cmds.findIndex((c) => c.verb === "Replace");
   assertEquals(firstDeleteIdx >= 0, true);
   assertEquals(firstAddIdx >= 0, true);
   assertEquals(firstDeleteIdx < firstAddIdx, true);
@@ -214,7 +214,7 @@ Deno.test("buildFirewallRulesDiff: updated rule（同 id 既在 old 也在 new�
   // 呼叫端把 updated 的 id 同時放 oldRuleIds 和 newRules
   const cmds = buildFirewallRulesDiff([sameId], [updated]);
   const deletes = cmds.filter((c) => c.verb === "Delete");
-  const adds = cmds.filter((c) => c.verb === "Add");
+  const adds = cmds.filter((c) => c.verb === "Replace");
   assertEquals(deletes.length, 1);
   assertEquals(deletes[0].target.endsWith(sameId), true);
   // Add 至少 5 條（Name/Direction/Action.Type/Profiles/Enabled）

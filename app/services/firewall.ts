@@ -172,7 +172,7 @@ export async function applyFirewallToDevice(opts: {
   const allCommands = [
     ...enforceCmds.map((c) => ({ commandType: "FirewallEnforceEnabled", command: c })),
     ...diffCmds.map((c) => ({
-      commandType: c.verb === "Delete" ? "FirewallRuleDelete" : "FirewallRuleAdd",
+      commandType: c.verb === "Delete" ? "FirewallRuleDelete" : "FirewallRuleReplace",
       command: c,
     })),
   ];
