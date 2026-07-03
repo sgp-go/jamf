@@ -8,8 +8,8 @@ import {
   buildMsiInstall,
   buildMsiStatusQuery,
   buildMsiUninstall,
-  type SyncMLCommand,
 } from "~/services/mdm/windows/csp.ts";
+import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { publishCommandEvent } from "~/services/mdm/command-events.ts";
 import { triggerWnsPush } from "~/services/mdm/windows/command.ts";
 

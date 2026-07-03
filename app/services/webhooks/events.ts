@@ -42,6 +42,10 @@ export const WEBHOOK_EVENT_TYPES = [
   "agent.usage_anomaly",
   // Agent 上報 GPS 位置（PRD §5.2 Lost Mode + §5.7 Inventory）
   "agent.gps_reported",
+
+  // ─ Geofence 地理圍欄（PRD §6 Future）─
+  "device.geofence_enter",
+  "device.geofence_exit",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

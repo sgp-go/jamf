@@ -4,6 +4,7 @@ import { auditAdminApp } from "~/routes/v1/admin/audit.ts";
 import { complianceAdminApp } from "~/routes/v1/admin/compliance.ts";
 import { deviceGroupsAdminApp } from "~/routes/v1/admin/device-groups.ts";
 import { devicePoliciesAdminApp } from "~/routes/v1/admin/device-policies.ts";
+import { geofencesAdminApp } from "~/routes/v1/admin/geofences.ts";
 import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
 import { enrollmentPpkgAdminApp } from "~/routes/v1/admin/enrollment-ppkg.ts";
 import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
@@ -56,6 +57,7 @@ export const controlApiMounts: Mount[] = [
   { basePath: "/api/v1", app: lapsAdminApp },
   { basePath: "/api/v1", app: bitlockerAdminApp },
   { basePath: "/api/v1", app: devicePoliciesAdminApp },
+  { basePath: "/api/v1", app: geofencesAdminApp },
 ];
 
 /**

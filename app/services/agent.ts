@@ -10,6 +10,7 @@ import {
   type UsageAnomaly,
   type UsageStatItemInput,
 } from "~/services/usage-merge.ts";
+import { checkGeofencesForDevice } from "~/services/geofence.ts";
 
 export type { UsageAnomaly, UsageStatItemInput };
 
@@ -298,6 +299,17 @@ export async function updateDeviceGps(input: AgentGpsInput): Promise<{
   if (!row) {
     throw new AppError(404, "device_not_found", "Device not found");
   }
+  // Geofence hook：fire-and-forget，不阻塞主鏈路。任何錯誤已在 service 內
+  // catch + log，這裡不需要 .catch 冗餘 handler。
+  void checkGeofencesForDevice({
+    tenantId: input.tenantId,
+    deviceId: row.id,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    now: capturedAt,
+  }).catch((err) => {
+    console.error(`[gps] geofence check failed device=${row.id}`, err);
+  });
   return {
     deviceId: row.id,
     latitude: row.lat!,
