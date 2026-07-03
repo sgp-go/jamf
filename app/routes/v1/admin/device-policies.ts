@@ -37,6 +37,8 @@ import {
   queryUpdateStatusOnDevice,
   pushEdgeBrowserSigninToDevice,
   clearEdgeBrowserSigninFromDevice,
+  pushDeviceInstallPolicyToDevice,
+  clearDeviceInstallPolicyFromDevice,
 } from "~/services/device-policies.ts";
 import { db } from "~/db/client.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
@@ -1183,6 +1185,93 @@ const clearBrowserSigninSpec = createRoute({
   },
 });
 
+// ── DeviceInstallation 設備類黑名單（PRD §5.4 進階 USB 管控）──
+
+const guidPattern = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/;
+
+const deviceInstallBody = z
+  .object({
+    blockedClasses: z.array(z.string().regex(guidPattern)).optional().openapi({
+      description:
+        "**【選填】** Setup Class GUID 黑名單。含 `{}` 或不含皆可（自動包上）。常用：\n" +
+        "- `{36fc9e60-c465-11cf-8056-444553540000}` USB 存儲類\n" +
+        "- `{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}` Bluetooth\n" +
+        "- `{6bdd1fc6-810f-11d0-bec7-08002be2092f}` Image Class（相機 / 掃描器）",
+      example: ["{36fc9e60-c465-11cf-8056-444553540000}"],
+    }),
+    blockedHardwareIds: z.array(z.string().min(1)).optional().openapi({
+      description:
+        "**【選填】** Hardware ID 黑名單（PnP hardware id）。例：`USB\\Composite`、`USB\\Class_FF`",
+      example: ["USB\\Composite"],
+    }),
+    blockRemovableDevices: z.boolean().optional().openapi({
+      description:
+        "**【選填】** 一刀切禁**所有** removable device（U 盤 / 外接硬碟 / SD 卡等）",
+    }),
+    applyRetroactive: z.boolean().optional().openapi({
+      description:
+        "**【選填】** 是否對已安裝的匹配設備也套用（強制卸載）；預設 false 只擋新插入",
+    }),
+  })
+  .refine(
+    (d) =>
+      (d.blockedClasses?.length ?? 0) > 0 ||
+      (d.blockedHardwareIds?.length ?? 0) > 0 ||
+      d.blockRemovableDevices === true,
+    { message: "必須至少提供 blockedClasses / blockedHardwareIds / blockRemovableDevices 其中之一" },
+  )
+  .openapi("PushDeviceInstallPolicyInput");
+
+const pushDeviceInstallSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-device-install-policy",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送 DeviceInstallation 黑名單（PRD §5.4 進階 USB 管控）",
+  description: [
+    "比 `/push-usb-policy`（Storage CSP）更徹底：按 Setup Class GUID / Hardware ID / removable-flag 全類別禁用。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**與 push-usb-policy 差異**：",
+    "- Storage CSP 只擋 USB **儲存**類的讀寫（Files Explorer 看不到但驅動仍載入）",
+    "- 此端點擋設備**安裝**（驅動層拒載），可覆蓋 USB 相機 / 藍牙 / 讀卡機等非儲存類",
+    "",
+    "**注意事項**：",
+    "- `applyRetroactive=true` 會強制卸載已裝驅動，可能中斷正在用的外設",
+    "- Windows Pro 22H2+ 完整支援；Home 不支援 GPO/CSP",
+    "- 政策生效需**重新插拔設備**或重啟",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: deviceInstallBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入（每種類型一條，1-3 條）",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const clearDeviceInstallSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/clear-device-install-policy",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "清除 DeviceInstallation 黑名單（PRD §5.4）",
+  description: "**鑑權**：Bearer admin token。同時清除 Classes / IDs / RemovableDevices 三種 policy。",
+  request: { params: deviceIdParam },
+  responses: {
+    202: {
+      description: "命令已排入（3 條 <disabled/>）",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 // ── App instance ──
 
 export const devicePoliciesAdminApp = new OpenAPIHono({
@@ -1582,6 +1671,43 @@ devicePoliciesAdminApp.openapi(pushBrowserSigninSpec, async (c) => {
     resourceType: "device",
     resourceId: deviceId,
     payload: { mode },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// DeviceInstallation push
+devicePoliciesAdminApp.openapi(pushDeviceInstallSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushDeviceInstallPolicyToDevice(device, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_device_install_policy",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      classesCount: body.blockedClasses?.length ?? 0,
+      hardwareIdsCount: body.blockedHardwareIds?.length ?? 0,
+      removable: body.blockRemovableDevices ?? false,
+      retroactive: body.applyRetroactive ?? false,
+    },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// DeviceInstallation clear
+devicePoliciesAdminApp.openapi(clearDeviceInstallSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await clearDeviceInstallPolicyFromDevice(device);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.clear_device_install_policy",
+    resourceType: "device",
+    resourceId: deviceId,
   });
   return c.json({ ok: true as const, data: { commandIds } }, 202);
 });

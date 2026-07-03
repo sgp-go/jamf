@@ -58,6 +58,11 @@ import {
   type DefenderHealthNode,
 } from "~/services/mdm/windows/csp-defender.ts";
 import {
+  buildDeviceInstallPolicy,
+  buildDeviceInstallPolicyClear,
+  type DeviceInstallPolicyInput,
+} from "~/services/mdm/windows/csp-device-install.ts";
+import {
   buildBlockedSites,
   buildIESiteZoneAssignment,
   buildIESiteZoneClear,
@@ -575,6 +580,39 @@ export async function clearEdgeBrowserSigninFromDevice(
     device,
     "EdgeBrowserSigninClear",
     [buildEdgeAdmxInstall(), buildEdgeBrowserSigninClear()],
+    "clear 命令構建失敗",
+  );
+}
+
+// ============================================================
+// DeviceInstallation 設備類黑名單（PRD §5.4 進階 USB 管控）
+// ============================================================
+//
+// 比 Storage CSP 更徹底：按 Setup Class GUID / Hardware ID / removable-flag
+// 全類別禁用。適用場景：學校要一刀切禁 U 盤（含讀卡機 / 外接硬碟）、禁藍牙、
+// 禁 USB 相機等超越 Storage CSP 範圍的需求。
+//
+// 空輸入拋 400。retroactive 決定是否影響已裝設備（預設 false 只擋新插入）。
+
+export async function pushDeviceInstallPolicyToDevice(
+  device: WindowsDevice,
+  input: DeviceInstallPolicyInput,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "DeviceInstallPolicy",
+    buildDeviceInstallPolicy(input),
+    "至少需提供 blockedClasses / blockedHardwareIds / blockRemovableDevices 其中之一",
+  );
+}
+
+export async function clearDeviceInstallPolicyFromDevice(
+  device: WindowsDevice,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "DeviceInstallPolicyClear",
+    buildDeviceInstallPolicyClear(),
     "clear 命令構建失敗",
   );
 }
