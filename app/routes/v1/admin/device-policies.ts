@@ -39,7 +39,10 @@ import {
   clearEdgeBrowserSigninFromDevice,
   pushDeviceInstallPolicyToDevice,
   clearDeviceInstallPolicyFromDevice,
+  pushSoftWipeToDevice,
+  cancelSoftWipeOnDevice,
 } from "~/services/device-policies.ts";
+import { publishEvent } from "~/services/webhooks/index.ts";
 import { db } from "~/db/client.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
 import { and, eq } from "drizzle-orm";
@@ -1272,6 +1275,105 @@ const clearDeviceInstallSpec = createRoute({
   },
 });
 
+// ── Soft Wipe（畢業換人零 IT 介入清理）──
+
+const softWipeBody = z
+  .object({
+    extraPreserveAppIds: z.array(z.string().uuid()).optional().openapi({
+      description:
+        "**【選填】** 額外保留的 app id 列表（除了 tenant 下所有 Windows apps 已在白名單外，明確指定其他要保留的）。通常不用填",
+    }),
+  })
+  .openapi("PushSoftWipeInput");
+
+const softWipeResultSchema = z
+  .object({
+    commandIds: z.array(z.string().uuid()),
+    wipeId: z.string().uuid().openapi({
+      description:
+        "本次 wipe 的唯一 ID，Agent 完成上報 / webhook 事件都會回帶此 ID 對帳",
+    }),
+    whitelistSize: z.number().int().openapi({
+      description: "白名單總條目數（MSI + UWP + winget 三桶合計）",
+    }),
+  })
+  .openapi("PushSoftWipeResult");
+
+const pushSoftWipeSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/soft-wipe",
+  tags: ["設備操作"],
+  security: [{ BearerAuth: [] }],
+  summary: "軟 Wipe：Agent 清乾淨學生痕跡（畢業換人零 IT 介入）",
+  description: [
+    "業務場景：**學生畢業換給新學生**。Agent SYSTEM 權限清乾淨學生痕跡，",
+    "**保留** Windows 系統 + Agent + MDM 派發的 App + MDM enrollment。",
+    "",
+    "**清理範圍**：",
+    "- 所有非 admin user profile（`C:\\Users\\<student>` 全刪 + `net user /delete`）",
+    "- 用戶自裝 MSI 應用（不在 tenant apps 白名單裡的）",
+    "- 用戶自裝 UWP/Store 應用（不在系統內建 + tenant apps 白名單裡的）",
+    "- 瀏覽器數據（Edge / Chrome cache / cookies / history / downloads）",
+    "- Recycle Bin + Temp 目錄",
+    "",
+    "**保留**（白名單）：",
+    "- Windows 系統 + 內建 UWP（Calculator / Photos / Store / Edge...）",
+    "- CoGrow Agent 服務 + MSI",
+    "- MDM 派發的 App（tenant apps 表 kind ∈ {msi, msix, winget}）",
+    "- MDM enrollment",
+    "",
+    "**跟 `/retire` / `/redeploy` 差異**：",
+    "- retire：真 wipe，設備不再回管",
+    "- redeploy：真 wipe，需 IT 現場重跑 PPKG",
+    "- **soft-wipe**：Agent 側清理，秒級完成，設備繼續在 MDM 管控下**（推薦畢業換人場景）**",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**事件**：",
+    "- 命令派入即發 webhook `device.soft_wipe_started`",
+    "- Agent 上報完成 → webhook `device.soft_wiped` 或 `device.soft_wipe_failed`",
+    "",
+    "**注意事項**：",
+    "- 白名單自動計算：包含 tenant 下所有 Windows apps（kind=msi/msix/winget）+ 系統內建 UWP",
+    "- Agent 執行**不可逆**，一旦觸發用戶數據無法恢復",
+    "- 執行時間依用戶數據量而定，通常 30 秒 - 5 分鐘",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: softWipeBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入（ADMX install + Trigger 2 條）；等 Agent 上報完成事件",
+      content: { "application/json": { schema: successSchema(softWipeResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const cancelSoftWipeSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/cancel-soft-wipe",
+  tags: ["設備操作"],
+  security: [{ BearerAuth: [] }],
+  summary: "取消未執行的 Soft Wipe（緊急止血）",
+  description: [
+    "在 Agent 執行前推 Trigger=0 阻斷。已刪除的數據不會回來，僅避免 Agent 再次執行。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：Agent 監聽 Registry 是 near-realtime，通常派 soft-wipe 後幾秒內就會開始執行。取消要**立即**發，時間窗口很短。",
+  ].join("\n"),
+  request: { params: deviceIdParam },
+  responses: {
+    202: {
+      description: "取消命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 // ── App instance ──
 
 export const devicePoliciesAdminApp = new OpenAPIHono({
@@ -1693,6 +1795,56 @@ devicePoliciesAdminApp.openapi(pushDeviceInstallSpec, async (c) => {
       removable: body.blockRemovableDevices ?? false,
       retroactive: body.applyRetroactive ?? false,
     },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Soft Wipe push
+devicePoliciesAdminApp.openapi(pushSoftWipeSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+
+  const { commandIds, wipeId, whitelistSize } = await pushSoftWipeToDevice(device, body);
+
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.soft_wipe",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      wipeId,
+      whitelistSize,
+      extraPreserveCount: body.extraPreserveAppIds?.length ?? 0,
+    },
+  });
+
+  // fire-and-forget：命令派入就發「started」事件，Agent 端完成後另外發 completed
+  void publishEvent({
+    tenantId,
+    eventType: "device.soft_wipe_started",
+    data: {
+      device_id: deviceId,
+      wipe_id: wipeId,
+      whitelist_size: whitelistSize,
+    },
+  }).catch((err) => console.error("[soft_wipe_started] publishEvent failed", err));
+
+  return c.json({ ok: true as const, data: { commandIds, wipeId, whitelistSize } }, 202);
+});
+
+// Soft Wipe cancel
+devicePoliciesAdminApp.openapi(cancelSoftWipeSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await cancelSoftWipeOnDevice(device);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.cancel_soft_wipe",
+    resourceType: "device",
+    resourceId: deviceId,
   });
   return c.json({ ok: true as const, data: { commandIds } }, 202);
 });

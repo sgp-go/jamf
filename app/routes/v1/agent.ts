@@ -181,6 +181,84 @@ const usageQuery = z.object({
   }),
 });
 
+const softWipeResultBody = z
+  .object({
+    wipeId: z.string().uuid().openapi({
+      description: "後端派 soft-wipe 時分配的唯一 ID（Registry `HKLM\\Software\\CoGrow\\Agent\\SoftWipe\\WipeId` 讀取）",
+    }),
+    serialNumber: z.string().min(1).openapi({
+      description: "設備序號",
+      example: "PF5XSMN1",
+    }),
+    status: z.enum(["success", "partial", "failed"]).openapi({
+      description:
+        "success=全清成功；partial=部分項失敗但繼續完成；failed=整體失敗（例如信箱格式錯 / 權限不足）",
+    }),
+    summary: z
+      .object({
+        msiUninstalled: z.number().int().nonnegative().openapi({
+          description: "卸載成功的非白名單 MSI 數量",
+        }),
+        msiFailed: z.number().int().nonnegative(),
+        uwpUninstalled: z.number().int().nonnegative(),
+        uwpFailed: z.number().int().nonnegative(),
+        userProfilesDeleted: z.number().int().nonnegative().openapi({
+          description: "刪除的非 admin user profile 數量",
+        }),
+        userProfilesFailed: z.number().int().nonnegative(),
+        browserDataCleared: z.boolean().openapi({
+          description: "Edge / Chrome 數據是否清完（有一個瀏覽器沒裝就是 vacuously true）",
+        }),
+        recycleBinCleared: z.boolean(),
+        tempCleared: z.boolean(),
+      })
+      .openapi("SoftWipeSummary"),
+    durationMs: z.number().int().nonnegative().openapi({
+      description: "Agent 端執行總耗時（毫秒）",
+    }),
+    errorTail: z.string().optional().openapi({
+      description: "**【選填】** 錯誤訊息尾段（僅 partial/failed 時，最多 2KB）",
+    }),
+  })
+  .openapi("SoftWipeResultInput");
+
+const softWipeResultResponseSchema = z
+  .object({
+    wipeId: z.string().uuid(),
+    accepted: z.boolean(),
+  })
+  .openapi("SoftWipeResultResponse");
+
+const softWipeResultRoute = createRoute({
+  method: "post",
+  path: "/tenants/{tenantId}/agent/soft-wipe-result",
+  tags: ["Agent 上報"],
+  summary: "Agent 回報 Soft Wipe 執行結果",
+  description: [
+    "Agent SoftWipeWatcher 完成清理後上報結果。後端根據 status 觸發：",
+    "- success → webhook `device.soft_wiped`",
+    "- partial → webhook `device.soft_wiped` + summary 帶失敗計數（admin 可查看細節）",
+    "- failed → webhook `device.soft_wipe_failed`",
+    "",
+    "**鑑權**：同 `/agent/reports`，token 已簽發則必填 Bearer。",
+    "",
+    "**約束**：wipeId 必須匹配設備收到的 wipe 命令（後端與 Registry 對帳）。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: { content: { "application/json": { schema: softWipeResultBody } } },
+  },
+  responses: {
+    200: {
+      description: "結果已記錄；回傳 accepted",
+      content: {
+        "application/json": { schema: successSchema(softWipeResultResponseSchema) },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 const wingetResultBody = z
   .object({
     commandId: z.string().uuid().openapi({
@@ -711,6 +789,45 @@ agentApp.openapi(checkinRoute, async (c) => {
 
   return c.json(
     { ok: true as const, data: { deviceId: device.id, actions } },
+    200,
+  );
+});
+
+agentApp.openapi(softWipeResultRoute, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
+
+  const device = await resolveAgentDevice({
+    tenantId,
+    serialNumber: body.serialNumber,
+    udid: null,
+    token,
+  });
+  await authorizeAgentReport({ device, token });
+  await touchDeviceLastSeen(device.id);
+
+  // Soft wipe result 目前不持久化到独立表（只走 webhook + audit）；
+  // 后端可用 event_log 表反查完整历史。若未来需要 admin UI 展示，另加持久化表。
+  const eventType = body.status === "failed"
+    ? "device.soft_wipe_failed"
+    : "device.soft_wiped";
+
+  void publishEvent({
+    tenantId,
+    eventType,
+    data: {
+      device_id: device.id,
+      wipe_id: body.wipeId,
+      status: body.status,
+      summary: body.summary,
+      duration_ms: body.durationMs,
+      error_tail: body.errorTail ?? null,
+    },
+  }).catch((err) => console.error(`[${eventType}] publishEvent failed`, err));
+
+  return c.json(
+    { ok: true as const, data: { wipeId: body.wipeId, accepted: true } },
     200,
   );
 });

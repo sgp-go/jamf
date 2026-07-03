@@ -46,6 +46,11 @@ export const WEBHOOK_EVENT_TYPES = [
   // ─ Geofence 地理圍欄（PRD §6 Future）─
   "device.geofence_enter",
   "device.geofence_exit",
+
+  // ─ Soft Wipe（畢業換人零 IT 介入清理）─
+  "device.soft_wipe_started",
+  "device.soft_wiped",
+  "device.soft_wipe_failed",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

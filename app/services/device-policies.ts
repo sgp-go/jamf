@@ -63,6 +63,14 @@ import {
   type DeviceInstallPolicyInput,
 } from "~/services/mdm/windows/csp-device-install.ts";
 import {
+  buildSoftWipeAdmxInstall,
+  buildSoftWipeReset,
+  buildSoftWipeTrigger,
+  type SoftWipeWhitelist,
+} from "~/services/mdm/windows/csp-soft-wipe.ts";
+import { apps } from "~/db/schema/apps.ts";
+import { and, eq, isNull, or } from "drizzle-orm";
+import {
   buildBlockedSites,
   buildIESiteZoneAssignment,
   buildIESiteZoneClear,
@@ -614,6 +622,158 @@ export async function clearDeviceInstallPolicyFromDevice(
     "DeviceInstallPolicyClear",
     buildDeviceInstallPolicyClear(),
     "clear 命令構建失敗",
+  );
+}
+
+// ============================================================
+// Soft Wipe（PRD §5.1 附加：學生畢業換人零 IT 介入清理）
+// ============================================================
+//
+// 目標：Agent SYSTEM 權限清乾淨學生痕跡（user profile / 用戶自裝 App /
+// 瀏覽器數據 / Recycle Bin / Temp），保留 Windows 系統 + Agent + MDM 派發
+// 的 App + MDM enrollment。跟 Windows RemoteWipe/doWipe 對比：
+//   - doWipe：Windows 系統層完全重置，需 IT 現場重跑 PPKG
+//   - SoftWipe：不動 Windows 系統，Agent 保留，MDM enrollment 保留，秒級完成
+//
+// 白名單來源：
+//   1. tenant 下所有 Windows platform + kind in {msi, msix, winget} 的 App
+//      （tenantId=null 的「全平台共用 App」如 Agent 自身也包含）
+//   2. 額外 extraPreserveAppIds（admin 明確指定保留的 app id）
+//   3. 硬編碼系統 essentials（Windows 內建 UWP）— 詳見 SYSTEM_UWP_WHITELIST
+
+/** Windows 系統內建 UWP，絕不刪 */
+const SYSTEM_UWP_WHITELIST_PATTERNS = [
+  "Microsoft.WindowsCalculator",
+  "Microsoft.WindowsCamera",
+  "Microsoft.WindowsAlarms",
+  "Microsoft.WindowsNotepad",
+  "Microsoft.Windows.Photos",
+  "Microsoft.WindowsStore",
+  "Microsoft.MicrosoftEdge", // Edge Chromium（設備正常上網 / URLBlocklist 政策必需）
+  "Microsoft.MicrosoftEdge.Stable",
+  "Microsoft.MicrosoftEdgeDevToolsClient",
+  "Microsoft.SecHealthUI", // Windows Security UI
+  "MicrosoftWindows.Client", // Windows shell 系列
+  "Microsoft.UI.Xaml",
+  "Microsoft.VCLibs",
+  "Microsoft.NET.Native", // .NET Native runtime
+  "Windows.PrintDialog", // 打印對話框
+];
+
+export interface SoftWipeInput {
+  /** 額外要保留的 App id 列表（在 whitelist 計算後合併進去） */
+  extraPreserveAppIds?: string[];
+}
+
+/**
+ * 從 apps 表計算 SoftWipe 白名單。
+ *
+ * 邏輯：
+ *   - Windows platform apps where tenantId=<tenant> OR tenantId=null（全平台共用如 Agent）
+ *   - kind ∈ {msi, msix, winget}
+ *   - bundleId / wingetId 非空
+ *   - 按 kind 分桶輸出
+ *
+ * 系統內建 UWP 走 SYSTEM_UWP_WHITELIST_PATTERNS 硬編碼，Agent 端會做前綴匹配
+ * （因為 UWP PFN 帶 publisher hash，例如 `Microsoft.WindowsCalculator_8wekyb3d8bbwe`，
+ * 匹配用 startsWith）。
+ */
+export async function computeSoftWipeWhitelist(
+  tenantId: string,
+  extraPreserveAppIds?: string[],
+): Promise<SoftWipeWhitelist> {
+  const rows = await db
+    .select({
+      id: apps.id,
+      kind: apps.kind,
+      bundleId: apps.bundleId,
+      wingetId: apps.wingetId,
+    })
+    .from(apps)
+    .where(
+      and(
+        eq(apps.platform, "windows"),
+        or(eq(apps.tenantId, tenantId), isNull(apps.tenantId)),
+      ),
+    );
+
+  const msi: string[] = [];
+  const uwp: string[] = [...SYSTEM_UWP_WHITELIST_PATTERNS];
+  const winget: string[] = [];
+
+  const extraSet = new Set(extraPreserveAppIds ?? []);
+  for (const r of rows) {
+    // extraPreserveAppIds 覆蓋 kind 過濾（admin 顯式指定 = 必保留）
+    // 但仍需 bundleId / wingetId 有值才能寫入白名單
+    if (r.kind === "msi" && r.bundleId) {
+      msi.push(r.bundleId);
+    } else if (r.kind === "msix" && r.bundleId) {
+      uwp.push(r.bundleId);
+    } else if (r.kind === "winget" && r.wingetId) {
+      winget.push(r.wingetId);
+    }
+    // extra 邏輯：若指定的 app 不在上面被 include，補一次
+    if (extraSet.has(r.id)) {
+      if (r.bundleId && !msi.includes(r.bundleId) && !uwp.includes(r.bundleId)) {
+        // bundle id 語意分不清 msi/msix，兩桶都放（Agent 端會分別匹配對應類別）
+        if (r.kind === "msix") uwp.push(r.bundleId);
+        else msi.push(r.bundleId);
+      }
+      if (r.wingetId && !winget.includes(r.wingetId)) winget.push(r.wingetId);
+    }
+  }
+
+  return {
+    msiProductCodes: dedupe(msi),
+    uwpPfns: dedupe(uwp),
+    wingetIds: dedupe(winget),
+  };
+}
+
+function dedupe(arr: string[]): string[] {
+  return Array.from(new Set(arr));
+}
+
+/**
+ * 觸發設備 Soft Wipe：
+ *   1. batch 派 ADMX install + Trigger（含 whitelist JSON + wipeId）
+ *   2. Agent 端 SoftWipeWatcher 監聽 Registry 觸發清理
+ *   3. 完成後 Agent 上報 → 後端發 webhook `device.soft_wiped`
+ */
+export async function pushSoftWipeToDevice(
+  device: WindowsDevice,
+  input: SoftWipeInput = {},
+): Promise<{ commandIds: string[]; wipeId: string; whitelistSize: number }> {
+  const whitelist = await computeSoftWipeWhitelist(
+    device.tenantId,
+    input.extraPreserveAppIds,
+  );
+  const wipeId = crypto.randomUUID();
+  const commandIds = await enqueueBatch(
+    device,
+    "SoftWipe",
+    [buildSoftWipeAdmxInstall(), buildSoftWipeTrigger({ whitelist, wipeId })],
+    "SoftWipe build 失敗",
+  );
+  const whitelistSize =
+    whitelist.msiProductCodes.length +
+    whitelist.uwpPfns.length +
+    whitelist.wingetIds.length;
+  return { commandIds, wipeId, whitelistSize };
+}
+
+/**
+ * 撤銷 Soft Wipe 觸發（在 Agent 執行前緊急止血用）。
+ * 已刪的數據不會回來，僅避免 Agent 再次執行同一個 wipe。
+ */
+export async function cancelSoftWipeOnDevice(
+  device: WindowsDevice,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "SoftWipeReset",
+    [buildSoftWipeAdmxInstall(), buildSoftWipeReset()],
+    "SoftWipe reset build 失敗",
   );
 }
 
