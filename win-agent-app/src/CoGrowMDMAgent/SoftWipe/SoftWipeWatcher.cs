@@ -100,7 +100,10 @@ public sealed class SoftWipeWatcher : BackgroundService
             payload.Whitelist.UwpPfns.Count,
             payload.Whitelist.WingetIds.Count);
 
-        // 立即清 Trigger 防重放（並發 Agent restart 場景避免二次執行）
+        // 立即記錄已處理 wipeId 並清 Trigger 防重放（並發 Agent restart 場景避免二次執行）
+        // MarkWipeIdProcessed 必須先於 ClearTrigger：極端場景 Trigger 被 dmclient sync 立刻
+        // restore 回 1，下一 tick ReadTrigger 讀到 LastProcessedWipeId 命中就 skip。
+        MarkWipeIdProcessed(payload.WipeId);
         ClearTrigger();
 
         var summary = new SoftWipeSummary();
@@ -163,6 +166,19 @@ public sealed class SoftWipeWatcher : BackgroundService
             return null;
         }
 
+        // 去重：ADMX policy 定義 Trigger=1，dmclient 每次 sync 都可能 restore 該 value；
+        // 若 wipeId 已處理過，直接 ClearTrigger + skip，避免二次執行整套清理。
+        // 真機驗證發現：同一 wipeId 5-10s 內連續觸發兩次（第二次 msi=0 空跑但發 webhook）。
+        var lastProcessed = key.GetValue("LastProcessedWipeId") as string;
+        if (!string.IsNullOrEmpty(lastProcessed) &&
+            string.Equals(lastProcessed, wipeId, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation(
+                "SoftWipe wipeId={WipeId} 已處理過，跳過重複觸發（ClearTrigger）", wipeId);
+            ClearTrigger();
+            return null;
+        }
+
         try
         {
             var whitelist = JsonSerializer.Deserialize<SoftWipeWhitelist>(
@@ -196,6 +212,21 @@ public sealed class SoftWipeWatcher : BackgroundService
         catch (Exception ex)
         {
             _logger.LogError(ex, "SoftWipe: 清 Trigger 失敗");
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void MarkWipeIdProcessed(string wipeId)
+    {
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(SoftWipeKeyPath, writable: true)
+                ?? Registry.LocalMachine.CreateSubKey(SoftWipeKeyPath);
+            key.SetValue("LastProcessedWipeId", wipeId, RegistryValueKind.String);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "SoftWipe: 寫 LastProcessedWipeId 失敗");
         }
     }
 
