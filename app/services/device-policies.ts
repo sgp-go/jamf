@@ -50,6 +50,29 @@ import {
   buildSettingsPageVisibility,
   type SettingsPageVisibilityInput,
 } from "~/services/mdm/windows/csp-experience.ts";
+import {
+  buildDefenderEnforce,
+  buildDefenderEnforceAll,
+  buildDefenderHealthQuery,
+  type DefenderEnforceInput,
+  type DefenderHealthNode,
+} from "~/services/mdm/windows/csp-defender.ts";
+import {
+  buildBlockedSites,
+  buildIESiteZoneAssignment,
+  buildIESiteZoneClear,
+  buildEdgeAdmxInstall,
+  buildEdgeUrlBlocklist,
+  buildEdgeUrlBlocklistClear,
+  type BrowserSiteZoneInput,
+} from "~/services/mdm/windows/csp-browser.ts";
+import {
+  buildUpdatePolicy,
+  buildUpdateInstallableQuery,
+  buildUpdateInstalledQuery,
+  buildUpdatePendingRebootQuery,
+  type UpdatePolicyInput,
+} from "~/services/mdm/windows/csp-update.ts";
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 
 // ============================================================
@@ -392,4 +415,208 @@ export async function pushSettingsRestrictionToDevice(
     command: buildSettingsPageVisibility(input),
   });
   return [id];
+}
+
+// ============================================================
+// Defender（PRD §4.1.2 惡意軟體限制）
+// ============================================================
+//
+// 兩個能力：
+//   1. push — Policy CSP 強制啟用 Realtime / Behavior / Cloud / IOAV /
+//              Network / PUA。all=true 走 buildDefenderEnforceAll 全開套餐，
+//              custom 走 buildDefenderEnforce 依欄位覆蓋。
+//   2. query — Get Defender/Health/<node>，供 admin 主動拉當前防護狀態。
+//              裝置回覆走既有 Get result → mdm_commands.response_payload
+//              路徑；admin 前端讀該欄位即可。
+
+export interface PushDefenderInput {
+  /** true = 套用全開預設；與 custom 同時提供時 custom 覆蓋對應欄位 */
+  all?: boolean;
+  /** 細項覆蓋；與 all 都不提供時拋 empty_input */
+  custom?: DefenderEnforceInput;
+}
+
+export async function pushDefenderPolicyToDevice(
+  device: WindowsDevice,
+  input: PushDefenderInput,
+): Promise<string[]> {
+  const baseCmds = input.all ? buildDefenderEnforceAll() : [];
+  const customCmds = input.custom ? buildDefenderEnforce(input.custom) : [];
+  // custom 覆蓋 base 中同 LocURI 的命令，保留 base 未覆寫部分
+  const customTargets = new Set(customCmds.map((c) => c.target));
+  const merged = [
+    ...baseCmds.filter((c) => !customTargets.has(c.target)),
+    ...customCmds,
+  ];
+  return enqueueBatch(
+    device,
+    "DefenderPolicy",
+    merged,
+    "至少需提供 all=true 或 custom 任一欄位",
+  );
+}
+
+export async function queryDefenderHealthOnDevice(
+  device: WindowsDevice,
+  nodes?: DefenderHealthNode[],
+): Promise<string[]> {
+  const cmds = nodes && nodes.length > 0
+    ? buildDefenderHealthQuery(nodes)
+    : buildDefenderHealthQuery();
+  return enqueueBatch(
+    device,
+    "DefenderHealthQuery",
+    cmds,
+    "nodes 為空且無預設，這不可能發生",
+  );
+}
+
+// ============================================================
+// 網站黑名單（PRD §4.1.1）
+// ============================================================
+//
+// IE Security Zone 4 (Restricted) 對 Edge Chromium 仍生效（Windows Security
+// Zones 機制）。單一 Replace 承載整份清單，重推 = 覆蓋（不是 append）。
+
+export type PushBlockedSitesInput =
+  | { hosts: string[]; scope?: "device" | "user" }
+  | { sites: BrowserSiteZoneInput["sites"]; scope?: "device" | "user" };
+
+/**
+ * 一次派 3 條 batch，覆蓋 Edge Chromium + IE 兩層：
+ *   1. Edge ADMX install（idempotent Replace，多次派無副作用）
+ *   2. Edge URLBlocklist Set（Chromium hive，主要封鎖鏈路）
+ *   3. IE Site Zone 4 Set（IE 11 / Edge IE Mode / ActiveX fallback）
+ *
+ * scope=user 時 IE Zone 走 user 節點，Edge policy 仍是 Machine class（Edge
+ * Chromium 政策只有 HKLM 一個位置）。
+ *
+ * host 純 host 名的清單會被兩層轉譯：
+ *   - IE Zone 4：host + zone 對應
+ *   - Edge：`*://<host>/*` pattern
+ * sites 進階用法（明確指定 zone）**只**寫 IE，不同時派 Edge blocklist（因為
+ * 只有 zone=4 才是「封鎖」語義）。
+ */
+export async function pushBlockedSitesToDevice(
+  device: WindowsDevice,
+  input: PushBlockedSitesInput,
+): Promise<string[]> {
+  const cmds: SyncMLCommand[] = [];
+
+  if ("sites" in input) {
+    // 進階模式：混合 zone；只寫 IE Zone，不觸發 Edge blocklist
+    cmds.push(buildIESiteZoneAssignment({ sites: input.sites, scope: input.scope }));
+    // 針對 zone=4 的 host 額外派 Edge blocklist
+    const blockedHosts = input.sites.filter((s) => s.zone === 4).map((s) => s.host);
+    if (blockedHosts.length > 0) {
+      cmds.push(buildEdgeAdmxInstall(), buildEdgeUrlBlocklist(blockedHosts));
+    }
+  } else {
+    // 簡易模式：hosts 統一封鎖，兩層一起派
+    cmds.push(
+      buildEdgeAdmxInstall(),
+      buildEdgeUrlBlocklist(input.hosts),
+      buildBlockedSites(input.hosts, input.scope ?? "device"),
+    );
+  }
+
+  return enqueueBatch(
+    device,
+    "BlockedSites",
+    cmds,
+    "hosts 或 sites 需至少一個非空",
+  );
+}
+
+export async function clearBlockedSitesFromDevice(
+  device: WindowsDevice,
+  scope: "device" | "user" = "device",
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "BlockedSitesClear",
+    [
+      buildEdgeAdmxInstall(),
+      buildEdgeUrlBlocklistClear(),
+      buildIESiteZoneClear(scope),
+    ],
+    "clear 命令構建失敗",
+  );
+}
+
+// ============================================================
+// OS 更新管理（PRD §5.6）
+// ============================================================
+//
+// Windows Update 沒有「立即觸發」MDM 命令；能做的是強制 policy + 短時段，
+// 讓下個 update poll cycle（通常幾分鐘內）依政策執行。「立即觸發」用便捷
+// 路徑 triggerOsUpdateNow：AllowAutoUpdate=4（強制無用戶控制） +
+// ScheduledInstallDay=0（每日） + ScheduledInstallTime=(now+delayHours)%24。
+//
+// 狀態查詢直接 Get Update CSP 三個節點；裝置回覆的 XML 由既有 SyncML ack
+// 路徑寫回 mdm_commands.response_payload。
+
+export async function pushUpdatePolicyToDevice(
+  device: WindowsDevice,
+  input: UpdatePolicyInput,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "UpdatePolicy",
+    buildUpdatePolicy(input),
+    "至少需提供一個 Update policy 欄位",
+  );
+}
+
+/**
+ * 「立即觸發」語義：組一份強制自動更新 + 短時段 policy 派下去。
+ *
+ * 裝置在下個 WU poll cycle（幾分鐘至半小時）依 policy 執行。
+ *
+ * @param delayHours 排程小時偏移，預設 0（即當前小時，若已過則今日不觸發，
+ *                    改用下一天。實務給 0-2 即可）
+ * @param now        供測試注入固定時間；生產不傳
+ */
+export async function triggerOsUpdateNow(
+  device: WindowsDevice,
+  delayHours = 0,
+  now: Date = new Date(),
+): Promise<{ commandIds: string[]; scheduledHour: number }> {
+  if (!Number.isInteger(delayHours) || delayHours < 0 || delayHours > 6) {
+    throw new AppError(
+      400,
+      "invalid_delay_hours",
+      "delayHours 必須是 0-6 的整數",
+    );
+  }
+  const scheduledHour = (now.getHours() + delayHours) % 24;
+  const commandIds = await enqueueBatch(
+    device,
+    "UpdatePolicy",
+    buildUpdatePolicy({
+      autoUpdate: 4, // 強制安裝不需使用者確認
+      scheduledDay: 0, // 每日
+      scheduledHour,
+    }),
+    "triggerOsUpdateNow build 出的命令為空",
+  );
+  return { commandIds, scheduledHour };
+}
+
+export type UpdateStatusScope = "installable" | "installed" | "pendingReboot";
+
+export async function queryUpdateStatusOnDevice(
+  device: WindowsDevice,
+  include: UpdateStatusScope[],
+): Promise<string[]> {
+  const cmds: SyncMLCommand[] = [];
+  if (include.includes("installable")) cmds.push(buildUpdateInstallableQuery());
+  if (include.includes("installed")) cmds.push(buildUpdateInstalledQuery());
+  if (include.includes("pendingReboot")) cmds.push(buildUpdatePendingRebootQuery());
+  return enqueueBatch(
+    device,
+    "UpdateStatusQuery",
+    cmds,
+    "include 需至少含 installable / installed / pendingReboot 其中之一",
+  );
 }

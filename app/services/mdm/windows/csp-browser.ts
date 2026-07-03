@@ -8,9 +8,12 @@
  *   3 = Internet
  *   4 = Restricted Sites（瀏覽器封鎖 / 強制 SmartScreen）
  *
- * Microsoft Edge Chromium 仍尊重 IE Security Zones，因此 Zone=4 對 Edge
- * 仍會封鎖（透過 Windows Security Zones 機制），不需要 ADMX ingestion 即
- * 可達成「網站黑名單」教育場景需求。
+ * ⚠️ 2026-07-03 真機驗證：**IE Zone 4 不封鎖 Edge Chromium 的 URL 訪問**
+ * （只影響 IE Mode / ActiveX / cookie 一類「安全區域功能」）。Edge Chromium
+ * 走 `HKLM\Software\Policies\Microsoft\Edge\URLBlocklist` 這個獨立 hive，
+ * 只認 Chromium URLBlocklist policy。所以真正封 Edge Chromium 靠下半段的
+ * `buildEdgeUrlBlocklist`（ADMX-backed），IE Site Zone 4 保留是為了 IE 11 /
+ * IE Mode / ActiveX 場景。pushBlockedSitesToDevice 端點會兩層一起派。
  *
  * MS 官方 schema（policy-csp-internetexplorer）：
  *   - LocURI：./Device/Vendor/MSFT/Policy/Config/InternetExplorer/AllowSiteToZoneAssignmentList
@@ -129,4 +132,128 @@ function escapeAdmxValue(s: string): string {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/"/g, "&quot;");
+}
+
+// ============================================================
+// Edge Chromium URLBlocklist（ADMX-backed）
+// ============================================================
+//
+// Edge Chromium 只認 `HKLM\Software\Policies\Microsoft\Edge\URLBlocklist`
+// 這個獨立 hive 裡的 policy，跟 IE Zone 機制完全獨立。走 ADMX-backed Policy
+// CSP：我們自寫一份最小 ADMX（跟 CoGrowLostMode 同一 pattern），`key` 屬性
+// 直接指向 Edge 那個 hive，讓 CSP 引擎把 policy value 落到 Edge 認的位置。
+//
+// Chromium URLBlocklist 語法：
+//   - "*://example.com/*"        封整個 example.com 網域
+//   - "*://*.example.com/*"      連子網域一起封
+//   - 若 host 已含 scheme 或 * 前綴，helper 尊重原樣
+//   - 未含則自動包成 "*://<host>/*"
+
+const ADMX_APP = "CoGrowMDM";
+const EDGE_ADMX_ID = "EdgePolicy";
+const EDGE_POLICY_AREA = `${ADMX_APP}~Policy~CoGrowEdge`;
+const EDGE_URL_BLOCKLIST_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${EDGE_POLICY_AREA}/EdgeUrlBlocklist`;
+
+const EDGE_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="cogrowedge" namespace="CoGrow.MDM.EdgePolicies" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="CoGrowEdge" displayName="CoGrow Edge" />
+  </categories>
+  <policies>
+    <policy name="EdgeUrlBlocklist" class="Machine" displayName="Edge URL Blocklist" explainText="Chromium Edge URLBlocklist" key="Software\\Policies\\Microsoft\\Edge">
+      <parentCategory ref="CoGrowEdge" />
+      <elements>
+        <list id="URLBlocklistDesc" key="Software\\Policies\\Microsoft\\Edge\\URLBlocklist" valuePrefix="" />
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>`;
+
+/**
+ * Edge Chromium ADMX ingest（idempotent Replace，跟 Lost Mode 一致）。
+ */
+export function buildEdgeAdmxInstall(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target:
+      `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${ADMX_APP}/Policy/${EDGE_ADMX_ID}`,
+    format: "chr",
+    data: EDGE_ADMX_XML,
+  };
+}
+
+/**
+ * host / URL pattern → Chromium URLBlocklist 語法
+ *
+ * Chromium URL filter format：`[scheme://][.]host[:port][/path][@query]`
+ *   - `tiktok.com`           → 匹配 tiktok.com **及所有 subdomain**（含 www.tiktok.com）
+ *   - `.tiktok.com`（前綴 .）→ 只 exact host（不含 subdomain）
+ *   - `mail.tiktok.com`      → 只該 subdomain 及其下級
+ *   - `*`                     → 全部封鎖
+ *
+ * ⚠️ **陷阱**：`/*` 在此語法裡是 literal path「`/*`」，不是通配任意 path。
+ * 把 host 包成 `*://tiktok.com/*` 反而 **不會匹配** `https://www.tiktok.com/`
+ * （path 是 `/`）。所以純 host **直接原樣**返回，Chromium 引擎自己處理
+ * scheme / port / path 通配（無指定 = match 全部）。
+ *
+ * 轉譯規則：
+ *   - "tiktok.com"           → "tiktok.com"（match host + subdomains）
+ *   - "*.tiktok.com"         → "tiktok.com"（Chromium URL filter 語法沒有 *.x 前綴；
+ *                                            用 bare host 語意等價）
+ *   - ".tiktok.com"          → 原樣（admin 顯式禁用 subdomain 匹配）
+ *   - "https://foo.com/bar"  → 原樣（含 scheme / path，admin 自訂 pattern）
+ *   - "mail.example.com/x"   → 原樣
+ *
+ * Ref: https://support.google.com/chrome/a/answer/9942583
+ */
+export function hostToUrlBlockPattern(host: string): string {
+  const trimmed = host.trim();
+  if (trimmed.length === 0) throw new Error("hostToUrlBlockPattern: 空 host");
+  if (trimmed.startsWith("*.")) return trimmed.slice(2);
+  return trimmed;
+}
+
+/**
+ * 對 Edge Chromium 派下 URLBlocklist policy（單條 ADMX Replace 承載整份清單）。
+ *
+ * hosts 可混合純 host、`*.foo.com` 子網域、含 scheme URL；helper 統一正規化。
+ * 重推 = 覆蓋，不 append。
+ */
+export function buildEdgeUrlBlocklist(hosts: string[]): SyncMLCommand {
+  if (!Array.isArray(hosts) || hosts.length === 0) {
+    throw new Error("buildEdgeUrlBlocklist: hosts 不可為空");
+  }
+  const pairs: string[] = [];
+  hosts.forEach((h, i) => {
+    pairs.push(String(i + 1));
+    pairs.push(escapeAdmxValue(hostToUrlBlockPattern(h)));
+  });
+  // ADMX list encoding：`key1<F000>value1<F000>key2<F000>value2`
+  const value = pairs.join("");
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: EDGE_URL_BLOCKLIST_TARGET,
+    format: "chr",
+    data: `<enabled/><data id="URLBlocklistDesc" value="${value}"/>`,
+  };
+}
+
+/**
+ * 清除 Edge URLBlocklist（送 <disabled/> 使 policy 不啟用）。
+ */
+export function buildEdgeUrlBlocklistClear(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: EDGE_URL_BLOCKLIST_TARGET,
+    format: "chr",
+    data: "<disabled/>",
+  };
 }

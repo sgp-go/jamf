@@ -3,6 +3,10 @@ import {
   buildIESiteZoneAssignment,
   buildBlockedSites,
   buildIESiteZoneClear,
+  buildEdgeAdmxInstall,
+  buildEdgeUrlBlocklist,
+  buildEdgeUrlBlocklistClear,
+  hostToUrlBlockPattern,
 } from "./csp-browser.ts";
 
 const SEP = "";
@@ -117,4 +121,92 @@ Deno.test("buildIESiteZoneClear: scope=user", () => {
     cmd.target,
     "./User/Vendor/MSFT/Policy/Config/InternetExplorer/AllowSiteToZoneAssignmentList",
   );
+});
+
+// ============================================================
+// Edge Chromium URLBlocklist（ADMX-backed）
+// ============================================================
+
+Deno.test("hostToUrlBlockPattern: bare host 原樣返回（match host + subdomains）", () => {
+  assertEquals(hostToUrlBlockPattern("tiktok.com"), "tiktok.com");
+  assertEquals(hostToUrlBlockPattern("mail.example.com"), "mail.example.com");
+});
+
+Deno.test("hostToUrlBlockPattern: *. 前綴移除（Chromium 沒此語法，bare host 語意等價）", () => {
+  assertEquals(hostToUrlBlockPattern("*.tiktok.com"), "tiktok.com");
+});
+
+Deno.test("hostToUrlBlockPattern: 前綴 . 原樣（禁用 subdomain 匹配）", () => {
+  assertEquals(hostToUrlBlockPattern(".tiktok.com"), ".tiktok.com");
+});
+
+Deno.test("hostToUrlBlockPattern: 含 scheme / path 原樣返回", () => {
+  assertEquals(hostToUrlBlockPattern("https://foo.com/bar"), "https://foo.com/bar");
+  assertEquals(hostToUrlBlockPattern("mail.example.com/x"), "mail.example.com/x");
+});
+
+Deno.test("hostToUrlBlockPattern: 空 host 拋錯", () => {
+  assertThrows(() => hostToUrlBlockPattern(""), Error);
+  assertThrows(() => hostToUrlBlockPattern("   "), Error);
+});
+
+Deno.test("buildEdgeAdmxInstall: Replace ADMXInstall/CoGrowMDM/Policy/EdgePolicy", () => {
+  const cmd = buildEdgeAdmxInstall();
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/CoGrowMDM/Policy/EdgePolicy",
+  );
+  assertEquals(cmd.format, "chr");
+  // XML 內容含 URLBlocklistDesc list 元素與 Edge hive key
+  const xml = cmd.data ?? "";
+  const hasList = xml.includes("URLBlocklistDesc");
+  const hasEdgeKey = xml.includes("Software\\Policies\\Microsoft\\Edge");
+  assertEquals(hasList, true);
+  assertEquals(hasEdgeKey, true);
+});
+
+Deno.test("buildEdgeUrlBlocklist: 單一 host 用 bare host 語法", () => {
+  const cmd = buildEdgeUrlBlocklist(["tiktok.com"]);
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/Config/CoGrowMDM~Policy~CoGrowEdge/EdgeUrlBlocklist",
+  );
+  assertEquals(cmd.format, "chr");
+  assertEquals(
+    cmd.data,
+    `<enabled/><data id="URLBlocklistDesc" value="1${SEP}tiktok.com"/>`,
+  );
+});
+
+Deno.test("buildEdgeUrlBlocklist: 多 host index 遞增 + U+F000 分隔", () => {
+  const cmd = buildEdgeUrlBlocklist(["tiktok.com", "*.facebook.com", "youtube.com"]);
+  // *.facebook.com 會被正規化為 facebook.com
+  assertEquals(
+    cmd.data,
+    `<enabled/><data id="URLBlocklistDesc" value="1${SEP}tiktok.com${SEP}2${SEP}facebook.com${SEP}3${SEP}youtube.com"/>`,
+  );
+});
+
+Deno.test("buildEdgeUrlBlocklist: 空 hosts 拋錯", () => {
+  assertThrows(() => buildEdgeUrlBlocklist([]), Error);
+});
+
+Deno.test("buildEdgeUrlBlocklist: pattern 內含 & < \" 需 escape", () => {
+  const cmd = buildEdgeUrlBlocklist([`bad&<host">.com`]);
+  assertEquals(
+    cmd.data,
+    `<enabled/><data id="URLBlocklistDesc" value="1${SEP}bad&amp;&lt;host&quot;>.com"/>`,
+  );
+});
+
+Deno.test("buildEdgeUrlBlocklistClear: data=<disabled/>", () => {
+  const cmd = buildEdgeUrlBlocklistClear();
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/Config/CoGrowMDM~Policy~CoGrowEdge/EdgeUrlBlocklist",
+  );
+  assertEquals(cmd.data, "<disabled/>");
 });

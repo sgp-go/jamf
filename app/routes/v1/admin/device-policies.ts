@@ -28,6 +28,13 @@ import {
   pushSettingsRestrictionToDevice,
   pushLostModeToDevice,
   removeLostModeFromDevice,
+  pushDefenderPolicyToDevice,
+  queryDefenderHealthOnDevice,
+  pushBlockedSitesToDevice,
+  clearBlockedSitesFromDevice,
+  pushUpdatePolicyToDevice,
+  triggerOsUpdateNow,
+  queryUpdateStatusOnDevice,
 } from "~/services/device-policies.ts";
 import { db } from "~/db/client.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
@@ -730,6 +737,391 @@ const removeLostModeSpec = createRoute({
   },
 });
 
+// ── Defender（PRD §4.1.2）──
+
+const defenderCustomSchema = z
+  .object({
+    realtimeMonitoring: z.boolean().optional(),
+    behaviorMonitoring: z.boolean().optional(),
+    cloudProtection: z.boolean().optional(),
+    ioavProtection: z.boolean().optional(),
+    networkProtection: z
+      .union([z.literal(0), z.literal(1), z.literal(2)])
+      .optional()
+      .openapi({ description: "0=disabled / 1=block / 2=audit" }),
+    puaProtection: z
+      .union([z.literal(0), z.literal(1), z.literal(2)])
+      .optional()
+      .openapi({ description: "0=disabled / 1=block / 2=audit" }),
+    submitSamplesConsent: z
+      .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+      .optional()
+      .openapi({ description: "0=Always prompt / 1=Send safe / 2=Never / 3=Send all" }),
+  })
+  .openapi("DefenderEnforceCustom");
+
+const pushDefenderBody = z
+  .object({
+    all: z.boolean().optional().openapi({
+      description:
+        "**【選填】** true 套用全開預設（Realtime / Behavior / Cloud / IOAV / Network=block / PUA=block / SubmitSamples=safe）",
+    }),
+    custom: defenderCustomSchema.optional().openapi({
+      description:
+        "**【選填】** 細項覆蓋；與 all 同時提供時 custom 覆蓋對應欄位。all 與 custom 兩者需至少提供其一",
+    }),
+  })
+  .openapi("PushDefenderInput");
+
+const pushDefenderSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-defender",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送 Windows Defender 強制啟用政策（PRD §4.1.2）",
+  description: [
+    "透過 Policy CSP 強制啟用 Defender 主要防護，防止學生關閉。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- 若裝置已啟用 Tamper Protection，Defender 會擋掉部分 policy 變更；先確認 Tamper 狀態",
+    "- 建議搭配 `/query-defender-health` 定期拉狀態確認",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: pushDefenderBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const defenderHealthNodeEnum = z.enum([
+  "ProductStatus",
+  "RealTimeProtectionEnabled",
+  "BehaviorMonitorEnabled",
+  "IoavProtectionEnabled",
+  "NisEnabled",
+  "RebootRequired",
+  "FullScanRequired",
+  "EngineVersion",
+  "SignatureVersion",
+  "AntiMalwareVersion",
+  "QuickScanTime",
+  "FullScanTime",
+  "QuickScanSigVersion",
+  "FullScanSigVersion",
+  "TamperProtectionEnabled",
+  "DefenderEnabled",
+]);
+
+const queryDefenderHealthBody = z
+  .object({
+    nodes: z.array(defenderHealthNodeEnum).optional().openapi({
+      description:
+        "**【選填】** 指定要查詢的 Health 節點；不填走預設套餐（ProductStatus / RealTime / Behavior / Tamper / SignatureVersion / EngineVersion / ScanTime / RebootRequired）",
+    }),
+  })
+  .openapi("QueryDefenderHealthInput");
+
+const queryDefenderHealthSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/query-defender-health",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "查詢設備 Defender 健康狀態（PRD §4.1.2）",
+  description: [
+    "發送 Get 命令到裝置的 Defender Health 節點；裝置回覆會寫回 mdm_commands.responsePayload，",
+    "admin 前端輪詢該欄位或訂閱 `command.completed` webhook 取用。",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: queryDefenderHealthBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入（多個 Get，一節點一 commandId）",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ── 網站黑名單（PRD §4.1.1）──
+
+const zonedSiteSchema = z.object({
+  host: z.string().min(1).openapi({
+    description: "host 或 URL pattern（如 `tiktok.com` 或 `https://*.tiktok.com`）",
+    example: "tiktok.com",
+  }),
+  zone: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]).openapi({
+    description: "1=Intranet / 2=Trusted / 3=Internet / 4=Restricted（封鎖）",
+  }),
+});
+
+const pushBlockedSitesBody = z
+  .object({
+    hosts: z.array(z.string().min(1)).optional().openapi({
+      description:
+        "**【選填】** 完整封鎖 host 清單（自動派到 Zone 4）。與 sites 二選一",
+      example: ["tiktok.com", "*.facebook.com"],
+    }),
+    sites: z.array(zonedSiteSchema).optional().openapi({
+      description:
+        "**【選填】** 進階：可指定每個 host 對應 Zone。與 hosts 二選一",
+    }),
+    scope: z.enum(["device", "user"]).optional().openapi({
+      description: "device（預設）= 全機生效；user = 僅當前使用者",
+    }),
+  })
+  .refine((d) => (!!d.hosts && d.hosts.length > 0) || (!!d.sites && d.sites.length > 0), {
+    message: "必須提供 hosts 或 sites 其中之一，且不可為空陣列",
+  })
+  .openapi("PushBlockedSitesInput");
+
+const pushBlockedSitesSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-blocked-sites",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送網站黑名單（PRD §4.1.1）",
+  description: [
+    "透過 IE Security Zones 將 host 派到 Restricted Sites（Zone 4）。Edge Chromium 尊重此機制，",
+    "故對 Edge / IE 兩者皆生效。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- 支援萬用字元（如 `*.tiktok.com`）",
+    "- 單一 Replace 承載整份清單，**重推 = 覆蓋**，不是 append",
+    "- host 中不可含 U+F000（分隔字元），有含會 400 rejected",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: pushBlockedSitesBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const clearBlockedSitesBody = z
+  .object({
+    scope: z.enum(["device", "user"]).optional().openapi({
+      description: "device（預設）= 全機；user = 僅當前使用者",
+    }),
+  })
+  .openapi("ClearBlockedSitesInput");
+
+const clearBlockedSitesSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/clear-blocked-sites",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "清除設備上網站黑名單（PRD §4.1.1）",
+  description: [
+    "送 `<disabled/>` 使 IE Site Zone Assignment 政策不啟用，回退本機原 Zone Map。",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: clearBlockedSitesBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+// ── OS 更新管理（PRD §5.6）──
+
+const updatePolicyBody = z
+  .object({
+    autoUpdate: z
+      .union([
+        z.literal(0),
+        z.literal(1),
+        z.literal(2),
+        z.literal(3),
+        z.literal(4),
+        z.literal(5),
+      ])
+      .optional()
+      .openapi({
+        description:
+          "**【選填】** 0=Notify / 1=Auto install at maintenance / 2=Auto install+notify restart / 3=Auto install+restart at scheduled / 4=Force restart（強制） / 5=關閉自動更新（不建議）",
+      }),
+    scheduledDay: z
+      .union([
+        z.literal(0),
+        z.literal(1),
+        z.literal(2),
+        z.literal(3),
+        z.literal(4),
+        z.literal(5),
+        z.literal(6),
+        z.literal(7),
+      ])
+      .optional()
+      .openapi({
+        description: "**【選填】** ScheduledInstallDay：0=每日 / 1=週日 / ... / 7=週六（autoUpdate=3/4 才生效）",
+      }),
+    scheduledHour: z.number().int().min(0).max(23).optional().openapi({
+      description: "**【選填】** ScheduledInstallTime，24h 制小時",
+    }),
+    activeHoursStart: z.number().int().min(0).max(23).optional().openapi({
+      description: "**【選填】** 使用者時段起，避開此時段自動安裝",
+    }),
+    activeHoursEnd: z.number().int().min(0).max(23).optional().openapi({
+      description: "**【選填】** 使用者時段迄",
+    }),
+    activeHoursMaxRange: z.number().int().min(8).max(18).optional().openapi({
+      description: "**【選填】** 使用者可調 Active Hours 最大範圍（8-18 小時）",
+    }),
+    deferQualityDays: z.number().int().min(0).max(30).optional().openapi({
+      description: "**【選填】** Quality update 延後天數（0-30）",
+    }),
+    deferFeatureDays: z.number().int().min(0).max(365).optional().openapi({
+      description: "**【選填】** Feature update 延後天數（0-365）",
+    }),
+    pauseQuality: z.boolean().optional().openapi({
+      description: "**【選填】** 暫停 Quality updates（最多 35 天）",
+    }),
+    pauseFeature: z.boolean().optional().openapi({
+      description: "**【選填】** 暫停 Feature updates（最多 35 天）",
+    }),
+  })
+  .openapi("PushUpdatePolicyInput");
+
+const pushUpdatePolicySpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-update-policy",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送 Windows Update 排程 / 延後 / 暫停政策（PRD §5.6）",
+  description: [
+    "透過 Policy CSP / Update namespace 設定裝置的 WU 行為。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- 只設有提供的欄位；未提供的欄位保留裝置現值",
+    "- 「立即觸發 OS 更新」用 `/trigger-os-update` 便捷端點（Windows 沒有原生立即觸發 CSP，走強制 policy + 短排程）",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: updatePolicyBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const triggerOsUpdateBody = z
+  .object({
+    delayHours: z.number().int().min(0).max(6).optional().openapi({
+      description:
+        "**【選填】** 排程小時偏移，預設 0（當前小時）；1-6 = 延後 N 小時（用於避開午休 / 上課時段）",
+    }),
+  })
+  .openapi("TriggerOsUpdateInput");
+
+const triggerOsUpdateResultSchema = z
+  .object({
+    commandIds: z.array(z.string().uuid()),
+    scheduledHour: z.number().int().min(0).max(23).openapi({
+      description: "實際排定的小時（24h 制）",
+    }),
+  })
+  .openapi("TriggerOsUpdateResult");
+
+const triggerOsUpdateSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/trigger-os-update",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "立即觸發 Windows OS 更新（PRD §5.6）",
+  description: [
+    "組合強制自動更新 policy 派下去，裝置在下個 WU poll cycle（幾分鐘至半小時）依 policy 執行。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- Windows Update 沒有原生「立即觸發」MDM 命令；此端點=`AllowAutoUpdate=4` + `ScheduledInstallDay=0` + 當前小時的組合",
+    "- 「強制無用戶控制」使用者不能取消；重啟會被排入 WU 排程",
+    "- 進度 / 完成透過 `/query-update-status` 拉取（或訂閱 command.completed）",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: triggerOsUpdateBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入，回傳實際 scheduledHour",
+      content: {
+        "application/json": { schema: successSchema(triggerOsUpdateResultSchema) },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const queryUpdateStatusBody = z
+  .object({
+    include: z
+      .array(z.enum(["installable", "installed", "pendingReboot"]))
+      .min(1)
+      .openapi({
+        description:
+          "要查詢的更新清單：installable=可安裝但未批准 / installed=已安裝 / pendingReboot=已裝待重啟",
+        example: ["installable", "pendingReboot"],
+      }),
+  })
+  .openapi("QueryUpdateStatusInput");
+
+const queryUpdateStatusSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/query-update-status",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "查詢設備 Windows Update 狀態（PRD §5.6）",
+  description: [
+    "發送 Get 命令到 Update CSP；裝置回覆會寫回 mdm_commands.responsePayload。",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: queryUpdateStatusBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入（每個 include 值對應一個 Get）",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 // ── App instance ──
 
 export const devicePoliciesAdminApp = new OpenAPIHono({
@@ -998,6 +1390,137 @@ devicePoliciesAdminApp.openapi(removeLostModeSpec, async (c) => {
     action: "device.remove_lost_mode",
     resourceType: "device",
     resourceId: deviceId,
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Defender push
+devicePoliciesAdminApp.openapi(pushDefenderSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushDefenderPolicyToDevice(device, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_defender",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { all: body.all ?? false, custom: body.custom ?? null },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Defender health query
+devicePoliciesAdminApp.openapi(queryDefenderHealthSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await queryDefenderHealthOnDevice(device, body.nodes);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.query_defender_health",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { nodeCount: body.nodes?.length ?? "default" },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// 網站黑名單 push
+devicePoliciesAdminApp.openapi(pushBlockedSitesSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushBlockedSitesToDevice(
+    device,
+    body.sites
+      ? { sites: body.sites, scope: body.scope }
+      : { hosts: body.hosts!, scope: body.scope },
+  );
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_blocked_sites",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: {
+      mode: body.sites ? "sites" : "hosts",
+      count: body.sites?.length ?? body.hosts?.length ?? 0,
+      scope: body.scope ?? "device",
+    },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// 網站黑名單 clear
+devicePoliciesAdminApp.openapi(clearBlockedSitesSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await clearBlockedSitesFromDevice(device, body.scope);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.clear_blocked_sites",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { scope: body.scope ?? "device" },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Update policy push
+devicePoliciesAdminApp.openapi(pushUpdatePolicySpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushUpdatePolicyToDevice(device, body);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_update_policy",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: body,
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Trigger OS update now
+devicePoliciesAdminApp.openapi(triggerOsUpdateSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const { commandIds, scheduledHour } = await triggerOsUpdateNow(
+    device,
+    body.delayHours,
+  );
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.trigger_os_update",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { delayHours: body.delayHours ?? 0, scheduledHour },
+  });
+  return c.json({ ok: true as const, data: { commandIds, scheduledHour } }, 202);
+});
+
+// Update status query
+devicePoliciesAdminApp.openapi(queryUpdateStatusSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await queryUpdateStatusOnDevice(device, body.include);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.query_update_status",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { include: body.include },
   });
   return c.json({ ok: true as const, data: { commandIds } }, 202);
 });
