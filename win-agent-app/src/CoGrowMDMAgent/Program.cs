@@ -79,6 +79,10 @@ builder.Services.AddHostedService<LapsWatcher>();
 builder.Services.AddHostedService<BitLockerWatcher>();
 builder.Services.AddHostedService<PpkgRemovalWatcher>();
 builder.Services.AddHostedService<SelfUninstallWatcher>();
+// SoftWipe：Registry 觸發深度清理（畢業換人零 IT 介入）— 卸非白名單 MSI/UWP，
+// 刪 non-admin user profile，清瀏覽器數據 / Recycle Bin / Temp。保 Agent + MDM。
+builder.Services.AddHttpClient<CoGrowMDMAgent.SoftWipe.SoftWipeWatcher>();
+builder.Services.AddHostedService<CoGrowMDMAgent.SoftWipe.SoftWipeWatcher>();
 // winget App 派發：WingetWatcher 為 singleton（被 OmaDmEventLogWatcher 持有引用以觸發 RequestPoll），
 // 同時以 hosted service 身分跑後台 loop；OmaDmEventLogWatcher 監聽 EventLog 265 喚醒它。
 builder.Services.AddHttpClient(nameof(CoGrowMDMAgent.Winget.WingetWatcher));

@@ -25,4 +25,7 @@ public sealed record AgentConfig
 
     public string WingetResultUrl =>
         $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/winget-result";
+
+    public string SoftWipeResultUrl =>
+        $"{ApiEndpoint.TrimEnd('/')}/tenants/{TenantId}/agent/soft-wipe-result";
 }
