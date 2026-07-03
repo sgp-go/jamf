@@ -64,6 +64,8 @@ import {
   buildEdgeAdmxInstall,
   buildEdgeUrlBlocklist,
   buildEdgeUrlBlocklistClear,
+  buildEdgeBrowserSignin,
+  buildEdgeBrowserSigninClear,
   type BrowserSiteZoneInput,
 } from "~/services/mdm/windows/csp-browser.ts";
 import {
@@ -540,6 +542,39 @@ export async function clearBlockedSitesFromDevice(
       buildEdgeUrlBlocklistClear(),
       buildIESiteZoneClear(scope),
     ],
+    "clear 命令構建失敗",
+  );
+}
+
+/**
+ * Edge BrowserSignin policy 推送。
+ *
+ * URLBlocklist 生產配套：學校場景推 mode=0（禁止 Edge 登入 MS 帳號），
+ * 防止學生登私人帳號後 URLBlocklist 被 by-design 免疫掉。
+ *
+ * batch 派 2 條：ADMX install（idempotent）+ Policy Set。
+ */
+export type EdgeBrowserSigninMode = 0 | 1 | 2;
+
+export async function pushEdgeBrowserSigninToDevice(
+  device: WindowsDevice,
+  mode: EdgeBrowserSigninMode,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "EdgeBrowserSignin",
+    [buildEdgeAdmxInstall(), buildEdgeBrowserSignin(mode)],
+    "BrowserSignin mode 缺失",
+  );
+}
+
+export async function clearEdgeBrowserSigninFromDevice(
+  device: WindowsDevice,
+): Promise<string[]> {
+  return enqueueBatch(
+    device,
+    "EdgeBrowserSigninClear",
+    [buildEdgeAdmxInstall(), buildEdgeBrowserSigninClear()],
     "clear 命令構建失敗",
   );
 }

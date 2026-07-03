@@ -6,6 +6,8 @@ import {
   buildEdgeAdmxInstall,
   buildEdgeUrlBlocklist,
   buildEdgeUrlBlocklistClear,
+  buildEdgeBrowserSignin,
+  buildEdgeBrowserSigninClear,
   hostToUrlBlockPattern,
 } from "./csp-browser.ts";
 
@@ -209,4 +211,42 @@ Deno.test("buildEdgeUrlBlocklistClear: data=<disabled/>", () => {
     "./Device/Vendor/MSFT/Policy/Config/CoGrowMDM~Policy~CoGrowEdge/EdgeUrlBlocklist",
   );
   assertEquals(cmd.data, "<disabled/>");
+});
+
+Deno.test("buildEdgeBrowserSignin: mode=0 Disable → decimal value=0", () => {
+  const cmd = buildEdgeBrowserSignin(0);
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/Config/CoGrowMDM~Policy~CoGrowEdge/EdgeBrowserSignin",
+  );
+  assertEquals(cmd.format, "chr");
+  assertEquals(
+    cmd.data,
+    `<enabled/><data id="BrowserSigninValue" value="0"/>`,
+  );
+});
+
+Deno.test("buildEdgeBrowserSignin: mode=1 Enable / mode=2 Force", () => {
+  assertEquals(
+    buildEdgeBrowserSignin(1).data,
+    `<enabled/><data id="BrowserSigninValue" value="1"/>`,
+  );
+  assertEquals(
+    buildEdgeBrowserSignin(2).data,
+    `<enabled/><data id="BrowserSigninValue" value="2"/>`,
+  );
+});
+
+Deno.test("buildEdgeBrowserSigninClear: data=<disabled/>", () => {
+  const cmd = buildEdgeBrowserSigninClear();
+  assertEquals(cmd.data, "<disabled/>");
+});
+
+Deno.test("buildEdgeAdmxInstall: XML 同時含 URLBlocklist + BrowserSignin policy", () => {
+  const cmd = buildEdgeAdmxInstall();
+  const xml = cmd.data ?? "";
+  assertEquals(xml.includes("EdgeUrlBlocklist"), true);
+  assertEquals(xml.includes("EdgeBrowserSignin"), true);
+  assertEquals(xml.includes("BrowserSigninValue"), true);
 });

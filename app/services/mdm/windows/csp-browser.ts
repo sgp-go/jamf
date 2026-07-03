@@ -154,7 +154,17 @@ const EDGE_ADMX_ID = "EdgePolicy";
 const EDGE_POLICY_AREA = `${ADMX_APP}~Policy~CoGrowEdge`;
 const EDGE_URL_BLOCKLIST_TARGET =
   `./Device/Vendor/MSFT/Policy/Config/${EDGE_POLICY_AREA}/EdgeUrlBlocklist`;
+const EDGE_BROWSER_SIGNIN_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${EDGE_POLICY_AREA}/EdgeBrowserSignin`;
 
+/**
+ * ADMX 定義 URLBlocklist + BrowserSignin 兩條 Edge policy：
+ *   - URLBlocklist：list 元素落到 URLBlocklist hive（1, 2, 3... 依序）
+ *   - BrowserSignin：decimal 元素落到 Edge hive `BrowserSignin` REG_DWORD
+ *     0=disabled / 1=enable / 2=force sign-in
+ *
+ * key 屬性統一指 Edge Chromium hive，CSP 引擎依此決定 policy value 寫入位置。
+ */
 const EDGE_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
 <policyDefinitions revision="1.0" schemaVersion="1.0">
   <policyNamespaces>
@@ -169,6 +179,12 @@ const EDGE_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
       <parentCategory ref="CoGrowEdge" />
       <elements>
         <list id="URLBlocklistDesc" key="Software\\Policies\\Microsoft\\Edge\\URLBlocklist" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="EdgeBrowserSignin" class="Machine" displayName="Edge Browser Signin" explainText="Chromium Edge BrowserSignin: 0=Disable / 1=Enable / 2=Force" key="Software\\Policies\\Microsoft\\Edge" valueName="BrowserSignin">
+      <parentCategory ref="CoGrowEdge" />
+      <elements>
+        <decimal id="BrowserSigninValue" valueName="BrowserSignin" minValue="0" maxValue="2" />
       </elements>
     </policy>
   </policies>
@@ -253,6 +269,39 @@ export function buildEdgeUrlBlocklistClear(): SyncMLCommand {
     cmdId: "0",
     verb: "Replace",
     target: EDGE_URL_BLOCKLIST_TARGET,
+    format: "chr",
+    data: "<disabled/>",
+  };
+}
+
+/**
+ * Edge BrowserSignin policy：控制 Edge 內帳號登入行為。
+ *
+ * 教育場景關鍵配套：**推 0 (Disable)** 禁止學生登入任何 MS 帳號到 Edge profile。
+ * 原因：URLBlocklist 對 MS 個人帳號登入的 profile 免疫（MS 官方 by design），
+ * 若學生登了 outlook/hotmail 帳號，URLBlocklist 直接被忽略。BrowserSignin=0
+ * 從源頭防止此繞過。
+ *
+ * @param mode 0=Disable（禁止登入，推薦教育場景）/ 1=Enable（預設）/ 2=Force（強制登入）
+ */
+export function buildEdgeBrowserSignin(mode: 0 | 1 | 2): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: EDGE_BROWSER_SIGNIN_TARGET,
+    format: "chr",
+    data: `<enabled/><data id="BrowserSigninValue" value="${mode}"/>`,
+  };
+}
+
+/**
+ * 清除 Edge BrowserSignin policy（回退為預設行為 Enable=1）。
+ */
+export function buildEdgeBrowserSigninClear(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: EDGE_BROWSER_SIGNIN_TARGET,
     format: "chr",
     data: "<disabled/>",
   };

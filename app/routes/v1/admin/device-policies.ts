@@ -35,6 +35,8 @@ import {
   pushUpdatePolicyToDevice,
   triggerOsUpdateNow,
   queryUpdateStatusOnDevice,
+  pushEdgeBrowserSigninToDevice,
+  clearEdgeBrowserSigninFromDevice,
 } from "~/services/device-policies.ts";
 import { db } from "~/db/client.ts";
 import { mdmDevices } from "~/db/schema/devices.ts";
@@ -1122,6 +1124,65 @@ const queryUpdateStatusSpec = createRoute({
   },
 });
 
+// ── Edge BrowserSignin（PRD §4.1.1 生產配套：URLBlocklist 免疫子問題防護）──
+
+const pushBrowserSigninBody = z
+  .object({
+    mode: z.union([z.literal(0), z.literal(1), z.literal(2)]).openapi({
+      description:
+        "0=禁止 Edge 登入任何帳號（教育場景推薦）/ 1=允許（Edge 預設）/ 2=強制登入",
+      example: 0,
+    }),
+  })
+  .openapi("PushEdgeBrowserSigninInput");
+
+const pushBrowserSigninSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/push-edge-browser-signin",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "推送 Edge BrowserSignin policy",
+  description: [
+    "設定 Edge 是否允許帳號登入。**URLBlocklist 生產配套**：MS 個人帳號登入的 Edge profile 對 URLBlocklist 免疫（by design），",
+    "教育場景推 mode=0 從源頭防繞過。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意事項**：",
+    "- mode=0 後既存已登入的 profile 會被強制登出",
+    "- policy 生效需要 Edge 重啟（跟 URLBlocklist 同一 policy engine cache 機制）",
+    "- 跟 push-blocked-sites 分離的端點：允許 admin 單獨切換 signin 而不動 URL 黑名單",
+  ].join("\n"),
+  request: {
+    params: deviceIdParam,
+    body: { content: { "application/json": { schema: pushBrowserSigninBody } } },
+  },
+  responses: {
+    202: {
+      description: "命令已排入（ADMX install + Policy Set 2 條）",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+const clearBrowserSigninSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/clear-edge-browser-signin",
+  tags: ["設備策略"],
+  security: [{ BearerAuth: [] }],
+  summary: "清除 Edge BrowserSignin policy（回退 Edge 預設允許登入）",
+  description: "**鑑權**：Bearer admin token。",
+  request: { params: deviceIdParam },
+  responses: {
+    202: {
+      description: "命令已排入",
+      content: { "application/json": { schema: successSchema(commandResultSchema) } },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 // ── App instance ──
 
 export const devicePoliciesAdminApp = new OpenAPIHono({
@@ -1506,6 +1567,38 @@ devicePoliciesAdminApp.openapi(triggerOsUpdateSpec, async (c) => {
     payload: { delayHours: body.delayHours ?? 0, scheduledHour },
   });
   return c.json({ ok: true as const, data: { commandIds, scheduledHour } }, 202);
+});
+
+// Edge BrowserSignin push
+devicePoliciesAdminApp.openapi(pushBrowserSigninSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const { mode } = c.req.valid("json");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await pushEdgeBrowserSigninToDevice(device, mode);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.push_edge_browser_signin",
+    resourceType: "device",
+    resourceId: deviceId,
+    payload: { mode },
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
+});
+
+// Edge BrowserSignin clear
+devicePoliciesAdminApp.openapi(clearBrowserSigninSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const device = await getWindowsDeviceForPolicy({ tenantId, deviceId });
+  const commandIds = await clearEdgeBrowserSigninFromDevice(device);
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "device.clear_edge_browser_signin",
+    resourceType: "device",
+    resourceId: deviceId,
+  });
+  return c.json({ ok: true as const, data: { commandIds } }, 202);
 });
 
 // Update status query
