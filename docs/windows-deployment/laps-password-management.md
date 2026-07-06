@@ -16,8 +16,8 @@
 | **student 密碼重設**（新） | `POST /user-password/reset` | 管理員指定（e.g. `student`） | 學生忘密 / 新學期重設 |
 
 **密碼特性**（`mode=random` 時）：
-- 長度 20 字元
-- 大小寫字母 + 數字 + 符號各至少一個
+- 長度 8 字元
+- 大小寫字母 + 數字各至少一個（純字母數字，無特殊符號，避免相容性 / 輸入問題）
 - 密碼學安全隨機（`crypto.randomBytes`）
 - 加密存 DB（AES-256-GCM，需設 `DATA_ENCRYPTION_KEY`）
 
@@ -123,7 +123,7 @@ POST /api/v1/admin/tenants/{tenantId}/devices/{deviceId}/user-password/reset
 | 欄位 | 說明 |
 |------|------|
 | `targetAccount` | 目標本機帳號名；regex `^[a-zA-Z0-9._-]{1,20}$` 防 net user 參數注入 |
-| `mode` | `explicit` = 用 body.password；`random` = 系統隨機 20 字元 |
+| `mode` | `explicit` = 用 body.password；`random` = 系統隨機 8 字元（純字母數字） |
 | `password` | mode=explicit 必填，4-127 字元 |
 | `requireChangeOnFirstLogon` | true = Agent 改密後額外跑 `net user <acct> /logonpasswordchg:yes` 強制帳號下次登入必須改密 |
 | `accountType` | `admin` / `student` / `other`，預設 `student` |

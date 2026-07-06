@@ -19,7 +19,7 @@ sequenceDiagram
     MDM->>設備: SyncML 下發 ADMX 定義
     設備-->>MDM: 200 OK[或 418 已存在]
 
-    後端->>後端: 生成 20 字元隨機密碼
+    後端->>後端: 生成 8 字元隨機密碼（純字母數字）
     後端->>後端: AES-256-GCM 加密存 DB
     後端->>MDM: 排入 LapsRotation 策略命令
     MDM->>設備: SyncML Replace 策略值
@@ -39,7 +39,7 @@ sequenceDiagram
 ### 流程說明
 
 1. **ADMX Ingest**：後端透過 `buildLapsAdmxInstall()` 將自定義 ADMX 策略定義注入設備的 Policy CSP。此操作冪等，重複 Add 回傳 418 無害。
-2. **生成密碼**：使用 `crypto.randomBytes` 生成 20 字元密碼（大小寫 + 數字 + 符號各至少一個），Fisher-Yates 洗牌後加密存入 `mdm_windows_laps` 表。
+2. **生成密碼**：使用 `crypto.randomBytes` 生成 8 字元密碼（大小寫 + 數字各至少一個，純字母數字無特殊符號），Fisher-Yates 洗牌後加密存入 `mdm_windows_laps` 表。
 3. **下發策略**：`buildLapsRotation()` 透過 ADMX Policy CSP 將 `NewPassword`、`AdminAccount`、`RotationId` 寫入設備 Registry 信箱，並設 `Pending=1`。
 4. **Agent 執行**：LapsWatcher 每 2 秒輪詢 Registry，偵測到 `Pending=1` 後讀取密碼、執行 `net user <AdminAccount> <NewPassword>` 改密，隨即清除 `NewPassword` 並設 `Pending=0`。
 5. **上報確認**：Agent 在下次 report 或 checkin 時帶上 `rotationId`，後端比對後標記 `confirmed`。

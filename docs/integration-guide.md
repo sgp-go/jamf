@@ -599,7 +599,7 @@ POST /admin/tenants/{tid}/devices/{did}/push-lost-mode
 
 ### 7.1 LAPS 密碼查詢
 
-設備納管後 Agent 自動輪換管理員密碼（20 字隨機）。IT 需要時：
+設備納管後 Agent 自動輪換管理員密碼（8 字隨機純字母數字）。IT 需要時：
 
 ```
 GET /admin/tenants/{tid}/devices/{did}/laps-password
