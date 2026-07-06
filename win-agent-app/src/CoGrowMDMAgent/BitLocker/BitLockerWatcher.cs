@@ -106,15 +106,22 @@ public sealed class BitLockerWatcher : BackgroundService
     {
         try
         {
-            // -WarningAction SilentlyContinue 抑制 Windows 的恢復密碼警告文本
+            // 冪等：已加密 / 加密中的卷跳過 Enable-BitLocker（否則重加 TPM 保護器 →
+            // 「該驅動器只允許這種類型的一個密鑰保護器」錯，ADMX policy 週期 refresh 反覆刷 log）；
+            // RecoveryPassword 保護器僅在缺失時才加（避免每輪累積新恢復密碼）；末尾輸出恢復密碼供回報。
+            // -WarningAction SilentlyContinue 抑制 Windows 的恢復密碼警告文本。
             var enableScript =
                 "$WarningPreference='SilentlyContinue'; " +
+                "$v = Get-BitLockerVolume -MountPoint 'C:'; " +
+                "if ($v.ProtectionStatus -ne 'On' -and $v.VolumeStatus -eq 'FullyDecrypted') { " +
                 $"Enable-BitLocker -MountPoint 'C:' -EncryptionMethod {encryptionMethod} " +
-                "-TpmProtector -SkipHardwareTest -WarningAction SilentlyContinue -ErrorAction Stop | Out-Null; " +
-                "$kp = Add-BitLockerKeyProtector -MountPoint 'C:' -RecoveryPasswordProtector " +
+                "-TpmProtector -SkipHardwareTest -WarningAction SilentlyContinue -ErrorAction Stop | Out-Null }; " +
+                "$rp = (Get-BitLockerVolume -MountPoint 'C:').KeyProtector | " +
+                "Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } | Select-Object -Last 1; " +
+                "if (-not $rp) { $kp = Add-BitLockerKeyProtector -MountPoint 'C:' -RecoveryPasswordProtector " +
                 "-WarningAction SilentlyContinue -ErrorAction Stop; " +
-                "$kp.KeyProtector | Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } | " +
-                "Select-Object -Last 1 -ExpandProperty RecoveryPassword";
+                "$rp = $kp.KeyProtector | Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } | Select-Object -Last 1 }; " +
+                "$rp.RecoveryPassword";
 
             var psi = new ProcessStartInfo("powershell", $"-NoProfile -NonInteractive -Command \"{enableScript}\"")
             {

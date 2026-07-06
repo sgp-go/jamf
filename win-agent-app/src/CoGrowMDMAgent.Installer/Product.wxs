@@ -29,8 +29,14 @@
       Description="CoGrow MDM Agent — device telemetry service"
       Manufacturer="CoGrow" />
 
-    <!-- Block downgrade; uninstall older versions automatically on upgrade. -->
+    <!-- Block downgrade; uninstall older versions automatically on upgrade.
+      AllowSameVersionUpgrades="yes"：ProductVersion 是 4 段 1.4.0.X，但 Windows Installer
+      只比前 3 段（1.4.0）→ 各 build（1.4.0.24/.25/.26…）被視為「同版本」。預設下
+      RemoveExistingProducts 不移除同版本 → 每個新 build（ProductCode 每次自動生成不同）
+      與舊的並存 → ARP 累積 7+ 條。開此旗標把「前 3 段相同、ProductCode 不同」也當升級移除舊版。
+      （ProductCode 恆不同，無真正同碼衝突風險；此旗標正是為此 4 段版本方案設計。） -->
     <MajorUpgrade
+      AllowSameVersionUpgrades="yes"
       DowngradeErrorMessage="A newer version of [ProductName] is already installed."
       Schedule="afterInstallInitialize" />
 

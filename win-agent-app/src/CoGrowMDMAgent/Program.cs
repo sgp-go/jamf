@@ -18,6 +18,13 @@ builder.Services.AddWindowsService(options =>
     options.ServiceName = "CoGrowMDMAgent";
 });
 
+// 單一 BackgroundService（watcher / reporter）未處理異常不應拖垮整個 host。
+// .NET 6+ 預設 StopHost → 開機時網路 / registry 未就緒的競態若在 watcher try/catch 迴圈
+// 外拋出，會 crash 全 agent（APPCRASH 0xe0434352，隨後 SCM 重啟）。改 Ignore：出事的
+// watcher 停掉、其餘（LAPS / BitLocker / rename / GPS / report）續跑，fleet agent 更韌。
+builder.Services.Configure<HostOptions>(o =>
+    o.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore);
+
 builder.Services.AddSingleton<RegistryConfig>();
 // AgentConfigProvider 持有 mutable snapshot，支援 Worker 每 cycle 前 TryReload
 // 讓 MDM 旋轉 token / 切換 endpoint 不需重啟 service。
