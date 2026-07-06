@@ -47,6 +47,14 @@ export const selfMdmConfigs = pgTable(
      * 空字串或 NULL 都當作 "ITAdmin"（服務層 fallback）。
      */
     adminAccountName: varchar({ length: 64 }).notNull().default("ITAdmin"),
+    /**
+     * 設備自動命名模板（PRD §5.1 自動設備命名）。非空時 enrollment hook 自動派
+     * SetComputerName 命令。模板變數見 [[renderDeviceNameTemplate]]：
+     *   {schoolCode} device_group.code；{serial} 全序號；{serial4} 序號後4碼；{udid8} udid 前8碼
+     * 例：`"{schoolCode}-{serial4}"` → `TPE001-1234`。
+     * null / 空字串 = 不觸發自動命名（enrollment hook 跳過）。
+     */
+    namingTemplate: varchar({ length: 128 }),
     apnsTopic: text(),
     apnsCertPem: text(),
     apnsKeyPemEnc: text(),

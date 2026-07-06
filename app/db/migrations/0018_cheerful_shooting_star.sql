@@ -1,0 +1,1 @@
+ALTER TABLE "self_mdm_configs" ADD COLUMN "naming_template" varchar(128);

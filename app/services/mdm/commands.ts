@@ -21,6 +21,7 @@ import {
 } from "~/db/schema/devices.ts";
 import { publishCommandEvent } from "./command-events.ts";
 import { reconcileProfileFromCommand } from "~/services/profile-ack-reconciler.ts";
+import { reconcileKioskFromCommand } from "~/services/kiosk-ack-reconciler.ts";
 
 type SyncMLVerb = "Add" | "Replace" | "Exec" | "Get" | "Delete";
 
@@ -272,6 +273,15 @@ export async function updateMdmCommand(
     reconcileProfileFromCommand({
       tenantId: updated.tenantId,
       deviceId: updated.deviceId,
+      commandType: updated.commandType,
+      status: updated.status,
+      errorChain: updated.errorChain,
+    });
+    // Kiosk：KioskApply ack → 回寫 kiosk_device_states.status + appliedVersion
+    reconcileKioskFromCommand({
+      tenantId: updated.tenantId,
+      deviceId: updated.deviceId,
+      commandUuid: updated.commandUuid,
       commandType: updated.commandType,
       status: updated.status,
       errorChain: updated.errorChain,

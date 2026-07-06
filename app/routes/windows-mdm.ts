@@ -57,6 +57,8 @@ import { buildSetAllowRestore, buildSetManualUnenroll } from "~/services/mdm/win
 import type { SyncMLCommand } from "~/services/mdm/windows/syncml.ts";
 import { setupDevicePush } from "~/services/mdm/windows/push-setup.ts";
 import { applyFirewallToDevice } from "~/services/firewall.ts";
+import { pushDeviceRenameToDevice } from "~/services/device-policies.ts";
+import { db } from "~/db/client.ts";
 import { installAgentOnDevice } from "~/services/install-agent.ts";
 import { getWnsClient, WnsAuthError } from "~/services/wns/client.ts";
 import {
@@ -299,6 +301,42 @@ async function handleEnrollmentRequest(c: Context, slug: string, groupCode?: str
   } catch (e) {
     console.warn(
       `[Win MDM] 自動 firewall 派發失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // 自動設備命名（PRD §5.1）：若 tenant 有 namingTemplate 則派 SetComputerName
+  // template 變數 {schoolCode}/{serial}/{serial4}/{udid8} 展開。
+  // ⚠️ enrollment 完成時 device.serialNumber 通常尚未 pull（要等 DevDetail 首次 sync），
+  // 若 template 含 {serial*} 會展開為 "0000"。可加後續 inventory hook 重派修正，
+  // 或用 {udid8}（enroll 時已有）作為主命名變數避免此問題。
+  try {
+    if (config.namingTemplate && config.namingTemplate.trim().length > 0) {
+      const enrolledDevice = await getMdmDevice(udid);
+      if (enrolledDevice) {
+        const schoolCode = enrolledDevice.deviceGroupId
+          ? (await db.query.deviceGroups.findFirst({
+            where: (t, { eq: eqOp }) =>
+              eqOp(t.id, enrolledDevice.deviceGroupId!),
+            columns: { code: true },
+          }))?.code ?? null
+          : null;
+        const renameResult = await pushDeviceRenameToDevice(
+          enrolledDevice,
+          { template: config.namingTemplate },
+          {
+            schoolCode,
+            serialNumber: enrolledDevice.serialNumber ?? null,
+            udid: enrolledDevice.udid ?? null,
+          },
+        );
+        console.log(
+          `[Win MDM] 已自動排入 rename udid=${udid} template="${config.namingTemplate}" name="${renameResult.appliedName}"`,
+        );
+      }
+    }
+  } catch (e) {
+    console.warn(
+      `[Win MDM] 自動命名失敗（不影響註冊）: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 

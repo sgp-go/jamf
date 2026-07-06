@@ -51,6 +51,10 @@ export const WEBHOOK_EVENT_TYPES = [
   "device.soft_wipe_started",
   "device.soft_wiped",
   "device.soft_wipe_failed",
+
+  // ─ Kiosk Mode（PRD Phase 3）─
+  "kiosk.applied",
+  "kiosk.failed",
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

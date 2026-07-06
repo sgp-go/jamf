@@ -312,6 +312,15 @@ const mdmConfigSchema = z
         "自動派發此 app 給設備。為 null 時 hook 會 warn 並跳過 install-agent（避免誤派發任意 MSI）。",
       example: "6015f333-8075-432b-bbea-b7dcbadf0022",
     }),
+    namingTemplate: z.string().nullable().openapi({
+      description:
+        "**【選填】** 設備自動命名模板（PRD §5.1）。非空時 enrollment hook 自動派 SetComputerName。" +
+        "模板變數：`{schoolCode}` = device_group.code；`{serial}` = 全序號；`{serial4}` = 後 4 碼；`{udid8}` = udid 前 8 碼。" +
+        "例：`\"{schoolCode}-{serial4}\"` → `TPE001-1234`。" +
+        "⚠️ enrollment 時序：Windows enroll 完成 → 派 rename 命令入 queue → 設備首次 SyncML session pull DevDetail（含 serial）後執行 rename。" +
+        "若 template 含 `{serial*}` 但 enroll 那一刻 device row 尚無 serial（首次未 sync），會展開為 `0000`。建議 template 用 `{udid8}` 作主變數。",
+      example: "{schoolCode}-{serial4}",
+    }),
   })
   .openapi("MdmConfig");
 
@@ -333,6 +342,11 @@ const mdmConfigUpdateBody = z
         "傳 UUID 設定 / 換 agent 版本。不傳此欄位則不修改。" +
         "**FK 校驗**：UUID 必須對應同 tenant + platform=windows + kind=msi 的 app，否則 409。",
       example: "6015f333-8075-432b-bbea-b7dcbadf0022",
+    }),
+    namingTemplate: z.string().max(128).nullable().optional().openapi({
+      description:
+        "**【選填】** 設備自動命名模板；傳 null 清除。變數 `{schoolCode}` / `{serial}` / `{serial4}` / `{udid8}`。例：`\"{schoolCode}-{serial4}\"`",
+      example: "{schoolCode}-{serial4}",
     }),
   })
   .openapi("MdmConfigUpdate");
@@ -466,6 +480,7 @@ tenantsAdminApp.openapi(createMdmConfigSpec, async (c) => {
     publicBaseUrl: selfMdmConfigs.publicBaseUrl,
     appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl,
     agentAppId: selfMdmConfigs.agentAppId,
+    namingTemplate: selfMdmConfigs.namingTemplate,
   });
 
   await logAudit({
@@ -487,7 +502,12 @@ tenantsAdminApp.openapi(getMdmConfigSpec, async (c) => {
   const { eq } = await import("drizzle-orm");
   const cfg = await db.query.selfMdmConfigs.findFirst({
     where: eq(selfMdmConfigs.tenantId, tenantId),
-    columns: { publicBaseUrl: true, appDownloadBaseUrl: true, agentAppId: true },
+    columns: {
+      publicBaseUrl: true,
+      appDownloadBaseUrl: true,
+      agentAppId: true,
+      namingTemplate: true,
+    },
   });
   if (!cfg) throw new AppError(404, "mdm_config_not_found", "此 tenant 無 MDM 配置");
   return c.json({ ok: true as const, data: cfg }, 200);
@@ -526,6 +546,9 @@ tenantsAdminApp.openapi(updateMdmConfigSpec, async (c) => {
     }
     updates.agentAppId = body.agentAppId;
   }
+  if (body.namingTemplate !== undefined) {
+    updates.namingTemplate = body.namingTemplate;
+  }
 
   if (Object.keys(updates).length === 0) {
     throw new AppError(400, "no_fields", "至少提供一個欄位");
@@ -539,6 +562,7 @@ tenantsAdminApp.openapi(updateMdmConfigSpec, async (c) => {
       publicBaseUrl: selfMdmConfigs.publicBaseUrl,
       appDownloadBaseUrl: selfMdmConfigs.appDownloadBaseUrl,
       agentAppId: selfMdmConfigs.agentAppId,
+      namingTemplate: selfMdmConfigs.namingTemplate,
     });
 
   if (!row) throw new AppError(404, "mdm_config_not_found", "此 tenant 無 MDM 配置");
