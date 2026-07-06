@@ -4,6 +4,8 @@ import {
   buildBlockedSites,
   buildIESiteZoneClear,
   buildEdgeAdmxInstall,
+  buildEdgeUrlAllowlist,
+  buildEdgeUrlAllowlistClear,
   buildEdgeUrlBlocklist,
   buildEdgeUrlBlocklistClear,
   buildEdgeBrowserSignin,
@@ -243,10 +245,43 @@ Deno.test("buildEdgeBrowserSigninClear: data=<disabled/>", () => {
   assertEquals(cmd.data, "<disabled/>");
 });
 
-Deno.test("buildEdgeAdmxInstall: XML 同時含 URLBlocklist + BrowserSignin policy", () => {
+Deno.test("buildEdgeAdmxInstall: XML 同時含 URLBlocklist + URLAllowlist + BrowserSignin policy", () => {
   const cmd = buildEdgeAdmxInstall();
   const xml = cmd.data ?? "";
   assertEquals(xml.includes("EdgeUrlBlocklist"), true);
+  assertEquals(xml.includes("EdgeUrlAllowlist"), true);
+  assertEquals(xml.includes("URLAllowlistDesc"), true);
   assertEquals(xml.includes("EdgeBrowserSignin"), true);
   assertEquals(xml.includes("BrowserSigninValue"), true);
+});
+
+Deno.test("buildEdgeUrlAllowlist: 單一 URL 用 bare host + ADMX list encoding", () => {
+  const cmd = buildEdgeUrlAllowlist(["exam.school.edu.tw"]);
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/Config/CoGrowMDM~Policy~CoGrowEdge/EdgeUrlAllowlist",
+  );
+  assertEquals(
+    cmd.data,
+    `<enabled/><data id="URLAllowlistDesc" value="1${SEP}exam.school.edu.tw"/>`,
+  );
+});
+
+Deno.test("buildEdgeUrlAllowlist: 多 URL 依序 1..N 編號", () => {
+  const cmd = buildEdgeUrlAllowlist(["a.tw", "b.gov.tw", "*.edu.tw"]);
+  assertEquals(
+    cmd.data,
+    `<enabled/><data id="URLAllowlistDesc" value="1${SEP}a.tw${SEP}2${SEP}b.gov.tw${SEP}3${SEP}edu.tw"/>`,
+  );
+});
+
+Deno.test("buildEdgeUrlAllowlist: 空陣列拋錯", () => {
+  assertThrows(() => buildEdgeUrlAllowlist([]), Error, "urls 不可為空");
+});
+
+Deno.test("buildEdgeUrlAllowlistClear: data=<disabled/>", () => {
+  const cmd = buildEdgeUrlAllowlistClear();
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(cmd.data, "<disabled/>");
 });

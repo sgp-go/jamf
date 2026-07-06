@@ -1,0 +1,1 @@
+ALTER TABLE "kiosk_profiles" ADD COLUMN "allowed_urls" jsonb;

@@ -113,6 +113,20 @@
       "when": 1783071986891,
       "tag": "0015_round_maddog",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1783308127713,
+      "tag": "0016_clever_dagger",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783311523895,
+      "tag": "0017_greedy_vapor",
+      "breakpoints": true
     }
   ]
 }

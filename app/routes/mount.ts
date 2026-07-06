@@ -8,6 +8,7 @@ import { geofencesAdminApp } from "~/routes/v1/admin/geofences.ts";
 import { devicesAdminApp } from "~/routes/v1/admin/devices.ts";
 import { enrollmentPpkgAdminApp } from "~/routes/v1/admin/enrollment-ppkg.ts";
 import { firewallAdminApp } from "~/routes/v1/admin/firewall.ts";
+import { kioskAdminApp } from "~/routes/v1/admin/kiosk.ts";
 import { installAgentAdminApp } from "~/routes/v1/admin/install-agent.ts";
 import { jamfInstancesAdminApp } from "~/routes/v1/admin/jamf-instances.ts";
 import { bitlockerAdminApp } from "~/routes/v1/admin/bitlocker.ts";
@@ -59,6 +60,7 @@ export const controlApiMounts: Mount[] = [
   { basePath: "/api/v1", app: bitlockerAdminApp },
   { basePath: "/api/v1", app: devicePoliciesAdminApp },
   { basePath: "/api/v1", app: firewallAdminApp },
+  { basePath: "/api/v1", app: kioskAdminApp },
   { basePath: "/api/v1", app: geofencesAdminApp },
 ];
 

@@ -24,6 +24,7 @@
 | [bitlocker-management.md](bitlocker-management.md) | BitLocker 磁碟加密：ADMX 信箱靜默加密 → Recovery Key 捕獲 → 加密狀態查詢 → 故障排除 |
 | [agent-upgrade-rollback-strategy.md](agent-upgrade-rollback-strategy.md) | Agent 升級與回滾：灰度分階段推送 → 健康驗證指標 → 回滾操作 → 自我保護注意事項 |
 | [device-lifecycle.md](device-lifecycle.md) | 設備生命週期：納管自動鏈路（全 10+ 步） → 移除納管（10 步清理） → 遠端鎖屏 / 抹機 / 重啟 |
+| [kiosk-mode-integration-guide.md](kiosk-mode-integration-guide.md) | **Kiosk Mode 對接**（PRD Phase 3）：AssignedAccess CSP → UWP / Chromium Edge 兩模式 → URL 白名單（URLBlocklist+Allowlist）→ 應急退出 Ctrl+B → **session-bound 切換需 sign out / activation=reboot** → 6 大真機教訓清單 |
 | [demo-walkthrough.md](demo-walkthrough.md) | **端到端 demo 演示腳本**（10-15 分鐘走完）：enroll → agent 自動裝 → LOCK/UNLOCK → 任意 MSI install/uninstall → REBOOT；含演示前 checklist + 常見問題排查 |
 
 ### C. 技術參考（排錯 / 原理，自探索期遷入）

@@ -126,6 +126,12 @@ export function buildIESiteZoneClear(
   };
 }
 
+/**
+ * ADMX list-encoded value 元素分隔符（U+F000）。
+ * 官方 encoding：`key1<F000>value1<F000>key2<F000>value2...`
+ */
+const ADMX_LIST_SEP = String.fromCharCode(0xF000);
+
 /** ADMX value 屬性內字串需 escape 的字元（&、<、"） */
 function escapeAdmxValue(s: string): string {
   return s
@@ -154,6 +160,8 @@ const EDGE_ADMX_ID = "EdgePolicy";
 const EDGE_POLICY_AREA = `${ADMX_APP}~Policy~CoGrowEdge`;
 const EDGE_URL_BLOCKLIST_TARGET =
   `./Device/Vendor/MSFT/Policy/Config/${EDGE_POLICY_AREA}/EdgeUrlBlocklist`;
+const EDGE_URL_ALLOWLIST_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${EDGE_POLICY_AREA}/EdgeUrlAllowlist`;
 const EDGE_BROWSER_SIGNIN_TARGET =
   `./Device/Vendor/MSFT/Policy/Config/${EDGE_POLICY_AREA}/EdgeBrowserSignin`;
 
@@ -179,6 +187,12 @@ const EDGE_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
       <parentCategory ref="CoGrowEdge" />
       <elements>
         <list id="URLBlocklistDesc" key="Software\\Policies\\Microsoft\\Edge\\URLBlocklist" valuePrefix="" />
+      </elements>
+    </policy>
+    <policy name="EdgeUrlAllowlist" class="Machine" displayName="Edge URL Allowlist" explainText="Chromium Edge URLAllowlist (Kiosk 白名單)" key="Software\\Policies\\Microsoft\\Edge">
+      <parentCategory ref="CoGrowEdge" />
+      <elements>
+        <list id="URLAllowlistDesc" key="Software\\Policies\\Microsoft\\Edge\\URLAllowlist" valuePrefix="" />
       </elements>
     </policy>
     <policy name="EdgeBrowserSignin" class="Machine" displayName="Edge Browser Signin" explainText="Chromium Edge BrowserSignin: 0=Disable / 1=Enable / 2=Force" key="Software\\Policies\\Microsoft\\Edge" valueName="BrowserSignin">
@@ -269,6 +283,52 @@ export function buildEdgeUrlBlocklistClear(): SyncMLCommand {
     cmdId: "0",
     verb: "Replace",
     target: EDGE_URL_BLOCKLIST_TARGET,
+    format: "chr",
+    data: "<disabled/>",
+  };
+}
+
+/**
+ * 對 Edge Chromium 派下 URLAllowlist policy（白名單，Kiosk 專用）。
+ *
+ * **語義**：一旦 URLAllowlist 有值，**只有**名單內的 URL 才准訪問，
+ * 其他一律 blocked（比 URLBlocklist 更嚴，適合考試場景）。
+ * URLAllowlist 也 override URLBlocklist：白名單 + 黑名單同時存在時，
+ * 白名單優先允許，其他被 block。
+ *
+ * urls 語法同 Chromium URLBlocklist（見 hostToUrlBlockPattern 註解）：
+ * bare host 匹配 host + subdomains，帶 scheme/path 則原樣。
+ *
+ * 重推 = 覆蓋，不 append。
+ */
+export function buildEdgeUrlAllowlist(urls: string[]): SyncMLCommand {
+  if (!Array.isArray(urls) || urls.length === 0) {
+    throw new Error("buildEdgeUrlAllowlist: urls 不可為空");
+  }
+  const pairs: string[] = [];
+  urls.forEach((u, i) => {
+    pairs.push(String(i + 1));
+    pairs.push(escapeAdmxValue(hostToUrlBlockPattern(u)));
+  });
+  // ADMX list encoding：U+F000 作為 key/value 及元素之間的分隔（同 URLBlocklist）
+  const value = pairs.join("");
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: EDGE_URL_ALLOWLIST_TARGET,
+    format: "chr",
+    data: `<enabled/><data id="URLAllowlistDesc" value="${value}"/>`,
+  };
+}
+
+/**
+ * 清除 Edge URLAllowlist（送 <disabled/> 讓政策不生效 → 恢復無白名單）。
+ */
+export function buildEdgeUrlAllowlistClear(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target: EDGE_URL_ALLOWLIST_TARGET,
     format: "chr",
     data: "<disabled/>",
   };

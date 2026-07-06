@@ -8,6 +8,7 @@ export * from "./bitlocker.ts";
 export * from "./compliance.ts";
 export * from "./firewall.ts";
 export * from "./geofences.ts";
+export * from "./kiosk.ts";
 export * from "./laps.ts";
 export * from "./profiles.ts";
 export * from "./relations.ts";
