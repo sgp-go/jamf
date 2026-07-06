@@ -24,6 +24,7 @@ import { touchDeviceLastSeen } from "~/services/mdm/devices.ts";
 import { verifyUsageSignature } from "~/services/usage-signature.ts";
 import { publishEvent } from "~/services/webhooks/index.ts";
 import { recordWingetResult } from "~/services/winget-deploy.ts";
+import { replaceInstalledApps } from "~/services/installed-apps.ts";
 
 /**
  * /api/v1/tenants/{tenantId}/agent/*
@@ -627,6 +628,102 @@ const gpsQuerySchema = z
   })
   .openapi("DeviceGpsLatest");
 
+// ─ Installed Apps（MSI / Win32 已裝清單，PRD §4.2）─
+
+const installedAppItemSchema = z
+  .object({
+    uninstallKey: z.string().min(1).max(256).openapi({
+      description:
+        "Registry Uninstall 子 key 名（GUID `{XXXXXXXX-...}` 或 exe 廠商自訂）；設備內唯一",
+      example: "{6015F333-8075-432B-BBEA-B7DCBADF0022}",
+    }),
+    displayName: z.string().min(1).openapi({
+      description: "軟體顯示名（Registry `DisplayName`）",
+      example: "Microsoft Edge",
+    }),
+    displayVersion: z.string().nullable().optional().openapi({
+      description: "**【選填】** 版本字串",
+      example: "128.0.2739.79",
+    }),
+    publisher: z.string().nullable().optional().openapi({
+      description: "**【選填】** 廠商",
+      example: "Microsoft Corporation",
+    }),
+    installDate: z.string().nullable().optional().openapi({
+      description:
+        "**【選填】** 安裝日期；Agent 端建議送 ISO 8601（原 registry `YYYYMMDD` 也接受）",
+      example: "2026-05-14",
+    }),
+    estimatedSizeKb: z.number().int().nonnegative().nullable().optional()
+      .openapi({
+        description: "**【選填】** 估算佔用空間（KB，registry `EstimatedSize`）",
+        example: 348192,
+      }),
+    uninstallString: z.string().nullable().optional().openapi({
+      description: "**【選填】** 卸載命令列（管理員參考，backend 不主動執行）",
+    }),
+  })
+  .openapi("InstalledAppItem");
+
+const installedAppsBody = z
+  .object({
+    serialNumber: z.string().min(1).openapi({
+      description: "設備序號",
+      example: "PF5XSMN1",
+    }),
+    apps: z.array(installedAppItemSchema).openapi({
+      description: "設備當前完整已裝軟體清單（backend 全量替換）",
+    }),
+  })
+  .openapi("AgentInstalledAppsInput");
+
+const installedAppsSavedSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    upserted: z.number().int().openapi({
+      description: "本次 upsert 的 row 數",
+    }),
+    removed: z.number().int().openapi({
+      description: "本次刪除的 stale row 數（上次上報有但本次沒回報的）",
+    }),
+  })
+  .openapi("AgentInstalledAppsSaved");
+
+const installedAppsReportRoute = createRoute({
+  method: "post",
+  path: "/tenants/{tenantId}/agent/installed-apps",
+  tags: ["Agent 上報"],
+  summary: "上報設備 MSI / Win32 已裝軟體清單（全量替換）",
+  description: [
+    "Agent 掃 registry Uninstall keys（HKLM 64/32 bit + HKCU）取得已裝軟體清單並上報。",
+    "backend 用全量替換：upsert 本次全部 + 刪除上次有本次沒回報的 stale row。",
+    "",
+    "**MSIX / UWP 應用不走本端點**（那條走 AppInventory CSP pull，落 `mdm_windows_apps` 表）。",
+    "",
+    "**鑑權**：同其它 agent 端點，若 device 已簽發 token 則必須帶 Bearer。",
+    "",
+    "**上報頻率**（建議 Agent 端）：",
+    "- 首次啟動一次",
+    "- 之後每 24h 一次（跟 DeviceFacts daily report 同節奏）",
+    "- App 派發 / 卸載後也可主動觸發（讓管理員後台立即看得到）",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: { content: { "application/json": { schema: installedAppsBody } } },
+  },
+  responses: {
+    200: {
+      description: "清單已更新",
+      content: {
+        "application/json": {
+          schema: successSchema(installedAppsSavedSchema),
+        },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
 const gpsQueryRoute = createRoute({
   method: "get",
   path: "/tenants/{tenantId}/agent/devices/{serialNumber}/gps",
@@ -1091,4 +1188,42 @@ agentApp.openapi(gpsQueryRoute, async (c) => {
   const deviceId = await resolveDeviceBySerial({ tenantId, serialNumber });
   const gps = await getDeviceGps({ tenantId, deviceId });
   return c.json({ ok: true as const, data: gps }, 200);
+});
+
+agentApp.openapi(installedAppsReportRoute, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+  const token = extractBearerToken(c.req.header("authorization"));
+
+  const device = await resolveAgentDevice({
+    tenantId,
+    serialNumber: body.serialNumber,
+    token,
+  });
+  await authorizeAgentReport({ device, token });
+
+  const result = await replaceInstalledApps({
+    tenantId,
+    deviceId: device.id,
+    apps: body.apps,
+  });
+
+  void publishEvent({
+    tenantId,
+    eventType: "inventory.updated",
+    data: {
+      device_id: device.id,
+      serial_number: body.serialNumber,
+      inventory_type: "installed_win32_apps",
+      upserted: result.upserted,
+      removed: result.removed,
+    },
+  }).catch((err) => {
+    console.error("[installed-apps] publishEvent failed", err);
+  });
+
+  return c.json({
+    ok: true as const,
+    data: { deviceId: device.id, ...result },
+  }, 200);
 });

@@ -67,6 +67,8 @@ builder.Services.AddSingleton<IUsageStore>(sp =>
 builder.Services.AddHttpClient<DeviceReporter>();
 builder.Services.AddHttpClient<UsageReporter>();
 builder.Services.AddHttpClient<GpsReporter>();
+builder.Services.AddHttpClient<InstalledAppsReporter>();
+builder.Services.AddSingleton<InstalledAppsCollector>();
 builder.Services.AddHttpClient<StartupCheckinService>();
 builder.Services.AddHostedService<StartupCheckinService>();
 builder.Services.AddHostedService<Worker>();

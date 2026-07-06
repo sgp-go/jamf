@@ -134,6 +134,13 @@
       "when": 1783327162729,
       "tag": "0018_cheerful_shooting_star",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783328166339,
+      "tag": "0019_cute_terror",
+      "breakpoints": true
     }
   ]
 }

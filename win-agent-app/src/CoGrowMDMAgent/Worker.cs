@@ -33,6 +33,8 @@ public class Worker : BackgroundService
     private readonly DeviceReporter _deviceReporter;
     private readonly UsageReporter _usageReporter;
     private readonly GpsReporter _gpsReporter;
+    private readonly InstalledAppsReporter _installedAppsReporter;
+    private readonly InstalledAppsCollector _installedAppsCollector;
     private readonly IUsageStore _usageStore;
     private readonly DeviceFactsCollector _facts;
     private readonly IReportQueue _queue;
@@ -44,6 +46,8 @@ public class Worker : BackgroundService
         DeviceReporter deviceReporter,
         UsageReporter usageReporter,
         GpsReporter gpsReporter,
+        InstalledAppsReporter installedAppsReporter,
+        InstalledAppsCollector installedAppsCollector,
         IUsageStore usageStore,
         DeviceFactsCollector facts,
         IReportQueue queue,
@@ -54,6 +58,8 @@ public class Worker : BackgroundService
         _deviceReporter = deviceReporter;
         _usageReporter = usageReporter;
         _gpsReporter = gpsReporter;
+        _installedAppsReporter = installedAppsReporter;
+        _installedAppsCollector = installedAppsCollector;
         _usageStore = usageStore;
         _facts = facts;
         _queue = queue;
@@ -146,6 +152,36 @@ public class Worker : BackgroundService
         }
 
         await ReportUsageAsync(ct);
+        await ReportInstalledAppsAsync(ct);
+    }
+
+    /// <summary>
+    /// 上報 MSI / Win32 已裝軟體清單（PRD §4.2）。跟 DeviceFacts / Usage 同節奏，
+    /// 每次 report cycle 一次。全量替換由 backend 處理，Agent 只送當前 snapshot。
+    /// 非 Windows 平台跳過（Collector 需要 registry 存取）。
+    /// </summary>
+    private async Task ReportInstalledAppsAsync(CancellationToken ct)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        try
+        {
+            var apps = _installedAppsCollector.Collect();
+            await _installedAppsReporter.ReportAsync(
+                new InstalledAppsPayload
+                {
+                    SerialNumber = _facts.CollectSerialNumber(),
+                    Apps = apps,
+                },
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "InstalledApps report failed — payload enqueued for retry");
+        }
     }
 
     /// <summary>
@@ -222,6 +258,8 @@ public class Worker : BackgroundService
                 ReportType.DeviceReport => await _deviceReporter.RetryAsync(item.Payload, ct),
                 ReportType.UsageReport => await _usageReporter.RetryAsync(item.Payload, ct),
                 ReportType.GpsReport => await _gpsReporter.RetryAsync(item.Payload, ct),
+                ReportType.InstalledAppsReport =>
+                    await _installedAppsReporter.RetryAsync(item.Payload, ct),
                 _ => false,
             };
 

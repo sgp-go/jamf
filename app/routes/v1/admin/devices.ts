@@ -10,6 +10,7 @@ import {
   transferDeviceToGroup,
   updateDeviceInventory,
 } from "~/services/devices.ts";
+import { listInstalledApps } from "~/services/installed-apps.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/devices/*
@@ -405,4 +406,59 @@ devicesAdminApp.openapi(inventorySpec, async (c) => {
     payload: patch,
   });
   return c.json({ ok: true as const, data: result }, 200);
+});
+
+// ─ Installed MSI / Win32 Apps 查詢（PRD §4.2） ─
+
+const installedAppRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    uninstallKey: z.string(),
+    displayName: z.string(),
+    displayVersion: z.string().nullable(),
+    publisher: z.string().nullable(),
+    installDate: z.string().nullable(),
+    estimatedSizeKb: z.number().int().nullable(),
+    uninstallString: z.string().nullable(),
+    lastSyncedAt: z.string(),
+  })
+  .openapi("InstalledWin32App");
+
+const installedAppsSpec = createRoute({
+  method: "get",
+  path: "/admin/tenants/{tenantId}/devices/{deviceId}/installed-apps",
+  tags: ["設備操作"],
+  security,
+  summary: "查詢設備 MSI / Win32 已裝軟體清單（PRD §4.2 App 安裝清單）",
+  description: [
+    "回傳設備 Agent 上次上報的 MSI / Win32 軟體清單（registry Uninstall keys 掃描結果）。",
+    "設備從未上報過會回空陣列。",
+    "",
+    "**鑑權**：Bearer admin token。",
+    "",
+    "**注意**：",
+    "- MSIX / UWP 軟體不在此清單（那走 AppInventory CSP pull，用 `mdm_windows_apps` 表）。",
+    "- 資料來自 `POST /agent/installed-apps` 上報；Agent 未升到帶此功能版本前清單為空。",
+  ].join("\n"),
+  request: { params: tenantDeviceParam },
+  responses: {
+    200: {
+      description: "已裝軟體清單（按 displayName 順序）",
+      content: {
+        "application/json": {
+          schema: successSchema(z.array(installedAppRowSchema)),
+        },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+devicesAdminApp.openapi(installedAppsSpec, async (c) => {
+  const { tenantId, deviceId } = c.req.valid("param");
+  const rows = await listInstalledApps({ tenantId, deviceId });
+  const sorted = rows
+    .slice()
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return c.json({ ok: true as const, data: sorted }, 200);
 });

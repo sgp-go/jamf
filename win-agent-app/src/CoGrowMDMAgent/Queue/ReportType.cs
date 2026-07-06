@@ -9,4 +9,5 @@ public static class ReportType
     public const string DeviceReport = "device_report";
     public const string UsageReport = "usage_report";
     public const string GpsReport = "gps_report";
+    public const string InstalledAppsReport = "installed_apps_report";
 }
