@@ -16,11 +16,11 @@ async function importLaps() {
 const hasDb = !!Deno.env.get("DATABASE_URL");
 
 Deno.test({
-  name: "generateLapsPassword: 預設長度 20",
+  name: "generateLapsPassword: 預設長度 8",
   ignore: !hasDb,
   fn: async () => {
     const { generateLapsPassword } = await importLaps();
-    assertEquals(generateLapsPassword().length, 20);
+    assertEquals(generateLapsPassword().length, 8);
   },
 });
 
@@ -34,7 +34,7 @@ Deno.test({
 });
 
 Deno.test({
-  name: "generateLapsPassword: 包含大寫、小寫、數字、符號",
+  name: "generateLapsPassword: 含大寫、小寫、數字，且不含特殊符號",
   ignore: !hasDb,
   fn: async () => {
     const { generateLapsPassword } = await importLaps();
@@ -42,7 +42,8 @@ Deno.test({
     assertMatch(pwd, /[A-Z]/);
     assertMatch(pwd, /[a-z]/);
     assertMatch(pwd, /[0-9]/);
-    assertMatch(pwd, /[^A-Za-z0-9]/);
+    // 僅字母數字，無任何非 [A-Za-z0-9] 字元
+    assertEquals(/[^A-Za-z0-9]/.test(pwd), false);
   },
 });
 

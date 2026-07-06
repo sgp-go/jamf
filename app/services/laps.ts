@@ -21,22 +21,21 @@ import { enqueueWindowsCommand } from "~/services/mdm/windows/command.ts";
  */
 const FALLBACK_ADMIN_ACCOUNT = "ITAdmin";
 export type AccountType = "admin" | "student" | "other";
-const DEFAULT_PASSWORD_LENGTH = 20;
+const DEFAULT_PASSWORD_LENGTH = 8;
 const STALE_PENDING_HOURS = 24;
 
-// 密碼字元集：避開 shell 問題字元（"、'、`、\）
+// 密碼字元集：僅大小寫字母 + 數字（不含特殊符號，避免相容性 / 輸入問題）。
 const CHARSET_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const CHARSET_LOWER = "abcdefghijklmnopqrstuvwxyz";
 const CHARSET_DIGIT = "0123456789";
-const CHARSET_SYMBOL = "!@#$%^&*()-_=+[]{}|;:,.<>?/~";
-const CHARSET_ALL = CHARSET_UPPER + CHARSET_LOWER + CHARSET_DIGIT + CHARSET_SYMBOL;
+const CHARSET_ALL = CHARSET_UPPER + CHARSET_LOWER + CHARSET_DIGIT;
 
 /**
- * 生成密碼：每個字元類別至少出現一次，其餘隨機填充。
+ * 生成密碼：預設 8 位，含大寫 / 小寫 / 數字各至少一個，其餘隨機填充（僅字母數字，無符號）。
  * 使用 crypto.randomBytes 確保密碼學安全隨機。
  */
 export function generateLapsPassword(length = DEFAULT_PASSWORD_LENGTH): string {
-  if (length < 4) throw new RangeError("密碼長度至少 4（每類別至少一個字元）");
+  if (length < 3) throw new RangeError("密碼長度至少 3（每類別至少一個字元）");
 
   const pick = (charset: string): string => {
     const bytes = randomBytes(1);
@@ -47,11 +46,10 @@ export function generateLapsPassword(length = DEFAULT_PASSWORD_LENGTH): string {
     pick(CHARSET_UPPER),
     pick(CHARSET_LOWER),
     pick(CHARSET_DIGIT),
-    pick(CHARSET_SYMBOL),
   ];
 
   const rest: string[] = [];
-  for (let i = 0; i < length - 4; i++) {
+  for (let i = 0; i < length - 3; i++) {
     rest.push(pick(CHARSET_ALL));
   }
 
