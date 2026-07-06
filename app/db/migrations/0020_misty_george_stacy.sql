@@ -1,0 +1,1 @@
+ALTER TABLE "mdm_devices" ADD COLUMN "assigned_name" text;

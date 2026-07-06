@@ -10,7 +10,7 @@
  */
 
 import { db } from "~/db/client.ts";
-import type { MdmDevice } from "~/db/schema/devices.ts";
+import { type MdmDevice, mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
 import {
   enqueueWindowsCommand,
@@ -25,7 +25,9 @@ import {
   buildAppLockerPolicy,
   buildCameraPolicy,
   buildFirewallPolicy,
-  buildSetComputerName,
+  assertValidComputerName,
+  buildRenameAdmxInstall,
+  buildDeviceRename,
   type WiFiProfileInput,
   type PersonalizationInput,
   type PasswordPolicyInput,
@@ -375,6 +377,47 @@ export function renderDeviceNameTemplate(
     .replace(/\{udid8\}/g, udid8);
 }
 
+/** template 是否依賴序號（{serial} / {serial4}）。含序號變數時，enroll 當下序號尚未 pull，
+ * 需等 agent 首次上報 backfill 序號後才能算出最終名稱。 */
+export function templateNeedsSerial(template: string): boolean {
+  return /\{serial4?\}/.test(template);
+}
+
+export type DeviceRenameSkipReason =
+  | "no_template" // tenant 未設 namingTemplate
+  | "awaiting_serial" // template 需序號但序號尚未 sync（等下次上報）
+  | "already_applied"; // 目標名 == 已派名，無需重派
+
+export type DeviceRenameDecision =
+  | { action: "dispatch"; desiredName: string }
+  | { action: "skip"; reason: DeviceRenameSkipReason; desiredName?: string };
+
+/**
+ * 自動命名純決策：給定 template / 當前 context / 已派名（assignedName），
+ * 判斷是否需要派 rename。無副作用，供 reconcile 與單元測試共用。
+ *
+ * - 無 template → skip no_template
+ * - template 需序號但序號缺 → skip awaiting_serial（避免派出 {serial4}=0000 的錯名）
+ * - 算出的目標名 == assignedName → skip already_applied（去重，避免每次上報重派）
+ * - 否則 → dispatch desiredName
+ */
+export function decideDeviceRename(opts: {
+  template: string | null | undefined;
+  ctx: RenameTemplateContext;
+  assignedName: string | null;
+}): DeviceRenameDecision {
+  const template = opts.template?.trim();
+  if (!template) return { action: "skip", reason: "no_template" };
+  if (templateNeedsSerial(template) && !opts.ctx.serialNumber) {
+    return { action: "skip", reason: "awaiting_serial" };
+  }
+  const desiredName = renderDeviceNameTemplate(template, opts.ctx);
+  if (desiredName === opts.assignedName) {
+    return { action: "skip", reason: "already_applied", desiredName };
+  }
+  return { action: "dispatch", desiredName };
+}
+
 export interface RenameDeviceInput {
   /** 直接指定名稱（與 template 二選一） */
   explicitName?: string;
@@ -397,10 +440,9 @@ export async function pushDeviceRenameToDevice(
   const appliedName = input.explicitName
     ?? renderDeviceNameTemplate(input.template!, ctx);
 
-  // buildSetComputerName 會驗證長度與字元；非法直接拋
-  let cmd: SyncMLCommand;
+  // 驗證計算機名（≤15 字、無非法字元）；非法直接拋 400
   try {
-    cmd = buildSetComputerName(appliedName);
+    assertValidComputerName(appliedName);
   } catch (e) {
     throw new AppError(
       400,
@@ -408,12 +450,85 @@ export async function pushDeviceRenameToDevice(
       e instanceof Error ? e.message : String(e),
     );
   }
-  const id = await enqueueWindowsCommand({
+
+  // Accounts CSP Domain/ComputerName 對 workgroup / PPKG 設備 406 不支援（真機 PF5XSMN1 驗），
+  // 改走 agent 信箱：ADMX ingest（idempotent，確保信箱存在）+ DeviceRename policy Replace 同 batch，
+  // Agent RenameWatcher 讀 HKLM\Software\CoGrow\Agent\Rename 跑 Rename-Computer（reboot 生效）。
+  const renameId = crypto.randomUUID();
+  const commandIds = await enqueueWindowsCommandsBatch({
     deviceUdid: device.udid!,
-    commandType: "RenameDevice",
-    command: cmd,
+    commands: [
+      { commandType: "policy_admx_install", command: buildRenameAdmxInstall() },
+      {
+        commandType: "RenameDevice",
+        command: buildDeviceRename({ newName: appliedName, renameId })[0],
+      },
+    ],
   });
-  return { commandIds: [id], appliedName };
+  // 持久化「已派的目標名」——所有 rename 路徑（admin 手動 + 自動 reconcile）都經此，
+  // 讓 reconcileDeviceName 能靠 assignedName 去重，不會每次上報重派同名 rename。
+  await db.update(mdmDevices).set({ assignedName: appliedName, updatedAt: new Date() })
+    .where(eq(mdmDevices.id, device.id));
+  return { commandIds, appliedName };
+}
+
+/**
+ * 自動命名 reconcile（PRD §5.1）：把設備名對齊到 tenant 的 namingTemplate 展開結果。
+ *
+ * enroll 當下序號通常還沒 pull（含 {serial*} 的 template 算不出最終名），故不在 enroll 硬派；
+ * 改由此函式在「① enroll hook ② agent 每次上報（序號已 backfill）」被呼叫，做 desired-state
+ * 收斂：序號到位、且目標名 != 已派名時才派一次 rename（agent 信箱），之後上報自動 skip。
+ *
+ * 非 Windows / 無 udid / 無 template / 序號未到 / 已套用 → 一律安全 skip，不拋。
+ */
+export async function reconcileDeviceName(opts: {
+  tenantId: string;
+  deviceId: string;
+}): Promise<DeviceRenameDecision | { action: "skip"; reason: "not_windows" }> {
+  const cfg = await db.query.selfMdmConfigs.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.tenantId, opts.tenantId), eqOp(t.isActive, true)),
+    columns: { namingTemplate: true },
+  });
+
+  const device = await db.query.mdmDevices.findFirst({
+    where: (t, { and: andOp, eq: eqOp }) =>
+      andOp(eqOp(t.id, opts.deviceId), eqOp(t.tenantId, opts.tenantId)),
+    columns: {
+      id: true,
+      tenantId: true,
+      platform: true,
+      udid: true,
+      serialNumber: true,
+      deviceGroupId: true,
+      assignedName: true,
+    },
+  });
+  if (!device || device.platform !== "windows" || !device.udid) {
+    return { action: "skip", reason: "not_windows" };
+  }
+
+  const schoolCode = device.deviceGroupId
+    ? (await db.query.deviceGroups.findFirst({
+      where: (t, { eq: eqOp }) => eqOp(t.id, device.deviceGroupId!),
+      columns: { code: true },
+    }))?.code ?? null
+    : null;
+
+  const ctx: RenameTemplateContext = {
+    schoolCode,
+    serialNumber: device.serialNumber,
+    udid: device.udid,
+  };
+  const decision = decideDeviceRename({
+    template: cfg?.namingTemplate,
+    ctx,
+    assignedName: device.assignedName,
+  });
+  if (decision.action === "dispatch") {
+    await pushDeviceRenameToDevice(device, { template: cfg!.namingTemplate! }, ctx);
+  }
+  return decision;
 }
 
 // ============================================================

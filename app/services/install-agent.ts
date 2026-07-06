@@ -9,6 +9,7 @@ import {
   buildLapsRotation,
   buildLockAdmxInstall,
   buildPpkgRemovalAdmxInstall,
+  buildRenameAdmxInstall,
   buildSelfUninstallAdmxInstall,
   buildMsiInstall,
   buildMsiStatusQuery,
@@ -198,6 +199,7 @@ export async function installAgentOnDevice(
     { commandType: "policy_admx_install", cmd: buildLapsAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildPpkgRemovalAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildSelfUninstallAdmxInstall(), commandUuid: crypto.randomUUID() },
+    { commandType: "policy_admx_install", cmd: buildRenameAdmxInstall(), commandUuid: crypto.randomUUID() },
     { commandType: "policy_admx_install", cmd: buildBitLockerAdmxInstall(), commandUuid: crypto.randomUUID() },
     // LostMode ADMX：信箱 HKLM\Software\CoGrow\Agent\LostMode，GpsCollector 讀 Enabled 切高頻
     { commandType: "policy_admx_install", cmd: buildLostModeAdmxInstall(), commandUuid: crypto.randomUUID() },

@@ -1,5 +1,9 @@
 import { assertEquals } from "jsr:@std/assert@^1";
-import { renderDeviceNameTemplate } from "./device-policies.ts";
+import {
+  decideDeviceRename,
+  renderDeviceNameTemplate,
+  templateNeedsSerial,
+} from "./device-policies.ts";
 
 const CTX = {
   schoolCode: "TPE001",
@@ -53,6 +57,79 @@ Deno.test("renderDeviceNameTemplate: {serial} 必須在 {serial4} 後替換（�
     renderDeviceNameTemplate("{serial}-{serial4}", CTX),
     "ABC1234-1234",
   );
+});
+
+// ============================================================
+// templateNeedsSerial：template 是否依賴序號
+// ============================================================
+
+Deno.test("templateNeedsSerial: {serial4} / {serial} 需要序號", () => {
+  assertEquals(templateNeedsSerial("TPE001-{serial4}"), true);
+  assertEquals(templateNeedsSerial("X-{serial}"), true);
+});
+
+Deno.test("templateNeedsSerial: {udid8} / {schoolCode} 不需序號", () => {
+  assertEquals(templateNeedsSerial("{schoolCode}-{udid8}"), false);
+  assertEquals(templateNeedsSerial("FIXED-NAME"), false);
+});
+
+// ============================================================
+// decideDeviceRename：自動命名純決策
+// ============================================================
+
+Deno.test("decideDeviceRename: 無 template → skip no_template", () => {
+  const d = decideDeviceRename({ template: null, ctx: CTX, assignedName: null });
+  assertEquals(d, { action: "skip", reason: "no_template" });
+});
+
+Deno.test("decideDeviceRename: 空白 template → skip no_template", () => {
+  const d = decideDeviceRename({ template: "   ", ctx: CTX, assignedName: null });
+  assertEquals(d, { action: "skip", reason: "no_template" });
+});
+
+Deno.test("decideDeviceRename: template 需序號但序號缺 → skip awaiting_serial（不派 0000）", () => {
+  const d = decideDeviceRename({
+    template: "TPE001-{serial4}",
+    ctx: { schoolCode: "TPE001", serialNumber: null, udid: "windows-abc" },
+    assignedName: null,
+  });
+  assertEquals(d, { action: "skip", reason: "awaiting_serial" });
+});
+
+Deno.test("decideDeviceRename: 序號到位 + 未曾派 → dispatch 正確名", () => {
+  const d = decideDeviceRename({
+    template: "{schoolCode}-{serial4}",
+    ctx: CTX,
+    assignedName: null,
+  });
+  assertEquals(d, { action: "dispatch", desiredName: "TPE001-1234" });
+});
+
+Deno.test("decideDeviceRename: 目標名 == 已派名 → skip already_applied（去重）", () => {
+  const d = decideDeviceRename({
+    template: "{schoolCode}-{serial4}",
+    ctx: CTX,
+    assignedName: "TPE001-1234",
+  });
+  assertEquals(d, { action: "skip", reason: "already_applied", desiredName: "TPE001-1234" });
+});
+
+Deno.test("decideDeviceRename: 已派舊名但 template 算出新名 → dispatch（template 改後收斂）", () => {
+  const d = decideDeviceRename({
+    template: "{schoolCode}-{serial4}",
+    ctx: CTX,
+    assignedName: "OLD-9999",
+  });
+  assertEquals(d, { action: "dispatch", desiredName: "TPE001-1234" });
+});
+
+Deno.test("decideDeviceRename: {udid8}-only template 序號缺也能立即 dispatch（enroll 當下）", () => {
+  const d = decideDeviceRename({
+    template: "{udid8}",
+    ctx: { schoolCode: null, serialNumber: null, udid: "windows-d144fe99-x" },
+    assignedName: null,
+  });
+  assertEquals(d, { action: "dispatch", desiredName: "windowsd" });
 });
 
 // ============================================================

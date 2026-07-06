@@ -1178,6 +1178,98 @@ export function buildLapsClear(): SyncMLCommand[] {
 }
 
 // ============================================================
+// 設備重命名（ADMX-backed Policy CSP → agent RenameWatcher）
+// ============================================================
+//
+// Accounts CSP `Domain/ComputerName` 的遠端 Replace 對 workgroup / PPKG 納管設備回 406
+// （optional feature not supported，非 Entra-joined 場景不支援；真機 PF5XSMN1 2026-07-06 驗）。
+// 改走 agent：與 LAPS 同款 ADMX 信箱 → HKLM\Software\CoGrow\Agent\Rename，
+// Agent 端 RenameWatcher 讀到 Pending=1 後跑 `Rename-Computer`（下次 reboot 生效）。
+
+export const AGENT_RENAME_REG_PATH = "SOFTWARE/CoGrow/Agent/Rename";
+
+const RENAME_ADMX_ID = "RenamePolicy";
+const RENAME_POLICY_AREA = `${LOCK_ADMX_APP}~Policy~CoGrowRename`;
+const RENAME_POLICY_NAME = "DeviceRename";
+const RENAME_POLICY_TARGET =
+  `./Device/Vendor/MSFT/Policy/Config/${RENAME_POLICY_AREA}/${RENAME_POLICY_NAME}`;
+
+const RENAME_ADMX_XML = `<?xml version="1.0" encoding="utf-8"?>
+<policyDefinitions revision="1.0" schemaVersion="1.0">
+  <policyNamespaces>
+    <target prefix="cogrowrename" namespace="CoGrow.MDM.RenamePolicies" />
+  </policyNamespaces>
+  <resources minRequiredRevision="1.0" />
+  <categories>
+    <category name="CoGrowRename" displayName="CoGrow Rename" />
+  </categories>
+  <policies>
+    <policy name="DeviceRename" class="Machine" displayName="Device Rename" explainText="CoGrow device computer name" key="Software\\CoGrow\\Agent\\Rename" valueName="Pending">
+      <parentCategory ref="CoGrowRename" />
+      <enabledValue><decimal value="1" /></enabledValue>
+      <disabledValue><decimal value="0" /></disabledValue>
+      <elements>
+        <text id="NewName" valueName="NewName" />
+        <text id="RenameId" valueName="RenameId" />
+      </elements>
+    </policy>
+  </policies>
+</policyDefinitions>`;
+
+/** Rename ADMX ingest（與 Lock ADMX 獨立 Policy ID）。Replace 統一 idempotent。 */
+export function buildRenameAdmxInstall(): SyncMLCommand {
+  return {
+    cmdId: "0",
+    verb: "Replace",
+    target:
+      `./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/${LOCK_ADMX_APP}/Policy/${RENAME_ADMX_ID}`,
+    format: "chr",
+    data: RENAME_ADMX_XML,
+  };
+}
+
+export interface DeviceRenameInput {
+  /** 目標計算機名（已驗證 ≤15 字、無非法字元；由 buildSetComputerName 的 validator 統一把關） */
+  newName: string;
+  /** 唯一重命名 ID（回報 / 防重放；agent 執行後可回帶確認） */
+  renameId: string;
+}
+
+/**
+ * 下發設備重命名：啟用 DeviceRename 策略，Agent RenameWatcher 讀到 Pending=1 後跑 Rename-Computer。
+ *
+ * 值落 HKLM\Software\CoGrow\Agent\Rename\{Pending=1, NewName, RenameId}。
+ * Agent 執行後設 Pending=0；重命名於下次 reboot 生效（Rename-Computer 語意）。
+ *
+ * ⚠️ ADMX required elements（見 memory [[admx_required_elements]]）：data 段必須送
+ * 全部 2 個 elements（NewName / RenameId），缺任一 → SyncML 500 + Event 856。
+ */
+export function buildDeviceRename(input: DeviceRenameInput): SyncMLCommand[] {
+  const name = escapeAttr(input.newName);
+  const renameId = escapeAttr(input.renameId);
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: RENAME_POLICY_TARGET,
+    format: "chr",
+    data: `<enabled/>` +
+      `<data id="NewName" value="${name}"/>` +
+      `<data id="RenameId" value="${renameId}"/>`,
+  }];
+}
+
+/** 清除 Rename 策略（disabled）：Agent 確認重命名後可由後端下發清 registry 殘留。 */
+export function buildDeviceRenameClear(): SyncMLCommand[] {
+  return [{
+    cmdId: "0",
+    verb: "Replace",
+    target: RENAME_POLICY_TARGET,
+    format: "chr",
+    data: `<disabled/>`,
+  }];
+}
+
+// ============================================================
 // 預配套件移除（ADMX-backed Policy CSP）
 // ============================================================
 
@@ -1808,9 +1900,10 @@ export function buildFirewallPolicy(input: FirewallPolicyInput): SyncMLCommand[]
 // 自動設備命名（Accounts CSP ComputerName）
 // ============================================================
 //
-// LocURI：./Device/Vendor/MSFT/Accounts/ComputerName
-// MVP 直接派發已組好的最終名稱字串；模板替換（學校代碼 / 序號）由 service 層
-// 完成,CSP 不關心。
+// LocURI：./Device/Vendor/MSFT/Accounts/Domain/ComputerName
+// （Accounts CSP 的重命名節點在 Domain/ComputerName 底下；少了 Domain 段設備回 404，
+//  真機 PF5XSMN1 2026-07-06 驗到）。直接派發已組好的最終名稱字串；模板替換
+// （學校代碼 / 序號）由 service 層完成,CSP 不關心。
 //
 // 限制：
 // - Windows ComputerName 規範：最多 15 字元、不含空白與保留符號
@@ -1819,24 +1912,26 @@ export function buildFirewallPolicy(input: FirewallPolicyInput): SyncMLCommand[]
 const COMPUTER_NAME_MAX_LENGTH = 15;
 const COMPUTER_NAME_INVALID = /[\s\\/:*?"<>|`'~!@#$%^&()=+[\]{};,.]/;
 
-export function buildSetComputerName(name: string): SyncMLCommand {
+/** 驗證 Windows ComputerName（≤15 字、無空白 / 保留符號）；非法拋 Error。
+ *  CSP 派發（buildSetComputerName）與 agent 信箱派發（pushDeviceRenameToDevice）共用。 */
+export function assertValidComputerName(name: string): void {
   if (!name || name.length === 0) {
-    throw new Error("buildSetComputerName: name 不可為空");
+    throw new Error("computer name 不可為空");
   }
   if (name.length > COMPUTER_NAME_MAX_LENGTH) {
-    throw new Error(
-      `buildSetComputerName: 超過 ${COMPUTER_NAME_MAX_LENGTH} 字元上限 (${name})`,
-    );
+    throw new Error(`computer name 超過 ${COMPUTER_NAME_MAX_LENGTH} 字元上限 (${name})`);
   }
   if (COMPUTER_NAME_INVALID.test(name)) {
-    throw new Error(
-      `buildSetComputerName: 含非法字元（空白 / 保留符號）: ${name}`,
-    );
+    throw new Error(`computer name 含非法字元（空白 / 保留符號）: ${name}`);
   }
+}
+
+export function buildSetComputerName(name: string): SyncMLCommand {
+  assertValidComputerName(name);
   return {
     cmdId: "0",
     verb: "Replace",
-    target: "./Device/Vendor/MSFT/Accounts/ComputerName",
+    target: "./Device/Vendor/MSFT/Accounts/Domain/ComputerName",
     format: "chr",
     data: name,
   };

@@ -2,6 +2,7 @@ import type { CheckinAction } from "~/services/laps.ts";
 import { handleLapsOnCheckin, handleLapsOnReport } from "~/services/laps.ts";
 import { handleBitLockerOnReport } from "~/services/bitlocker.ts";
 import { buildWingetCheckinActions } from "~/services/winget-deploy.ts";
+import { reconcileDeviceName } from "~/services/device-policies.ts";
 
 export type { CheckinAction };
 
@@ -36,15 +37,25 @@ export interface AgentReportHooks {
 export const directAgentReportHooks: AgentReportHooks = {
   async onReport({ tenantId, deviceId, extraData }) {
     if (extraData?.platform !== "windows") return;
-    const [laps, bitlocker] = await Promise.allSettled([
+    // 自動命名 reconcile：enroll 當下序號未到只能 skip，agent 首次上報 backfill 序號後，
+    // 這裡才算得出含 {serial*} 的最終名並派一次 rename（assignedName 去重，後續上報自動 skip）。
+    const [laps, bitlocker, naming] = await Promise.allSettled([
       handleLapsOnReport({ tenantId, deviceId, extraData }),
       handleBitLockerOnReport({ tenantId, deviceId, extraData }),
+      reconcileDeviceName({ tenantId, deviceId }),
     ]);
     if (laps.status === "rejected") {
       console.error("[laps] handleLapsOnReport failed", laps.reason);
     }
     if (bitlocker.status === "rejected") {
       console.error("[bitlocker] handleBitLockerOnReport failed", bitlocker.reason);
+    }
+    if (naming.status === "rejected") {
+      console.error("[naming] reconcileDeviceName failed", naming.reason);
+    } else if (naming.value.action === "dispatch") {
+      console.log(
+        `[naming] 自動重命名已排入 deviceId=${deviceId} name="${naming.value.desiredName}"`,
+      );
     }
   },
   async onCheckin(opts) {

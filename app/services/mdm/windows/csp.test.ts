@@ -2,6 +2,8 @@ import { assertEquals, assertThrows } from "jsr:@std/assert@^1";
 import {
   buildCameraPolicy,
   buildFirewallPolicy,
+  buildDeviceRename,
+  buildRenameAdmxInstall,
   buildSetComputerName,
   buildReboot,
   buildRemoteWipe,
@@ -1189,7 +1191,7 @@ Deno.test("buildFirewallPolicy: showNotifications=true → DisableInboundNotific
 Deno.test("buildSetComputerName: 合法名稱 → Replace ComputerName", () => {
   const cmd = buildSetComputerName("TPE001-1234");
   assertEquals(cmd.verb, "Replace");
-  assertEquals(cmd.target, "./Device/Vendor/MSFT/Accounts/ComputerName");
+  assertEquals(cmd.target, "./Device/Vendor/MSFT/Accounts/Domain/ComputerName");
   assertEquals(cmd.format, "chr");
   assertEquals(cmd.data, "TPE001-1234");
 });
@@ -1205,6 +1207,33 @@ Deno.test("buildSetComputerName: 超 15 字元拋錯", () => {
 
 Deno.test("buildSetComputerName: 空字串拋錯", () => {
   assertThrows(() => buildSetComputerName(""), Error, "不可為空");
+});
+
+// ============================================================
+// Agent 信箱重命名（workgroup / PPKG 設備 Accounts CSP 406 的替代方案）
+// ============================================================
+
+Deno.test("buildRenameAdmxInstall: Replace ADMXInstall RenamePolicy", () => {
+  const cmd = buildRenameAdmxInstall();
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/ConfigOperations/ADMXInstall/CoGrowMDM/Policy/RenamePolicy",
+  );
+  // ADMX XML 落 registry 信箱 Software\CoGrow\Agent\Rename
+  assertEquals(cmd.data?.includes("Software\\CoGrow\\Agent\\Rename"), true);
+});
+
+Deno.test("buildDeviceRename: enabled + NewName/RenameId 兩 elements（ADMX required）", () => {
+  const [cmd] = buildDeviceRename({ newName: "demo-group-SMN1", renameId: "rid-1" });
+  assertEquals(cmd.verb, "Replace");
+  assertEquals(
+    cmd.target,
+    "./Device/Vendor/MSFT/Policy/Config/CoGrowMDM~Policy~CoGrowRename/DeviceRename",
+  );
+  assertEquals(cmd.data?.includes("<enabled/>"), true);
+  assertEquals(cmd.data?.includes('id="NewName" value="demo-group-SMN1"'), true);
+  assertEquals(cmd.data?.includes('id="RenameId" value="rid-1"'), true);
 });
 
 Deno.test("buildSetComputerName: 含空白拋錯", () => {

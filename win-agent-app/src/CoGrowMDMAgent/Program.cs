@@ -82,6 +82,7 @@ builder.Services.AddHostedService<LapsWatcher>();
 builder.Services.AddHostedService<BitLockerWatcher>();
 builder.Services.AddHostedService<PpkgRemovalWatcher>();
 builder.Services.AddHostedService<SelfUninstallWatcher>();
+builder.Services.AddHostedService<RenameWatcher>();
 // SoftWipe：Registry 觸發深度清理（畢業換人零 IT 介入）— 卸非白名單 MSI/UWP，
 // 刪 non-admin user profile，清瀏覽器數據 / Recycle Bin / Temp。保 Agent + MDM。
 builder.Services.AddHttpClient<CoGrowMDMAgent.SoftWipe.SoftWipeWatcher>();

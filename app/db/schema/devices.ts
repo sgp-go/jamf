@@ -59,6 +59,10 @@ export const mdmDevices = pgTable(
     udid: varchar({ length: 64 }),
     serialNumber: varchar({ length: 64 }),
     deviceName: text(),
+    // 我方依 namingTemplate 派發的「目標設備名」（≠ deviceName：後者是 agent 上報的實際 hostname，
+    // rename 需 reboot 才生效，生效前兩者會不一致）。作為自動命名 reconcile 的去重 marker：
+    // 只在 render 結果 != assignedName 時才派 SetComputerName，避免每次上報重複派命令。
+    assignedName: text(),
     model: text(),
     osVersion: text(),
 
