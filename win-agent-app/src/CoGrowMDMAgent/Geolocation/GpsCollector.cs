@@ -169,8 +169,11 @@ public sealed class GpsCollector : BackgroundService
             using var key = Registry.LocalMachine.OpenSubKey(StateKeyPath);
             var raw = key?.GetValue(LastCapturedValueName) as string;
             if (string.IsNullOrEmpty(raw)) return null;
+            // 寫入端用 ToString("o")（帶 Z 的 ISO 8601 round-trip），RoundtripKind 單獨即可
+            // 正確解析 Z → Kind=Utc。RoundtripKind 不可與 AssumeUniversal/AdjustToUniversal
+            // 併用（否則 ArgumentException，ReadLastCapturedUtc 每次拋 → 永遠回 null）。
             if (DateTime.TryParse(raw, CultureInfo.InvariantCulture,
-                DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal,
+                DateTimeStyles.RoundtripKind,
                 out var dt))
             {
                 return dt.ToUniversalTime();
