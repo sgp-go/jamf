@@ -252,14 +252,26 @@ CSP 寫入後**不會寫** `HKLM:\SOFTWARE\Microsoft\PolicyManager\current\devic
 
 ## 自動設備命名
 
-| 項目 | 說明 |
-|------|------|
-| 端點 | `POST /admin/tenants/{tid}/devices/{did}/rename` |
-| CSP 路徑 | `./Device/Vendor/MSFT/Accounts/ComputerName` |
-| SyncML verb | `Replace` |
-| 資料格式 | `chr` |
+依規則自動命名設備（如 `學校代碼-序號後四碼` → `TPE001-1234`），讓設備名統一規律、易於辨識管理。
 
-### 命名參數（二選一）
+### 兩種觸發方式
+
+| 方式 | 說明 |
+|------|------|
+| **① Enroll 後自動命名（推薦）** | tenant 設 `namingTemplate` → 設備 enroll + agent 首次上報後**自動**套用，零人工介入 |
+| **② 手動指定** | `POST /admin/tenants/{tid}/devices/{did}/rename`（單台，`explicitName` 或 `template`） |
+
+### ① Enroll 後自動命名
+
+1. 設 tenant 級模板：`PATCH /admin/tenants/{tid}/mdm-config` body `{ "namingTemplate": "{schoolCode}-{serial4}" }`
+2. 新設備 enroll → agent 裝好首次上報。後端 `reconcileDeviceName` 在**每次 agent 上報**時收斂：
+   - **序號依賴**：含 `{serial}`/`{serial4}` 的模板，enroll 當下序號尚未 pull，會先跳過（`awaiting_serial`）；等 agent 上報 backfill 序號後才算出最終名並派發。**建議含序號的模板無需擔心時序，reconcile 會自動補**。
+   - **去重**：目標名 == 已派名（`assignedName`）即跳過，不重複派發。
+3. 派發後設備套用，**下次重啟生效**。
+
+> ⚠️ 若模板只用 `{udid8}`（enroll 當下即有），enroll hook 當場就派；含 `{serial*}` 則等首次上報。
+
+### 命名參數（手動 /rename，二選一）
 
 | 參數 | 型別 | 說明 |
 |------|------|------|
@@ -277,12 +289,23 @@ CSP 寫入後**不會寫** `HKLM:\SOFTWARE\Microsoft\PolicyManager\current\devic
 
 範例：`{schoolCode}-{serial4}` + serial=`ABC1234` + schoolCode=`TPE001` → **`TPE001-1234`**
 
+### 派發機制（走 agent 信箱，非 Accounts CSP）
+
+> ⚠️ **重要**：Windows Accounts CSP `./Device/Vendor/MSFT/Accounts/Domain/ComputerName` 的遠端 Replace **對 workgroup / PPKG 納管設備回 406（不支援）**——該 CSP 主要為 Entra-joined / Autopilot 設計。真機 PF5XSMN1 驗證後改走 **agent 信箱**（與 LAPS 同款）：
+
+| 環節 | 說明 |
+|------|------|
+| ADMX 信箱 | `HKLM\Software\CoGrow\Agent\Rename`（enroll 時隨 install-agent 一併裝） |
+| 派發 | Policy CSP Replace 寫 `Pending=1` + `NewName` 到信箱（SyncML ACK 200） |
+| 執行 | Agent `RenameWatcher` 讀到 `Pending=1` → 跑 `Rename-Computer -Force` → 清 `Pending=0` |
+| 生效 | **下次重啟**（Rename-Computer 語意；CSP 套用本身不觸發 reboot） |
+
 ### 名稱規範
 
 - Windows ComputerName 最長 **15 字元**
 - 不含空白與保留符號（`\/:*?"<>|...`）
-- 變更後**設備需重啟**新名稱才生效
-- 回傳 `appliedName` 為實際派發的最終名稱
+- 變更後**設備需重啟**新名稱才生效（Windows 存為大寫，如 `DEMO-GROUP-SMN1`）
+- 手動 /rename 回傳 `appliedName` 為實際派發的最終名稱
 
 ## 設備功能限制（Settings 頁面可見性）
 
