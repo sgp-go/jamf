@@ -93,6 +93,54 @@ sequenceDiagram
 
 ---
 
+## 學生 / 指定帳號密碼重設（PRD Phase 3 遠端密碼重設）
+
+管理員重設設備上**任意本機帳號**的密碼（不限管理員），最常見是重設學生帳號密碼。與 LAPS 管理員輪換**共用同一條通道**（同 ADMX Policy CSP + 同 Registry 信箱 + 同 Agent `LapsWatcher`），差別只在目標帳號與語意分類。
+
+```mermaid
+sequenceDiagram
+    participant IT as IT 管理員
+    participant API as Admin API
+    participant DB as 資料庫
+    participant MDM as MDM SyncML
+    participant Agent as Agent LapsWatcher
+
+    Note over IT,Agent: 重設學生密碼
+    IT->>API: POST /user-password/reset<br/>{ targetAccount:"student", mode:"explicit"/"random",<br/>password?, accountType:"student", requireChangeOnFirstLogon? }
+    API->>API: 生成隨機 or 用指定明碼<br/>（targetAccount 走 regex 防 net user 注入）
+    API->>DB: 加密存 DB（account_type=student, status=pending）
+    API->>MDM: 排入密碼重設命令（同 LapsRotation 通道）
+    API->>DB: 寫 audit log
+    API-->>IT: 200 { rotationId, commandUuid, password }
+    MDM->>Agent: SyncML 下發 → Registry 信箱
+    Agent->>Agent: net user student <新密碼><br/>（requireChange=true 則設下次登入須改密）
+    Agent->>API: 上報 rotationId 確認 → 標記 confirmed
+
+    Note over IT,DB: 查詢指定帳號最新已確認密碼
+    IT->>API: GET /user-password/{targetAccount}
+    API->>DB: 取最新 confirmed（account_type 對應）
+    API-->>IT: 解密回傳明文（寫 audit log）
+```
+
+### 端點與參數
+
+| 方法 | 路徑 | 用途 |
+|------|------|------|
+| `POST` | `/admin/tenants/{tid}/devices/{did}/user-password/reset` | 重設指定帳號密碼（含 student / admin / other） |
+| `GET` | `/admin/tenants/{tid}/devices/{did}/user-password/{targetAccount}` | 查該帳號最新已確認密碼 |
+
+| 參數 | 型別 | 必填 | 說明 |
+|------|------|------|------|
+| `targetAccount` | string | ✅ | 目標本機帳號名，regex `^[a-zA-Z0-9._-]{1,20}$`（防 `net user` 參數注入） |
+| `mode` | `"random"` \| `"explicit"` | ✅ | random=後端隨機生成；explicit=用管理員指定明碼 |
+| `password` | string(4–127) | mode=explicit 時必填 | 指定明碼；mode=random 時忽略 |
+| `requireChangeOnFirstLogon` | boolean? | | 設 true 則使用者下次登入強制改密 |
+| `accountType` | `"admin"`\|`"student"`\|`"other"`? | | 僅用於 DB row 分類，決定查詢時的歸類 |
+
+> 與 `laps-rotate`（#管理員查詢與手動輪換）的差別：`laps-rotate` 語意固定為 `accountType=admin`、不強制改密、只隨機；`user-password/reset` 是通用入口，可指定任意帳號、明碼或隨機、可強制改密。兩者底層是同一套 CSP 通道與 Agent 執行邏輯。
+
+---
+
 ## 自動觸發判斷
 
 後端在 Agent report 與 checkin 兩個時點自動判斷是否需要觸發輪換（`shouldTriggerLaps`）：

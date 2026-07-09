@@ -103,6 +103,11 @@ sequenceDiagram
 | | `device.offline` | 裝置離線 |
 | | `device.transferred` | 裝置跨租戶轉移 |
 | | `device.unenrolled` | 裝置取消註冊 |
+| **地理圍欄** | `device.geofence_enter` | 裝置進入圍欄（見 [22-geofence](22-geofence.md)） |
+| | `device.geofence_exit` | 裝置離開圍欄 |
+| **軟 Wipe** | `device.soft_wipe_started` | 深度軟 wipe 開始 |
+| | `device.soft_wiped` | 深度軟 wipe 完成 |
+| | `device.soft_wipe_failed` | 深度軟 wipe 失敗 |
 | **MDM 命令** | `command.queued` | 命令已排入佇列 |
 | | `command.sent` | 命令已發送至裝置 |
 | | `command.acknowledged` | 裝置已確認收到命令 |
@@ -111,7 +116,7 @@ sequenceDiagram
 | **配置描述檔** | `profile.applied` | 描述檔套用成功 |
 | | `profile.failed` | 描述檔套用失敗 |
 | | `profile.removed` | 描述檔已移除 |
-| **Inventory** | `inventory.updated` | 裝置清冊資訊已更新 |
+| **Inventory** | `inventory.updated` | 裝置清冊 / 已裝軟體清單更新（見 [21-installed-apps-inventory](21-installed-apps-inventory.md)） |
 | **App 派發** | `app.installed` | App 安裝成功 |
 | | `app.install_failed` | App 安裝失敗 |
 | | `app.uninstalled` | App 已解除安裝 |
@@ -120,6 +125,7 @@ sequenceDiagram
 | | `agent.reported` | Agent 定時上報裝置狀態 |
 | | `agent.usage_reported` | Agent 上報使用時長 |
 | | `agent.usage_anomaly` | 使用時長回退異常（疑似本地資料被篡改） |
+| | `agent.gps_reported` | Agent 上報 GPS 位置（見 [19-agent-gps-reporting](19-agent-gps-reporting.md)） |
 
 事件命名規則：`{resource}.{action}`，動詞用過去式表示「已發生」。
 

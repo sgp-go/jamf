@@ -41,6 +41,44 @@ open http://localhost:3000/docs
 /api/mdm/win/manage/{deviceId}                   ← OMA-DM SyncML 管理通道
 ```
 
+### 系統總覽圖
+
+四方關係：台灣後端（身分/認證/RBAC）調本平台 API 做管理、收 Webhook；本平台作為 MDM 引擎，經 Jamf/APNs 管 iOS、經 OMA-DM + WNS 管 Windows；Agent App 回上報數據。
+
+```mermaid
+flowchart TB
+    subgraph TW[台灣團隊]
+        TWB["台灣後端<br/>使用者 / 認證 / SSO / RBAC"]
+    end
+    subgraph CG[本平台後端 — MDM 引擎]
+        API["Admin API / Tenant API"]
+        WH["Webhook 發布"]
+        CH["OMA-DM 管理通道"]
+    end
+    subgraph EXT[外部推送 / 管理服務]
+        JAMF["Jamf Pro（iOS 管理）"]
+        WNS["WNS（Windows Push）"]
+        APNS["APNs（Apple Push）"]
+    end
+    subgraph DEV[設備側]
+        WIN["Windows 設備"]
+        APPLE["Apple 設備"]
+        AGENT["Agent App（Win / iOS）"]
+    end
+
+    TWB -->|"Admin/Tenant API（Bearer + HMAC）"| API
+    WH -->|"事件（HMAC 簽名）"| TWB
+    API -->|iOS 命令| JAMF
+    JAMF -->|推送| APNS
+    APNS -->|喚醒| APPLE
+    API -->|喚醒| WNS
+    WNS -->|push| WIN
+    API --> CH
+    CH <-->|"SyncML / OMA-DM"| WIN
+    WIN -. 首次 enroll .-> CH
+    AGENT -->|"report / checkin / gps / installed-apps（Agent token）"| API
+```
+
 ---
 
 ## 2. 概念對齊

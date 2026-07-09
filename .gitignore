@@ -40,6 +40,8 @@ AgentApp/fastlane/test_output/
 /certs/**
 # 內部文件
 docs/工作量評估*.md
+# PRD 對齊追蹤（含 brain 內部知識庫引用，僅供內部；對外版見 docs/prd-requirement-coverage.md）
+docs/prd-alignment-tracking.md
 .claude/*
 # 但專案級開發規範（rules）需隨 git 共享 + 供 CLAUDE.md @import
 !.claude/rules/

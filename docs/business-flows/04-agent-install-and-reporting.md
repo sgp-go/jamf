@@ -163,6 +163,21 @@ sequenceDiagram
 
 ---
 
+## 4. 防止卸載（防止學生刪除 App，PRD §1.4）
+
+確保 Agent App（及其他關鍵教學軟體）不被學生自行移除：
+
+| 機制 | 說明 |
+|------|------|
+| **ARPSYSTEMCOMPONENT=1** | Agent MSI 設此 property，讓 Agent **不出現在「設定 → 應用程式」/「控制台 → 新增或移除程式」清單**，學生看不到、無從點擊卸載（這也是為何 Agent 不出現在 installed-apps 清單，屬設計預期）。 |
+| **MDM 移除授權** | 合法卸載只透過 MDM 通道（EDA-CSP `Delete /MSI/{ProductID}` 觸發 `msiexec /x`），見 [03-app-deployment](03-app-deployment.md)；學生無此權限。 |
+| **防脫離納管** | `AllowManualMDMUnenrollment=0`，學生無法在系統設定中移除 MDM 管理（否則可繞過所有保護），見 [01-device-enrollment](01-device-enrollment.md)。 |
+| **Agent 自我保護** | Agent 服務被非 MDM 手段強停時觸發 crash-restart + 鎖文件保護；MDM 派發的 MSI 優雅停啟不受影響（升級用），見 [agent-upgrade-rollback-strategy](../windows-deployment/agent-upgrade-rollback-strategy.md)。 |
+
+> 一般教學軟體若也要「防刪」，同樣可用 MSI `ARPSYSTEMCOMPONENT=1` 隱藏 + 依賴防脫離納管兜底；AppLocker（[12-app-blocklist](12-app-blocklist.md)）管的是「防執行」不是「防卸載」，兩者互補。
+
+---
+
 ## 關鍵技術細節
 
 ### Token 簽發機制

@@ -39,6 +39,7 @@
 | [03-app-deployment.md](03-app-deployment.md) | App 派發與管理（上傳 → assign → MSI/MSIX 安裝 → 狀態追蹤 → 卸載） |
 | [04-agent-install-and-reporting.md](04-agent-install-and-reporting.md) | Agent App 安裝與數據上報（自動安裝 → 錯峰上報 → 灰度升級） |
 | [19-agent-gps-reporting.md](19-agent-gps-reporting.md) | Agent GPS 位置上報（每日 Inventory + Lost Mode 高頻；最新一筆無歷史） |
+| [21-installed-apps-inventory.md](21-installed-apps-inventory.md) | App 安裝清單 Inventory（Agent 掃 registry 全量上報 → 後台按設備查已裝 MSI/Win32 軟體） |
 | [12-app-blocklist.md](12-app-blocklist.md) | App 黑名單（AppLocker Deny 規則，路徑 / 簽名者兩種封鎖） |
 
 ### E. 安全性
@@ -46,6 +47,7 @@
 | 文件 | 說明 |
 |------|------|
 | [11-website-blocklist.md](11-website-blocklist.md) | 網站黑名單（IE Security Zone → 萬用字元封鎖 → 受限頁面） |
+| [22-geofence.md](22-geofence.md) | Geofence 地理圍欄（polygon CRUD → 關聯設備 → GPS point-in-polygon → enter/exit webhook → 可聯動 Lost Mode） |
 
 ### F. 平台營運
 

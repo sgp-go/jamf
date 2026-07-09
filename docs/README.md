@@ -37,7 +37,7 @@
 
 ### D. 理解業務流程（對接前建立全局認知）
 
-[`business-flows/`](./business-flows/README.md) — **16 份 Mermaid 序列圖**，每份對應一個功能場景，標示 Server / Device / Agent 之間的完整通訊流程。建議順序：
+[`business-flows/`](./business-flows/README.md) — **22 份 Mermaid 序列圖**，每份對應一個功能場景，標示 Server / Device / Agent 之間的完整通訊流程。建議順序：
 1. [設備納管](./business-flows/01-device-enrollment.md) → [Webhook 事件](./business-flows/15-webhook-events.md)（理解設備怎麼進來、事件怎麼推出去）
 2. [Agent 安裝與上報](./business-flows/04-agent-install-and-reporting.md) → [App 派發](./business-flows/03-app-deployment.md)（理解 App 生命週期）
 3. [Profile 推送](./business-flows/06-configuration-profile.md) → [策略推送](./business-flows/07-device-policies.md)（理解兩種配置下發模式的差異）
@@ -63,7 +63,7 @@
 
 | 目錄 | 內容 |
 |---|---|
-| [`business-flows/`](./business-flows/README.md) | **業務流程圖**（16 份 Mermaid 序列圖）：設備納管 / App 派發 / 遠端控制 / 策略推送 / LAPS / BitLocker / 轉校 / 退役 / 黑名單 / Webhook 等全場景 |
+| [`business-flows/`](./business-flows/README.md) | **業務流程圖**（22 份 Mermaid 序列圖）：設備納管 / App 派發 / 遠端控制 / 策略推送 / LAPS / BitLocker / 轉校 / 退役 / 已裝清單 / Geofence / 黑名單 / Webhook 等全場景 |
 | [`ios-deployment/`](./ios-deployment/README.md) | iOS Agent App 對接：Managed App Config 鍵契約、ABM 分發、APNs 憑證、App 更新策略 |
 | [`windows-deployment/`](./windows-deployment/README.md) | Windows 正式生產交付（13 份）：基礎設施部署、設備配置運維、LAPS / BitLocker、升級回滾、技術參考 |
 | [`scripts/`](./scripts/README.md) | push MSIX 重 build 的 PowerShell 工具腳本（接手 / 換簽署主體時才需要） |
