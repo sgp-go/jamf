@@ -5,6 +5,7 @@ import type {
   CommandPayload,
   JamfLostModeStatus,
   MobileDeviceDetail,
+  MobileDeviceDetailListResponse,
   MobileDeviceListResponse,
 } from "./types.ts";
 
@@ -21,6 +22,20 @@ export class DeviceService {
 
   getMobileDevice(id: string): Promise<MobileDeviceDetail> {
     return this.client.get<MobileDeviceDetail>(`/api/v2/mobile-devices/${id}/detail`);
+  }
+
+  /**
+   * 批量庫存端點：一次分頁取回多台完整庫存（含電量 / 儲存 / OS / 納管日期）。
+   *
+   * 必須帶 section=GENERAL&section=HARDWARE，否則 general / hardware 回空物件
+   * （預設精簡回應不含這些欄位）。sync 用此端點取代 listMobileDevices（summary 無這些欄位）。
+   */
+  listMobileDevicesDetail(opts?: { page?: number; pageSize?: number }) {
+    const page = opts?.page ?? 0;
+    const size = opts?.pageSize ?? 100;
+    return this.client.get<MobileDeviceDetailListResponse>(
+      `/api/v2/mobile-devices/detail?page=${page}&page-size=${size}&section=GENERAL&section=HARDWARE`,
+    );
   }
 
   /**

@@ -4,6 +4,7 @@ import { mdmDevices } from "~/db/schema/devices.ts";
 import { AppError } from "~/lib/errors.ts";
 import { JamfClient } from "~/services/jamf/client.ts";
 import { DeviceService } from "~/services/jamf/devices.ts";
+import { parseJamfDate, roundOrNull } from "~/services/jamf/inventory.ts";
 
 /**
  * 從一個 Jamf instance 拉全部 mobile devices，upsert 進 mdm_devices。
@@ -46,11 +47,24 @@ export async function syncDevicesFromJamf(opts: {
   let totalFromJamf = 0;
 
   for (;;) {
-    const resp = await svc.listMobileDevices({ page, pageSize: PAGE_SIZE });
+    // 用批量庫存端點（含 GENERAL + HARDWARE section）取代 summary 端點，
+    // 一次分頁即帶回電量 / 儲存 / OS / 納管日期，寫進 mdm_devices 對應欄位。
+    const resp = await svc.listMobileDevicesDetail({ page, pageSize: PAGE_SIZE });
     totalFromJamf = resp.totalCount;
     if (resp.results.length === 0) break;
 
     for (const d of resp.results) {
+      const g = d.general;
+      const h = d.hardware;
+      const serialNumber = h?.serialNumber ?? null;
+      const deviceName = g?.displayName ?? null;
+      const managementId = g?.managementId ?? null;
+      const osVersion = g?.osVersion ?? null;
+      const batteryLevel = roundOrNull(h?.batteryLevel);
+      const storageTotalMb = roundOrNull(h?.capacityMb);
+      const storageAvailableMb = roundOrNull(h?.availableSpaceMb);
+      const enrolledAt = parseJamfDate(g?.lastEnrolledDate);
+
       await db
         .insert(mdmDevices)
         .values({
@@ -59,10 +73,16 @@ export async function syncDevicesFromJamf(opts: {
           jamfInstanceId: opts.jamfInstanceId,
           platform: "apple",
           udid: null,
-          serialNumber: d.serialNumber ?? null,
-          deviceName: d.name ?? null,
-          jamfDeviceId: String(d.id),
-          jamfManagementId: d.managementId ?? null,
+          serialNumber,
+          deviceName,
+          osVersion,
+          batteryLevel,
+          storageTotalMb,
+          storageAvailableMb,
+          // 有 Jamf 納管日期就寫真值；沒有則不設此欄，讓 schema defaultNow() 兜底
+          ...(enrolledAt ? { enrolledAt } : {}),
+          jamfDeviceId: String(d.mobileDeviceId),
+          jamfManagementId: managementId,
           lastSyncedAt: now,
         })
         .onConflictDoUpdate({
@@ -71,9 +91,15 @@ export async function syncDevicesFromJamf(opts: {
           targetWhere: sql`${mdmDevices.jamfDeviceId} IS NOT NULL`,
           set: {
             deviceGroupId: deviceGroup?.id ?? sql`${mdmDevices.deviceGroupId}`,
-            serialNumber: d.serialNumber ?? sql`${mdmDevices.serialNumber}`,
-            deviceName: d.name ?? sql`${mdmDevices.deviceName}`,
-            jamfManagementId: d.managementId ?? sql`${mdmDevices.jamfManagementId}`,
+            serialNumber: serialNumber ?? sql`${mdmDevices.serialNumber}`,
+            deviceName: deviceName ?? sql`${mdmDevices.deviceName}`,
+            osVersion: osVersion ?? sql`${mdmDevices.osVersion}`,
+            // 電量可能為 0（真值），?? 只在 null/undefined 時保留原值，不會誤判 0
+            batteryLevel: batteryLevel ?? sql`${mdmDevices.batteryLevel}`,
+            storageTotalMb: storageTotalMb ?? sql`${mdmDevices.storageTotalMb}`,
+            storageAvailableMb: storageAvailableMb ?? sql`${mdmDevices.storageAvailableMb}`,
+            enrolledAt: enrolledAt ?? sql`${mdmDevices.enrolledAt}`,
+            jamfManagementId: managementId ?? sql`${mdmDevices.jamfManagementId}`,
             lastSyncedAt: now,
           },
         });

@@ -65,6 +65,12 @@ export const mdmDevices = pgTable(
     assignedName: text(),
     model: text(),
     osVersion: text(),
+    // 設備庫存快照（電量/儲存）。Apple 走 Jamf sync 寫入本表；Windows 主表留 null，
+    // 由 listDevicesInTenant 從 agent_reports 最新一筆 fallback 補值。單位對齊 agent_reports：
+    // batteryLevel = 百分比 0-100（無電池 null）；storage* = MB。
+    batteryLevel: integer(),
+    storageTotalMb: integer(),
+    storageAvailableMb: integer(),
 
     // Jamf 那邊的 id（同步時填寫，用於後續命令派發）
     jamfDeviceId: varchar({ length: 32 }),

@@ -84,11 +84,12 @@ export async function listDevicesInTenant(opts: {
     const rpt = reportByDevice.get(row.id);
     return {
       ...row,
-      // agent_reports 有值就覆蓋主表 null；主表非 null（Apple 走 Jamf sync 寫過）保留原值
+      // 主表優先（Apple 走 Jamf sync 寫入電量/儲存/OS）；主表為 null 再 fallback
+      // agent_reports 最新一筆（Windows / 有裝 Agent 的來源）。電量 0 是真值，?? 不誤判。
       osVersion: row.osVersion ?? rpt?.osVersion ?? null,
-      batteryLevel: rpt?.batteryLevel ?? null,
-      storageTotalMb: rpt?.storageTotalMb ?? null,
-      storageAvailableMb: rpt?.storageAvailableMb ?? null,
+      batteryLevel: row.batteryLevel ?? rpt?.batteryLevel ?? null,
+      storageTotalMb: row.storageTotalMb ?? rpt?.storageTotalMb ?? null,
+      storageAvailableMb: row.storageAvailableMb ?? rpt?.storageAvailableMb ?? null,
       lastReportAt: rpt?.reportedAt ?? null,
     };
   });

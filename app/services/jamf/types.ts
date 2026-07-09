@@ -18,6 +18,50 @@ export interface MobileDeviceSummary {
   managementId: string;
 }
 
+/**
+ * 批量庫存端點 GET /api/v2/mobile-devices/detail?section=GENERAL&section=HARDWARE 的回應。
+ *
+ * ⚠️ 與單台 /{id}/detail（MobileDeviceDetail）結構不同：單台是扁平 + ios 子物件；
+ * 批量是巢狀 section（general / hardware），且欄位名有差：
+ *   - id → mobileDeviceId
+ *   - lastEnrollmentTimestamp → general.lastEnrolledDate
+ *   - ios.availableMb → hardware.availableSpaceMb
+ *   - serialNumber 位於 hardware（非頂層）
+ * sync 用此端點（一次分頁取回全庫存），兩端點欄位名不可混用。
+ */
+export interface MobileDeviceDetailListResponse {
+  totalCount: number;
+  results: MobileDeviceInventory[];
+}
+
+export interface MobileDeviceInventory {
+  mobileDeviceId: string;
+  deviceType: string;
+  general: MobileDeviceGeneralSection | null;
+  hardware: MobileDeviceHardwareSection | null;
+}
+
+export interface MobileDeviceGeneralSection {
+  displayName: string | null;
+  udid: string | null;
+  managementId: string | null;
+  osVersion: string | null;
+  osBuild: string | null;
+  lastEnrolledDate: string | null;
+  lastInventoryUpdateDate: string | null;
+}
+
+export interface MobileDeviceHardwareSection {
+  serialNumber: string | null;
+  model: string | null;
+  modelIdentifier: string | null;
+  capacityMb: number | null;
+  availableSpaceMb: number | null;
+  usedSpacePercentage: number | null;
+  batteryLevel: number | null;
+  batteryHealth: string | null;
+}
+
 export interface MobileDeviceDetail {
   id: string;
   name: string;

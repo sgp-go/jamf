@@ -79,20 +79,23 @@ const deviceItemSchema = z
         example: "enrolled",
       }),
     enrolledAt: z.string().nullable().openapi({
-      description: "首次註冊時間（ISO 8601 UTC）",
+      description:
+        "納管日期（ISO 8601 UTC）。Apple 為 Jamf 最近一次 enrollment（lastEnrolledDate）；Windows 為自建 MDM 註冊時間",
       example: "2026-05-28T10:30:00Z",
     }),
     batteryLevel: z.number().int().nullable().openapi({
       description:
-        "**【選填】** 最新 agent_reports 的電量百分比（0-100）；未上報則 null",
+        "**【選填】** 電量百分比（0-100）。Apple 走 Jamf sync 寫主表；Windows 取最新 agent_reports；皆無則 null",
       example: 87,
     }),
     storageTotalMb: z.number().int().nullable().openapi({
-      description: "**【選填】** 最新 agent_reports 的儲存空間總量（MB）",
+      description:
+        "**【選填】** 儲存空間總量（MB）。Apple 走 Jamf sync（capacityMb）；Windows 取最新 agent_reports",
       example: 500000,
     }),
     storageAvailableMb: z.number().int().nullable().openapi({
-      description: "**【選填】** 最新 agent_reports 的儲存空間剩餘量（MB）",
+      description:
+        "**【選填】** 儲存空間剩餘量（MB）。Apple 走 Jamf sync（availableSpaceMb）；Windows 取最新 agent_reports",
       example: 128000,
     }),
     lastReportAt: z.string().nullable().openapi({
