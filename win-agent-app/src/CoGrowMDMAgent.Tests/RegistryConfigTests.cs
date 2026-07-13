@@ -7,6 +7,7 @@ namespace CoGrowMDMAgent.Tests;
 /// Real HKLM coverage is exercised on Windows test machines (out of scope
 /// for cross-platform CI).
 /// </summary>
+[Collection("CogrowEnv")]
 public class RegistryConfigTests
 {
     private const string DeviceIdVar = "COGROW_DEVICE_ID";
@@ -46,19 +47,47 @@ public class RegistryConfigTests
     }
 
     [Fact]
-    public void Load_MissingEnvVar_Throws_OnNonWindows()
+    public void Load_MissingRequiredVar_Throws_OnNonWindows()
     {
         if (OperatingSystem.IsWindows()) return;
 
         var prev = SnapshotEnv();
         try
         {
-            Environment.SetEnvironmentVariable(DeviceIdVar, null);
+            // api_endpoint / tenant_id 兩種模式都必填（缺失＝MSI 未正確注入 config）→ 拋。
+            Environment.SetEnvironmentVariable(DeviceIdVar, "d");
             Environment.SetEnvironmentVariable(TokenVar, "t");
-            Environment.SetEnvironmentVariable(EndpointVar, "e");
+            Environment.SetEnvironmentVariable(EndpointVar, null);
             Environment.SetEnvironmentVariable(TenantVar, "x");
 
             Assert.Throws<InvalidOperationException>(() => new RegistryConfig().Load());
+        }
+        finally
+        {
+            RestoreEnv(prev);
+        }
+    }
+
+    [Fact]
+    public void Load_MissingOptionalIdentity_ReturnsEmpty_OnNonWindows()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var prev = SnapshotEnv();
+        try
+        {
+            // Intune 共存首啟：device_id / agent_token 尚未換取 → 選填，回空字串不拋。
+            Environment.SetEnvironmentVariable(DeviceIdVar, null);
+            Environment.SetEnvironmentVariable(TokenVar, null);
+            Environment.SetEnvironmentVariable(EndpointVar, "https://dev.example.com/api/v1");
+            Environment.SetEnvironmentVariable(TenantVar, "dev-tenant");
+
+            var cfg = new RegistryConfig().Load();
+
+            Assert.Equal(string.Empty, cfg.DeviceId);
+            Assert.Equal(string.Empty, cfg.AgentToken);
+            Assert.Equal("https://dev.example.com/api/v1", cfg.ApiEndpoint);
+            Assert.Equal("dev-tenant", cfg.TenantId);
         }
         finally
         {

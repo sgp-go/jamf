@@ -1,0 +1,2 @@
+ALTER TABLE "self_mdm_configs" ADD COLUMN "agent_enrollment_secret_hash" varchar(128);--> statement-breakpoint
+ALTER TABLE "self_mdm_configs" ADD COLUMN "agent_enrollment_secret_issued_at" timestamp with time zone;

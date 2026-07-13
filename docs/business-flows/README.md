@@ -38,6 +38,7 @@
 |------|------|
 | [03-app-deployment.md](03-app-deployment.md) | App 派發與管理（上傳 → assign → MSI/MSIX 安裝 → 狀態追蹤 → 卸載） |
 | [04-agent-install-and-reporting.md](04-agent-install-and-reporting.md) | Agent App 安裝與數據上報（自動安裝 → 錯峰上報 → 灰度升級） |
+| [23-intune-coexistence-agent-enroll.md](23-intune-coexistence-agent-enroll.md) | **Intune 共存 — Agent 自助註冊（遙測 only）**（Intune 派發只帶共享密鑰的 MSI → Agent 首啟自助換 per-device token → 僅遙測，管理面仍歸 Intune） |
 | [19-agent-gps-reporting.md](19-agent-gps-reporting.md) | Agent GPS 位置上報（每日 Inventory + Lost Mode 高頻；最新一筆無歷史） |
 | [21-installed-apps-inventory.md](21-installed-apps-inventory.md) | App 安裝清單 Inventory（Agent 掃 registry 全量上報 → 後台按設備查已裝 MSI/Win32 軟體） |
 | [12-app-blocklist.md](12-app-blocklist.md) | App 黑名單（AppLocker Deny 規則，路徑 / 簽名者兩種封鎖） |

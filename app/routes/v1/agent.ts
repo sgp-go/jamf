@@ -25,6 +25,7 @@ import { verifyUsageSignature } from "~/services/usage-signature.ts";
 import { publishEvent } from "~/services/webhooks/index.ts";
 import { recordWingetResult } from "~/services/winget-deploy.ts";
 import { replaceInstalledApps } from "~/services/installed-apps.ts";
+import { enrollAgentDevice } from "~/services/agent-enroll.ts";
 
 /**
  * /api/v1/tenants/{tenantId}/agent/*
@@ -349,6 +350,63 @@ const usageStatsListSchema = z
 // ============================================================
 // Routes
 // ============================================================
+
+const enrollBody = z
+  .object({
+    serialNumber: z.string().min(1).openapi({
+      description: "設備序號（Win32_BIOS.SerialNumber）",
+      example: "PF5XSMN1",
+    }),
+    enrollmentSecret: z.string().min(1).openapi({
+      description: "tenant 級共享自註冊密鑰（由 admin 端點生成、經 Intune MSI 命令行下發）",
+      example: "3f8a1c9e2b7d4056a1c9e2b7d4056a1c9e2b7d4056a1c9",
+    }),
+    udid: z.string().optional().openapi({ description: "選填設備 UDID" }),
+  })
+  .openapi("AgentEnrollInput");
+
+const enrollResponseSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    agentToken: z.string().openapi({
+      description:
+        "為此設備簽發的 raw token（hex 64 chars）。Agent 寫入 registry 後以 Bearer 上報。**僅此回傳一次**，DB 只存 sha256 hash。",
+    }),
+    issuedAt: z.string().datetime(),
+  })
+  .openapi("AgentEnrollResult");
+
+const enrollRoute = createRoute({
+  method: "post",
+  path: "/tenants/{tenantId}/agent/enroll",
+  tags: ["Agent 上報"],
+  summary: "設備自助註冊換取 Agent Token（Intune 共存 / 遙測-only）",
+  description: [
+    "**用途**：存量設備仍歸 Intune 管、無法走自建 MDM install-agent 的 MSI 逐台注入時，",
+    "由 Intune 下發只帶「共享密鑰」的 MSI，Agent 首啟帶密鑰 + 序號呼叫此端點換取 per-device",
+    "token，寫入本機 registry 後即照常上報遙測。",
+    "",
+    "**鑑權**：不帶 Bearer（設備此時尚無 token）；以 tenant 級共享密鑰 `enrollmentSecret` 授權。",
+    "密鑰經 admin 端點 `POST /admin/tenants/{tenantId}/agent-enrollment-secret` 生成 / 輪換。",
+    "",
+    "**冪等**：同序號再次呼叫 = 重簽 token（舊 token 立即失效），覆蓋 MSI 重裝 / token 遺失。",
+    "",
+    "**能力邊界**：此路徑建立的設備 `selfMdmManaged=false` —— 我方只收遙測，管理面歸 Intune。",
+  ].join("\n"),
+  request: {
+    params: tenantParam,
+    body: { content: { "application/json": { schema: enrollBody } } },
+  },
+  responses: {
+    200: {
+      description: "註冊成功；一次性返回 deviceId + agentToken",
+      content: {
+        "application/json": { schema: successSchema(enrollResponseSchema) },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
 
 const reportRoute = createRoute({
   method: "post",
@@ -842,6 +900,31 @@ agentApp.openapi(reportRoute, async (c) => {
     { ok: true as const, data: { reportId: saved.id, deviceId: device.id } },
     201,
   );
+});
+
+agentApp.openapi(enrollRoute, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const body = c.req.valid("json");
+
+  const result = await enrollAgentDevice({
+    tenantId,
+    serialNumber: body.serialNumber,
+    enrollmentSecret: body.enrollmentSecret,
+    udid: body.udid ?? null,
+  });
+  void publishEvent({
+    tenantId,
+    eventType: "agent.installed",
+    data: {
+      device_id: result.deviceId,
+      serial_number: body.serialNumber,
+      source: "intune_self_enroll",
+    },
+  }).catch((err) => {
+    console.error("[agent.enroll] publishEvent failed", err);
+  });
+
+  return c.json({ ok: true as const, data: result }, 200);
 });
 
 agentApp.openapi(checkinRoute, async (c) => {

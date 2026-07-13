@@ -155,6 +155,13 @@
       "when": 1783570723605,
       "tag": "0021_yummy_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1783932315991,
+      "tag": "0022_powerful_jazinda",
+      "breakpoints": true
     }
   ]
 }

@@ -45,8 +45,13 @@
 
     <!--
       Agent config 由 msiexec 公開屬性寫入 HKLM（Registry CSP 在 Win10 22H2 全 404
-      不可用，config 只能隨 MSI property 注入）。backend install-agent 經 EDA-CSP
+      不可用，config 只能隨 MSI property 注入）。自建 MDM install-agent 經 EDA-CSP
       MsiInstallJob CommandLine 傳 DEVICE_ID / AGENT_TOKEN / API_ENDPOINT / TENANT_ID。
+
+      Intune 共存模式（遙測-only）：存量設備仍歸 Intune 管、無法逐台注入 token 時，Intune
+      下發只帶 API_ENDPOINT + TENANT_ID + ENROLLMENT_SECRET（tenant 級共享密鑰，非 per-device
+      token）的同一條命令行。Agent 首啟帶密鑰 + 序號 POST /agent/enroll 換取 per-device token
+      寫回 registry（見 AgentEnrollment），DEVICE_ID / AGENT_TOKEN 留空由 Agent 補。
 
       升級保留（方案 C+，修 RegistrySearch 蓋掉命令行 token 的 bug，2026-06-02 真機抓到）：
       **命令行屬性優先，缺失才回填**。原方案把 RegistrySearch 直接掛主屬性 → 升級時舊註冊表
@@ -62,6 +67,8 @@
     <Property Id="AGENT_TOKEN" Secure="yes" />
     <Property Id="API_ENDPOINT" Secure="yes" />
     <Property Id="TENANT_ID" Secure="yes" />
+    <!-- Intune 共存：共享自註冊密鑰（非 per-device）。Agent 消費後自刪（AgentEnrollment）。 -->
+    <Property Id="ENROLLMENT_SECRET" Secure="yes" />
 
     <!-- 影子屬性：RegistrySearch 從現有註冊表回填現值（AppSearch 階段，RemoveExistingProducts 之前）。 -->
     <Property Id="EXISTING_DEVICE_ID">
@@ -158,6 +165,11 @@
         <RegistryValue Name="agent_token" Type="string" Value="[AGENT_TOKEN]" />
         <RegistryValue Name="api_endpoint" Type="string" Value="[API_ENDPOINT]" />
         <RegistryValue Name="tenant_id" Type="string" Value="[TENANT_ID]" />
+        <!--
+          Intune 共存自註冊共享密鑰：Agent 換到 per-device token 後自刪此值（縮小暴露）。
+          不掛 RegistrySearch 回填（值屬瞬態、消費即刪）；升級時命令行若仍帶則覆寫、Agent 再清。
+        -->
+        <RegistryValue Name="enrollment_secret" Type="string" Value="[ENROLLMENT_SECRET]" />
 
         <util:PermissionEx
           User="SYSTEM"

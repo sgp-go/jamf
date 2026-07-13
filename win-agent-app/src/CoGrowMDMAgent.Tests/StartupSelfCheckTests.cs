@@ -25,18 +25,20 @@ public class StartupSelfCheckTests
     }
 
     [Fact]
-    public void ValidateConfig_EmptyFields_ReportsEach()
+    public void ValidateConfig_EmptyTenantId_Reported()
     {
-        var cfg = GoodConfig with
-        {
-            DeviceId = "",
-            AgentToken = "  ",
-            TenantId = "",
-        };
+        var cfg = GoodConfig with { TenantId = "" };
         var failures = StartupSelfCheck.ValidateConfig(cfg);
-        Assert.Contains(failures, f => f.Contains("device_id"));
-        Assert.Contains(failures, f => f.Contains("agent_token"));
         Assert.Contains(failures, f => f.Contains("tenant_id"));
+    }
+
+    [Fact]
+    public void ValidateConfig_EmptyIdentity_NotFatal_PreEnroll()
+    {
+        // Intune 共存首啟：device_id / agent_token 尚未換取為空 → 選填，不列入 failures
+        // （AgentEnrollmentService 會補；上報端對空 token skip）。tenant_id / api_endpoint 仍在。
+        var cfg = GoodConfig with { DeviceId = "", AgentToken = "  " };
+        Assert.Empty(StartupSelfCheck.ValidateConfig(cfg));
     }
 
     [Theory]

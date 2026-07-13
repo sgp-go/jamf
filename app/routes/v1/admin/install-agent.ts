@@ -5,6 +5,10 @@ import { adminAuth } from "~/middleware/admin-auth.ts";
 import { extractAuditMeta, logAudit } from "~/services/admin/audit.ts";
 import { installAgentOnDevice, issueAgentTokenForDevice } from "~/services/install-agent.ts";
 import { getRolloutHealth, rolloutAgentVersion } from "~/services/agent-rollout.ts";
+import {
+  clearAgentEnrollmentSecret,
+  generateAgentEnrollmentSecret,
+} from "~/services/agent-enroll.ts";
 
 /**
  * /api/v1/admin/tenants/{tenantId}/devices/{deviceId}/install-agent
@@ -375,4 +379,113 @@ installAgentAdminApp.openapi(healthSpec, async (c) => {
   const { appId, windowMinutes } = c.req.valid("query");
   const health = await getRolloutHealth({ tenantId, appId, windowMinutes });
   return c.json({ ok: true as const, data: health }, 200);
+});
+
+// ============================================================
+// Agent 自助註冊共享密鑰（Intune 共存 / 遙測-only）：生成 / 輪換 / 撤銷
+// ============================================================
+
+const enrollSecretParams = z.object({
+  tenantId: z.string().uuid().openapi({
+    param: { name: "tenantId", in: "path" },
+    example: "00000000-0000-0000-0000-000000000001",
+  }),
+});
+
+const enrollSecretResponse = z
+  .object({
+    enrollmentSecret: z.string().openapi({
+      description:
+        "tenant 級共享自註冊密鑰（hex 48 chars）。填入 Intune MSI 安裝命令行 " +
+        "`ENROLLMENT_SECRET=<此值>`。**僅此 API 回傳一次**，DB 只存 sha256 hash。",
+    }),
+    issuedAt: z.string().datetime().openapi({ example: "2026-07-13T10:00:00.000Z" }),
+  })
+  .openapi("AgentEnrollmentSecretResult");
+
+const generateEnrollSecretSpec = createRoute({
+  method: "post",
+  path: "/admin/tenants/{tenantId}/agent-enrollment-secret",
+  tags: ["Agent 派發"],
+  security: [{ BearerAuth: [] }],
+  summary: "生成 / 輪換 Agent 自助註冊共享密鑰（Intune 共存）",
+  description: [
+    "為 tenant 生成（或輪換）Agent 自助註冊共享密鑰，開啟 `POST /tenants/{tenantId}/agent/enroll`。",
+    "",
+    "**用途**：存量設備仍歸 Intune 管、無法逐台 install-agent 注入 token 時，把只帶此共享密鑰的",
+    "MSI 交給 Intune 下發：",
+    "",
+    "```",
+    "msiexec /i CoGrowMDMAgent.msi /qn API_ENDPOINT=https://<host>/api/v1 \\",
+    "  TENANT_ID=<tenantId> ENROLLMENT_SECRET=<此密鑰>",
+    "```",
+    "",
+    "Agent 首啟帶密鑰 + 序號換 per-device token，之後照常上報遙測（管理面仍歸 Intune）。",
+    "",
+    "**輪換**：再次呼叫立即失效舊密鑰（已簽發的 per-device token 不受影響）。",
+    "",
+    "**鑑權**：Bearer admin token。**⚠️ enrollmentSecret 僅此 API 回傳一次**，無法從 DB 復原。",
+  ].join("\n"),
+  request: { params: enrollSecretParams },
+  responses: {
+    200: {
+      description: "密鑰已生成 / 輪換；一次性返回明文",
+      content: {
+        "application/json": { schema: successSchema(enrollSecretResponse) },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+installAgentAdminApp.openapi(generateEnrollSecretSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  const result = await generateAgentEnrollmentSecret({ tenantId });
+  // 不記 enrollmentSecret 明文（一次性 raw 值，audit 落表會洩漏）；只記發了 + 時間
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "tenant.rotate_agent_enrollment_secret",
+    resourceType: "self_mdm_config",
+    resourceId: tenantId,
+    payload: { issuedAt: result.issuedAt },
+  });
+  return c.json({ ok: true as const, data: result }, 200);
+});
+
+const disableEnrollSecretSpec = createRoute({
+  method: "delete",
+  path: "/admin/tenants/{tenantId}/agent-enrollment-secret",
+  tags: ["Agent 派發"],
+  security: [{ BearerAuth: [] }],
+  summary: "撤銷 Agent 自助註冊密鑰（關閉自助註冊）",
+  description: [
+    "清除該 tenant 的自助註冊共享密鑰，後續 `POST /agent/enroll` 一律 403。",
+    "冪等：無密鑰也回 ok。已簽發的 per-device token 照常鑑權，不受影響。",
+    "",
+    "**鑑權**：Bearer admin token。",
+  ].join("\n"),
+  request: { params: enrollSecretParams },
+  responses: {
+    200: {
+      description: "已撤銷",
+      content: {
+        "application/json": { schema: successSchema(z.object({ disabled: z.literal(true) })) },
+      },
+    },
+    ...commonErrorResponses,
+  },
+});
+
+installAgentAdminApp.openapi(disableEnrollSecretSpec, async (c) => {
+  const { tenantId } = c.req.valid("param");
+  await clearAgentEnrollmentSecret({ tenantId });
+  await logAudit({
+    ...extractAuditMeta(c),
+    tenantId,
+    action: "tenant.disable_agent_enrollment_secret",
+    resourceType: "self_mdm_config",
+    resourceId: tenantId,
+  });
+  return c.json({ ok: true as const, data: { disabled: true as const } }, 200);
 });

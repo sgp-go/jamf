@@ -2,6 +2,7 @@ using CoGrowMDMAgent;
 using CoGrowMDMAgent.Config;
 using CoGrowMDMAgent.Diagnostics;
 using CoGrowMDMAgent.BitLocker;
+using CoGrowMDMAgent.Enrollment;
 using CoGrowMDMAgent.Geolocation;
 using CoGrowMDMAgent.Laps;
 using CoGrowMDMAgent.Locking;
@@ -76,6 +77,11 @@ builder.Services.AddHttpClient<UsageReporter>();
 builder.Services.AddHttpClient<GpsReporter>();
 builder.Services.AddHttpClient<InstalledAppsReporter>();
 builder.Services.AddSingleton<InstalledAppsCollector>();
+// Intune 共存自註冊：無 token 但有共享密鑰時向後端換 per-device token 寫回 registry。
+// 註冊在其他上報服務之前；ExecuteAsync 是「開機網路未就緒」的重試兜底（Program.cs 已在
+// host.Run() 前跑一次同步嘗試）。非自註冊模式（injected / 無密鑰）首次判定即退出。
+builder.Services.AddHttpClient<AgentEnrollmentService>();
+builder.Services.AddHostedService<AgentEnrollmentService>();
 builder.Services.AddHttpClient<StartupCheckinService>();
 builder.Services.AddHostedService<StartupCheckinService>();
 builder.Services.AddHostedService<Worker>();
@@ -115,6 +121,26 @@ var host = builder.Build();
 // 診斷（Windows service host 的 EventLog provider 落 Critical），而非延遲到 Worker 首次
 // 使用才裸崩成 unhandled exception → FailureActions 崩潰循環（[[windows-agent-update-delivery]] §4）。
 var startupLogger = host.Services.GetRequiredService<ILogger<Program>>();
+
+// Intune 共存自註冊 bootstrap：在 self-check / AgentConfig 快照前跑一次同步嘗試，讓
+// JitterScheduler 拿到真 DeviceId（否則整批 Intune 設備 hash("") 同 offset → 上報錯峰塌縮）。
+// 短逾時 + 單次；開機網路未就緒等失敗不阻塞啟動，AgentEnrollmentService 會持續重試。
+try
+{
+    using var enrollHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+    using var enrollCts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+    var enrollOutcome = await AgentEnrollment.EnsureEnrolledAsync(
+        host.Services.GetRequiredService<RegistryConfig>(),
+        enrollHttp,
+        host.Services.GetRequiredService<DeviceFactsCollector>().CollectSerialNumber,
+        startupLogger,
+        enrollCts.Token);
+    startupLogger.LogInformation("Startup enrollment bootstrap: {Outcome}", enrollOutcome);
+}
+catch (Exception ex)
+{
+    startupLogger.LogWarning(ex, "Startup enrollment bootstrap threw (non-fatal; 服務會重試)");
+}
 var selfCheck = StartupSelfCheck.Run(host.Services);
 if (!selfCheck.Ok)
 {

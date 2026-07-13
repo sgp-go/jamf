@@ -77,14 +77,16 @@ public static class StartupSelfCheck
     }
 
     /// <summary>
-    /// 純函數：驗 config 必填欄位非空、api_endpoint 為合法 http(s) 絕對 URL。
-    /// （api_endpoint 缺前綴是已知環境坑，自檢提前攔住而非運行時上報才報錯。）
+    /// 純函數：驗 bootstrap 必填欄位（tenant_id / api_endpoint）非空、api_endpoint 為合法
+    /// http(s) 絕對 URL（api_endpoint 缺前綴是已知環境坑，自檢提前攔住）。
+    ///
+    /// device_id / agent_token <b>刻意不列為 fatal</b>：Intune 共存自註冊場景下，兩者在
+    /// 首啟換 token 前為空，是預期狀態（AgentEnrollmentService 會補；上報端對空 token skip）。
+    /// 只驗 tenant_id / api_endpoint —— 這兩個兩種模式都必須由 MSI 注入，缺失才是真硬錯誤。
     /// </summary>
     public static IReadOnlyList<string> ValidateConfig(AgentConfig cfg)
     {
         var failures = new List<string>();
-        if (string.IsNullOrWhiteSpace(cfg.DeviceId)) failures.Add("config: device_id empty");
-        if (string.IsNullOrWhiteSpace(cfg.AgentToken)) failures.Add("config: agent_token empty");
         if (string.IsNullOrWhiteSpace(cfg.TenantId)) failures.Add("config: tenant_id empty");
 
         if (string.IsNullOrWhiteSpace(cfg.ApiEndpoint))

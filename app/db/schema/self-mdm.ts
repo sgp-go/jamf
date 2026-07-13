@@ -55,6 +55,15 @@ export const selfMdmConfigs = pgTable(
      * null / 空字串 = 不觸發自動命名（enrollment hook 跳過）。
      */
     namingTemplate: varchar({ length: 128 }),
+    /**
+     * Intune 共存場景的 Agent 自註冊共享密鑰（sha256 hex）。非 null = 該 tenant 開啟
+     * 「設備自助換 token」：Intune 下發的 MSI 只帶此共享密鑰（非 per-device token），
+     * Agent 首啟帶密鑰 + 序號 POST /agent/enroll 換取 per-device token。明文僅在生成
+     * API 回傳一次，DB 只存 hash（同 agent_token_hash 模式）。null = 關閉自助註冊
+     * （僅接受自建 MDM install-agent 的 MSI property 注入）。詳見 agent-enroll.ts。
+     */
+    agentEnrollmentSecretHash: varchar({ length: 128 }),
+    agentEnrollmentSecretIssuedAt: timestamp({ withTimezone: true }),
     apnsTopic: text(),
     apnsCertPem: text(),
     apnsKeyPemEnc: text(),
